@@ -2,7 +2,7 @@
 .env
 .env.local
 .env.*.local
-output/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -79,8 +79,6 @@ data_test/*.pdf
 data_legacy/
 chunking_data/
 
-# Note: output/ is now tracked - contains indexed documents for testing
-
 # Backup files
 *.bak
 *.backup
@@ -92,6 +90,19 @@ benchmarks/
 clean_text/
 vector_db/
 data/
+!data/.gitkeep
 benchmark_dataset/
 dataset/
+!dataset/.gitkeep
+output/
+!output/.gitkeep
 evaluations/
+
+# Research papers (moved to docs/papers/)
+papers/
+!docs/papers/
+
+# Generated analysis outputs
+rag_confidence/
+results/
+extraction_dataset/
