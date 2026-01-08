@@ -2,7 +2,19 @@
 .env
 .env.local
 .env.*.local
+.env*
+# NOTE: config.json is now version-controlled (no secrets, only settings)
+# NOTE: .env.example is not tracked now(template for developers)
 
+# Developer-specific Docker override (each dev has different ports)
+docker-compose.override.yml
+# .example is not tracked now (template for developers)
+docker-compose.override.yml.example
+
+data
+output
+vector_db
+ 
 # Python
 __pycache__/
 *.py[cod]
@@ -25,14 +37,14 @@ wheels/
 .installed.cfg
 *.egg
 MANIFEST
-
+ 
 # Virtual environments
 venv/
 ENV/
 env/
 .venv
 .vite/
-
+ 
 # IDE
 .vscode/
 .idea/
@@ -40,51 +52,55 @@ env/
 *.swo
 *~
 .DS_Store
-
+ 
 # Jupyter Notebook
 .ipynb_checkpoints
-
+ 
 # Output directories (large files)
 # Allow GRI 306 example output
 phase1_output/
 phase3_output/
-
-
-CLAUDE.md
+ 
+# AI Model folders
+claude* 
+CLAUDE*
 .claude/
-
+ 
+codex*
+CODEX*
+.codex/
 
 # Logs
 *.log
 logs/
-
+ 
 # Model caches
 .cache/
 .sentence_transformers/
 models/
-
+ 
 # Testing
 .pytest_cache/
 .mypy_cache/
 .coverage
 htmlcov/
 .tox/
-
+ 
 # UV (Python package manager)
 .uv/
-
+ 
 # Test data files (large PDFs)
 data_test/*.pdf
 !data_test/.gitkeep
 data_legacy/
 chunking_data/
-
+ 
 # Backup files
 *.bak
 *.backup
 *.tar.gz
 results_all/
-
+ 
 # Generated data folders
 benchmarks/
 clean_text/
@@ -97,12 +113,15 @@ dataset/
 output/
 !output/.gitkeep
 evaluations/
-
+ 
 # Research papers (moved to docs/papers/)
 papers/
 !docs/papers/
-
+ 
 # Generated analysis outputs
 rag_confidence/
 results/
 extraction_dataset/TODO.md
+ 
+# Misc  files
+TODO.md

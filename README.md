@@ -50,7 +50,7 @@ Production-ready RAG system based on 4 research papers implementing state-of-the
 - **PHASE 1:** Smart hierarchy extraction (Docling, font-size classification)
 - **PHASE 2:** Generic summary generation (150 chars, proven better than expert summaries)
 - **PHASE 3:** RCTS chunking (500 chars) + SAC (58% DRM reduction)
-- **PHASE 4:** Multi-layer indexing (3 separate FAISS indexes)
+- **PHASE 4:** Multi-layer indexing (PostgreSQL pgvector)
 - **PHASE 5:** Hybrid search (BM25+Dense+RRF) + Universal language support (Czech, 24+ languages) + Knowledge graph + Cross-encoder reranking + Query expansion
 - **PHASE 6:** Context assembly with citations
 
@@ -99,9 +99,9 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # Install dependencies
 uv sync
 
-# Configure
-cp .env.example .env
-# Edit .env with your API keys
+# Configure environment
+# .env is shared internally - contact administrator for access
+# Or create your own .env with required API keys (see below)
 ```
 
 **Windows:**
@@ -115,9 +115,9 @@ uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cp
 # Install dependencies
 uv sync
 
-# Configure (use cloud embeddings for Windows)
-copy .env.example .env
-# Edit .env and set EMBEDDING_MODEL=text-embedding-3-large
+# Configure environment (use cloud embeddings for Windows)
+# .env is shared internally - contact administrator for access
+# Or create your own .env with required API keys (set EMBEDDING_MODEL=text-embedding-3-large)
 ```
 
 **API Keys (.env):**
@@ -169,15 +169,9 @@ Password: ChangeThisPassword123!
 docker compose exec backend uv run python scripts/reset_admin_password.py
 ```
 
-**⚠️ SECURITY:** Never commit `config.json` or `.env` files to git!
-```bash
-# First-time setup (creates config.json from template)
-cp config.json.example config.json
-# Edit config.json with your settings (API keys, database passwords)
-
-# Verify config.json is in .gitignore
-git check-ignore config.json  # Should print: config.json
-```
+**ℹ️ Configuration:**
+- `config.json` - Version controlled (contains only settings, NO secrets)
+- `.env` - NOT versioned (contains API keys, passwords) - shared internally
 
 **Full documentation:** [docs/WEB_INTERFACE.md](docs/WEB_INTERFACE.md)
 
@@ -418,10 +412,10 @@ Document (PDF/DOCX)
     ├─ Layer 2: Sections (N chunks, summaries)
     └─ Layer 3: RCTS 500 chars + SAC (PRIMARY)
     ↓
-[PHASE 4] Embedding + FAISS Indexing
-    ├─ text-embedding-3-large (3072D) or bge-m3 (1024D)
-    ├─ 3 separate FAISS indexes (IndexFlatIP)
-    └─ Cosine similarity search
+[PHASE 4] Embedding + PostgreSQL pgvector Indexing
+    ├─ Qwen3-Embedding-8B (4096D) via DeepInfra
+    ├─ 3-layer vector tables (layer1, layer2, layer3)
+    └─ HNSW indexes for fast similarity search
     ↓
 [PHASE 5] Hybrid Search + Knowledge Graph + Reranking + Query Expansion
     ├─ Query expansion (optional, num_expands=0-5)
@@ -430,7 +424,7 @@ Document (PDF/DOCX)
     │   ├─ Czech stop words (422 words, hardcoded)
     │   ├─ spaCy lemmatization (24 languages)
     │   └─ NLTK stop words fallback (16 languages)
-    ├─ Entity/relationship extraction (NetworkX)
+    ├─ Entity/relationship extraction (Neo4j + Graphiti)
     └─ Cross-encoder reranking (NOT Cohere - hurts legal docs)
     ↓
 [PHASE 6] Context Assembly
@@ -597,33 +591,32 @@ IndexingConfig(
 ## 📁 Project Structure
 
 ```
-MY_SUJBOT/
+SUJBOT/
 ├── src/
 │   ├── indexing_pipeline.py           # Main orchestrator (PHASE 1-6)
 │   ├── config.py                      # Central config (load from .env)
-│   ├── docling_extractor_v2.py        # PHASE 1: Hierarchy extraction
+│   ├── gemini_extractor.py            # PHASE 1: Hierarchy extraction (Gemini)
 │   ├── summary_generator.py           # PHASE 2: Generic summaries
 │   ├── multi_layer_chunker.py         # PHASE 3: Chunking + SAC
 │   ├── embedding_generator.py         # PHASE 4: Embeddings
-│   ├── faiss_vector_store.py          # PHASE 4: FAISS indexes
-│   ├── hybrid_search.py               # PHASE 5: BM25+Dense+RRF
-│   ├── graph/                         # PHASE 5: Knowledge graph
-│   │   ├── entity_extractor.py
-│   │   └── graph_store.py
-│   └── agent/                         # PHASE 7: RAG Agent
+│   ├── storage/                       # PHASE 4: Vector storage
+│   │   └── postgres_adapter.py        # PostgreSQL pgvector backend
+│   ├── retrieval/                     # PHASE 5: Search & retrieval
+│   ├── graph/                         # PHASE 5: Knowledge graph (Neo4j + Graphiti)
+│   ├── multi_agent/                   # PHASE 7: Multi-agent system
+│   │   ├── runner.py                  # Agent orchestration
+│   │   └── agents/                    # 8 specialized agents
+│   └── agent/                         # PHASE 7: RAG Agent CLI
 │       ├── cli.py                     # Interactive CLI
-│       ├── config.py                  # Agent configuration
-│       └── tools/                     # 27 specialized tools
+│       └── tools/                     # Specialized tools
+├── backend/                           # FastAPI web backend
+├── frontend/                          # React + Vite UI
+├── docker/                            # Docker configuration
 ├── tests/                             # Comprehensive test suite
-├── data/                              # Input documents
-├── output/                            # Pipeline outputs
-├── vector_db/                         # Central vector database
 ├── docs/                              # Documentation
-├── run_pipeline.py                    # Pipeline entry point
-├── CLAUDE.md                          # Development guidelines
-├── INSTALL.md                         # Platform-specific installation
-├── PIPELINE.md                        # Complete pipeline spec
-└── .env.example                       # Environment template
+├── prompts/                           # System prompts (SSOT)
+├── config.json                        # Settings (version-controlled, NO secrets)
+└── run_pipeline.py                    # Pipeline entry point
 ```
 
 ---
@@ -633,8 +626,8 @@ MY_SUJBOT/
 ### Core Documentation
 
 - **[INSTALL.md](INSTALL.md)** - Platform-specific installation (Windows/macOS/Linux)
-- **[CLAUDE.md](CLAUDE.md)** - Development guidelines and project instructions
 - **[PIPELINE.md](PIPELINE.md)** - Complete pipeline specification with research
+- **[docs/WEB_INTERFACE.md](docs/WEB_INTERFACE.md)** - Web UI documentation
 
 ### User Guides
 
@@ -751,5 +744,5 @@ MIT License
 
 ---
 
-**Status:** PHASE 1-7 COMPLETE ✅
-**Last Updated:** 2025-10-26
+**Status:** PHASE 1-7 COMPLETE + Security Audit ✅
+**Last Updated:** 2025-01-08

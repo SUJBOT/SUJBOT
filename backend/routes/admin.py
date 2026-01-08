@@ -25,6 +25,7 @@ from backend.auth.manager import AuthManager
 from backend.database.auth_queries import AuthQueries
 from backend.database.admin_queries import AdminQueries
 from backend.middleware.auth import get_current_admin_user
+from src.utils.security import sanitize_error
 from backend.models import (
     AdminUserResponse,
     AdminUserListResponse,
@@ -322,7 +323,7 @@ async def create_user(
         return _format_user_response(user)
 
     except asyncpg.PostgresConnectionError as e:
-        logger.error(f"Database connection failed creating user {user_data.email}: {e}", exc_info=True)
+        logger.error(f"Database connection failed creating user {user_data.email}: {sanitize_error(e)}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Database temporarily unavailable. Please try again."
@@ -333,13 +334,13 @@ async def create_user(
             detail="Email already exists"
         )
     except asyncpg.PostgresError as e:
-        logger.error(f"Database error creating user {user_data.email}: {e}", exc_info=True)
+        logger.error(f"Database error creating user {user_data.email}: {sanitize_error(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Database error"
         )
     except Exception as e:
-        logger.error(f"Unexpected error creating user {user_data.email}: {e}", exc_info=True)
+        logger.error(f"Unexpected error creating user {user_data.email}: {sanitize_error(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create user"
@@ -439,19 +440,19 @@ async def update_user(
             detail="Email already in use"
         )
     except asyncpg.PostgresConnectionError as e:
-        logger.error(f"Database connection failed updating user {user_id}: {e}", exc_info=True)
+        logger.error(f"Database connection failed updating user {user_id}: {sanitize_error(e)}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Database temporarily unavailable. Please try again."
         )
     except asyncpg.PostgresError as e:
-        logger.error(f"Database error updating user {user_id}: {e}", exc_info=True)
+        logger.error(f"Database error updating user {user_id}: {sanitize_error(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Database error"
         )
     except Exception as e:
-        logger.error(f"Unexpected error updating user {user_id}: {e}", exc_info=True)
+        logger.error(f"Unexpected error updating user {user_id}: {sanitize_error(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update user"
@@ -506,7 +507,7 @@ async def delete_user(
         return None
 
     except asyncpg.PostgresConnectionError as e:
-        logger.error(f"Database connection failed deleting user {user_id}: {e}", exc_info=True)
+        logger.error(f"Database connection failed deleting user {user_id}: {sanitize_error(e)}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Database temporarily unavailable. Please try again."
@@ -517,13 +518,13 @@ async def delete_user(
             detail="Cannot delete user with associated data"
         )
     except asyncpg.PostgresError as e:
-        logger.error(f"Database error deleting user {user_id}: {e}", exc_info=True)
+        logger.error(f"Database error deleting user {user_id}: {sanitize_error(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Database error"
         )
     except Exception as e:
-        logger.error(f"Unexpected error deleting user {user_id}: {e}", exc_info=True)
+        logger.error(f"Unexpected error deleting user {user_id}: {sanitize_error(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete user"

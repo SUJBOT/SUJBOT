@@ -24,9 +24,19 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from datetime import datetime, timedelta
 import asyncio
+import ipaddress
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Trusted proxy networks (Docker internal networks)
+# Only trust X-Forwarded-For from these networks
+TRUSTED_PROXY_NETWORKS = [
+    ipaddress.ip_network("172.16.0.0/12"),   # Docker default bridge
+    ipaddress.ip_network("10.0.0.0/8"),      # Docker custom networks
+    ipaddress.ip_network("127.0.0.0/8"),     # Localhost
+    ipaddress.ip_network("192.168.0.0/16"),  # Docker host-mode
+]
 
 
 class TokenBucket:
@@ -187,14 +197,33 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Allow request
         return await call_next(request)
 
+    def _is_trusted_proxy(self, ip: str) -> bool:
+        """
+        Check if IP address is from a trusted proxy network.
+
+        Only trusts Docker internal networks (nginx reverse proxy).
+        Prevents IP spoofing via X-Forwarded-For from untrusted sources.
+
+        Args:
+            ip: IP address string to check
+
+        Returns:
+            True if IP is from trusted proxy network
+        """
+        try:
+            addr = ipaddress.ip_address(ip)
+            return any(addr in network for network in TRUSTED_PROXY_NETWORKS)
+        except ValueError:
+            # Invalid IP address format
+            return False
+
     def _get_client_ip(self, request: Request) -> str:
         """
         Extract client IP address from request.
 
-        Supports:
-        - X-Forwarded-For header (reverse proxy)
-        - X-Real-IP header (nginx)
-        - Direct connection
+        Security: Only trusts proxy headers (X-Forwarded-For, X-Real-IP)
+        when the direct connection is from a trusted proxy network.
+        This prevents IP spoofing attacks.
 
         Args:
             request: FastAPI request object
@@ -202,18 +231,24 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         Returns:
             Client IP address string
         """
-        # Check reverse proxy headers
-        forwarded = request.headers.get("X-Forwarded-For")
-        if forwarded:
-            # Take first IP (client) from chain
-            return forwarded.split(",")[0].strip()
+        # Get direct connection IP
+        direct_ip = request.client.host if request.client else "unknown"
 
-        real_ip = request.headers.get("X-Real-IP")
-        if real_ip:
-            return real_ip
+        # Only trust proxy headers if request comes from trusted proxy
+        if self._is_trusted_proxy(direct_ip):
+            # Check X-Forwarded-For (standard proxy header)
+            forwarded = request.headers.get("X-Forwarded-For")
+            if forwarded:
+                # Take first IP (original client) from chain
+                return forwarded.split(",")[0].strip()
 
-        # Fallback to direct connection
-        return request.client.host if request.client else "unknown"
+            # Check X-Real-IP (nginx)
+            real_ip = request.headers.get("X-Real-IP")
+            if real_ip:
+                return real_ip
+
+        # Use direct connection IP (either untrusted source or no proxy headers)
+        return direct_ip
 
     def _get_rate_limit(self, path: str, client_ip: str) -> Tuple[int, str]:
         """
@@ -232,8 +267,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 # Bucket key: route + IP (separate limits per route)
                 return limit, f"{route_prefix}:{client_ip}"
 
-        # Default limit
-        return self.DEFAULT_LIMIT, f"default:{client_ip}"
+        # Default limit (use configured default_rpm instead of hardcoded DEFAULT_LIMIT)
+        return self.default_rpm, f"default:{client_ip}"
 
     def _get_bucket(self, bucket_key: str, rpm: int) -> TokenBucket:
         """
@@ -280,10 +315,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if path.startswith(("/static/", "/favicon.ico", "/assets/")):
             return True
 
-        # Citations endpoint - read-only metadata, safe to exclude from rate limiting
-        # Frontend renders many citation links that trigger individual fetches
-        if path.startswith("/citations"):
-            return True
+        # Note: /citations endpoint uses ROUTE_LIMITS (300/min) instead of exemption
+        # to prevent abuse while allowing normal UI usage
 
         return False
 

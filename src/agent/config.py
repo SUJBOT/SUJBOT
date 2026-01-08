@@ -297,16 +297,15 @@ class AgentConfig:
                 f"Gemini (gemini-2.5-flash/gemini-2.5-pro)"
             )
 
-        # Path validation (skip for PostgreSQL backend)
-        # Storage backend is determined at runtime from config.json, not here
-        # The multi-agent runner will handle vector store initialization
-        # This validation only applies if explicitly using FAISS backend
+        # Storage backend validation
+        # FAISS is no longer supported - only PostgreSQL backend is available
         import os
-        storage_backend = os.getenv("STORAGE_BACKEND", "faiss")
-        if storage_backend == "faiss" and not self.vector_store_path.exists():
-            raise FileNotFoundError(
-                f"Vector store not found: {self.vector_store_path}. "
-                f"Run indexing pipeline first."
+        storage_backend = os.getenv("STORAGE_BACKEND", "postgresql")
+        if storage_backend == "faiss":
+            raise ValueError(
+                "FAISS backend is no longer supported. "
+                "Use 'postgresql' backend instead (set STORAGE_BACKEND=postgresql or remove the variable). "
+                "See docs/vector-db-management.md for migration instructions."
             )
 
         # Knowledge graph validation

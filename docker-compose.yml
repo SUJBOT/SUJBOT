@@ -26,7 +26,8 @@ services:
       - sujbot_net
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "${NEO4J_PASSWORD:-password}", "RETURN 1"]
+      # NOTE: No fallback password - healthcheck will fail if NEO4J_PASSWORD not set (correct behavior)
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "${NEO4J_PASSWORD}", "RETURN 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -94,8 +95,10 @@ services:
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
+    # NOTE: Port mapping removed for security (production default)
+    # For local development, use docker-compose.override.yml to expose ports
+    expose:
+      - "6379"
     networks:
       - sujbot_net
     restart: unless-stopped
@@ -118,13 +121,16 @@ services:
     image: dpage/pgadmin4:latest
     container_name: sujbot_pgadmin
     environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@admin.com}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+      # IMPORTANT: Set PGADMIN_EMAIL and PGADMIN_PASSWORD in .env for security
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
       PGADMIN_CONFIG_SERVER_MODE: "False"
     volumes:
       - pgadmin_data:/var/lib/pgadmin
-    ports:
-      - "5050:80"
+    # NOTE: Port mapping removed for security (production default)
+    # For local development, use docker-compose.override.yml to expose ports
+    expose:
+      - "80"
     networks:
       - sujbot_net
     depends_on:

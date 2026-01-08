@@ -63,9 +63,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
         # Content-Security-Policy (CSP) - Prevents XSS attacks
         # Restrictive policy: only allow same-origin resources
+        # Note: 'unsafe-inline' required for React/Vite, but 'unsafe-eval' removed for security
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "  # Allow inline scripts for React
+            "script-src 'self' 'unsafe-inline'; "  # Allow inline scripts for React (no eval)
             "style-src 'self' 'unsafe-inline'; "  # Allow inline styles for React
             "img-src 'self' data: https:; "  # Allow images from HTTPS and data URIs
             "font-src 'self' data:; "

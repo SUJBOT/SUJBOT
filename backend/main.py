@@ -65,6 +65,9 @@ from backend.routes.admin import router as admin_router, set_admin_dependencies
 # Import PostgreSQL adapter for user/conversation storage
 from src.storage.postgres_adapter import PostgreSQLStorageAdapter
 
+# Import security utilities for error sanitization (prevents API key leaks in logs)
+from src.utils.security import sanitize_error
+
 # Import title generator service
 from backend.services.title_generator import title_generator
 
@@ -185,7 +188,8 @@ async def lifespan(app: FastAPI):
         logger.info("=" * 60)
 
     except Exception as e:
-        logger.error(f"FATAL: Failed to initialize backend: {e}", exc_info=True)
+        # Sanitize error to prevent API key leaks in logs
+        logger.error(f"FATAL: Failed to initialize backend: {sanitize_error(e)}")
         logger.error("Server cannot start. Fix configuration and restart.")
         # Fail fast - prevent server from starting in broken state
         raise RuntimeError("Cannot start server without proper initialization") from e
@@ -413,11 +417,11 @@ async def _maybe_generate_title(
         return title
 
     except asyncio.TimeoutError as e:
-        logger.warning(f"Title generation timed out for {conversation_id}: {e}")
+        logger.warning(f"Title generation timed out for {conversation_id}: {sanitize_error(e)}")
     except ConnectionError as e:
-        logger.warning(f"Connection error during title generation for {conversation_id}: {e}")
+        logger.warning(f"Connection error during title generation for {conversation_id}: {sanitize_error(e)}")
     except Exception as e:
-        logger.error(f"Unexpected error in title generation for {conversation_id}: {e}", exc_info=True)
+        logger.error(f"Unexpected error in title generation for {conversation_id}: {sanitize_error(e)}")
 
     # On any error, try to save fallback title and release lock
     try:
@@ -547,7 +551,7 @@ async def chat_stream(
                 adapter=adapter
             )
         except Exception as e:
-            logger.error(f"Failed to save user message: {e}", exc_info=True)
+            logger.error(f"Failed to save user message: {sanitize_error(e)}")
             # Don't block streaming if database save fails - continue gracefully
             # Frontend will retry if needed
 
@@ -620,7 +624,7 @@ async def chat_stream(
                     try:
                         event_data = json.dumps(event["data"], ensure_ascii=True)
                     except Exception as fallback_error:
-                        logger.error(f"ASCII fallback also failed: {fallback_error}", exc_info=True)
+                        logger.error(f"ASCII fallback also failed: {sanitize_error(fallback_error)}")
                         # Send error event instead of crashing entire stream
                         yield {
                             "event": "error",
@@ -655,7 +659,7 @@ async def chat_stream(
                         "data": json.dumps({"message_id": saved_message_id}, ensure_ascii=False)
                     }
                 except Exception as e:
-                    logger.error(f"Failed to save assistant message: {e}", exc_info=True)
+                    logger.error(f"Failed to save assistant message: {sanitize_error(e)}")
                     # Inform frontend that save failed - feedback won't work for this message
                     yield {
                         "event": "message_saved",
@@ -740,11 +744,11 @@ async def chat_stream(
                 }, ensure_ascii=True)
             }
         except Exception as e:
-            logger.error(f"Error in event generator: {e}", exc_info=True)
+            logger.error(f"Error in event generator: {sanitize_error(e)}")
             yield {
                 "event": "error",
                 "data": json.dumps({
-                    "error": str(e),
+                    "error": sanitize_error(e),  # Sanitize before sending to frontend
                     "type": type(e).__name__
                 }, ensure_ascii=True)  # Use ASCII for error messages (defensive)
             }
@@ -802,7 +806,7 @@ async def chat_clarify(request: ClarificationRequest, user: Dict = Depends(get_c
                     try:
                         event_data = json.dumps(event["data"], ensure_ascii=True)
                     except Exception as fallback_error:
-                        logger.error(f"ASCII fallback failed: {fallback_error}", exc_info=True)
+                        logger.error(f"ASCII fallback failed: {sanitize_error(fallback_error)}")
                         yield {
                             "event": "error",
                             "data": json.dumps(
@@ -823,11 +827,11 @@ async def chat_clarify(request: ClarificationRequest, user: Dict = Depends(get_c
         except (KeyboardInterrupt, SystemExit):
             raise
         except Exception as e:
-            logger.error(f"Error in clarification event generator: {e}", exc_info=True)
+            logger.error(f"Error in clarification event generator: {sanitize_error(e)}")
             yield {
                 "event": "error",
                 "data": json.dumps(
-                    {"error": str(e), "type": type(e).__name__}, ensure_ascii=True
+                    {"error": sanitize_error(e), "type": type(e).__name__}, ensure_ascii=True
                 ),
             }
 

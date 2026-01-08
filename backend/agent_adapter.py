@@ -20,6 +20,7 @@ from typing import AsyncGenerator, Dict, Any, List, Optional
 from src.multi_agent.runner import MultiAgentRunner
 from src.agent.config import AgentConfig
 from src.cost_tracker import get_global_tracker, reset_global_tracker
+from src.utils.security import sanitize_error
 from backend.constants import (
     VARIANT_CONFIG,
     DEFAULT_VARIANT,
@@ -54,12 +55,14 @@ class AgentAdapter:
         # Load config from environment
         config_overrides = {}
 
-        # Set default vector_store_path relative to project root (parent of backend/)
+        # Backend runs from backend/, so project root is parent directory
+        # Define project_root unconditionally to avoid UnboundLocalError when loading config.json
+        project_root = Path(__file__).parent.parent
+
+        # Set default vector_store_path relative to project root
         if vector_store_path:
             config_overrides["vector_store_path"] = vector_store_path
         else:
-            # Backend runs from backend/, so vector_db is in parent directory
-            project_root = Path(__file__).parent.parent
             config_overrides["vector_store_path"] = project_root / "vector_db"
 
         if model:
@@ -79,6 +82,7 @@ class AgentAdapter:
         # Check if config.json has multi_agent section
         config_path = project_root / "config.json"
         multi_agent_config = {}
+        full_config = {}  # Initialize to prevent UnboundLocalError
 
         if config_path.exists():
             try:
@@ -213,12 +217,13 @@ class AgentAdapter:
             return True
 
         except Exception as e:
-            logger.error(f"Failed to initialize multi-agent system: {e}", exc_info=True)
+            safe_error = sanitize_error(e)
+            logger.error(f"Failed to initialize multi-agent system: {safe_error}")
             self.degraded_components.append({
                 "component": "multi_agent_system",
-                "error": str(e),
+                "error": safe_error,
                 "severity": "critical",
-                "user_message": f"System initialization error: {str(e)}",
+                "user_message": f"System initialization error: {safe_error}",
             })
             return False
 
@@ -256,10 +261,18 @@ class AgentAdapter:
 
         project_root = Path(__file__).parent.parent
         config_path = project_root / "config.json"
+        full_config = {}  # Initialize to prevent UnboundLocalError
 
-        with open(config_path) as f:
-            full_config = json.load(f)
-            multi_agent_config = full_config.get("multi_agent", {})
+        try:
+            with open(config_path) as f:
+                full_config = json.load(f)
+                multi_agent_config = full_config.get("multi_agent", {})
+        except FileNotFoundError:
+            logger.error(f"Config file not found: {config_path}")
+            raise ValueError(f"Required config.json not found at {config_path}")
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in config.json: {e}")
+            raise ValueError(f"Invalid JSON in config.json: {e}")
 
         # Apply variant overrides
         multi_agent_config = self._apply_variant_overrides(variant, multi_agent_config)
@@ -371,7 +384,7 @@ class AgentAdapter:
                 # Will emit warning below
             except Exception as e:
                 # Unexpected error - log as error for investigation
-                logger.error(f"Unexpected error loading variant for user {user_id}: {e}", exc_info=True)
+                logger.error(f"Unexpected error loading variant for user {user_id}: {sanitize_error(e)}")
                 runner_to_use = self.runner
                 # Will emit warning below
 
@@ -935,22 +948,10 @@ class AgentAdapter:
                     "degraded_components": []
                 }
 
-            # Check vector store (skip for PostgreSQL backend)
-            # Read storage backend from environment variable (set in docker-compose.yml)
-            import os
-            storage_backend = os.getenv("STORAGE_BACKEND", "faiss")
-
-            if storage_backend == "faiss":
-                vector_store_exists = self.config.vector_store_path.exists()
-                if not vector_store_exists:
-                    return {
-                        "status": "error",
-                        "message": "Vector store not found",
-                        "details": {
-                            "vector_store_path": str(self.config.vector_store_path)
-                        },
-                        "degraded_components": []
-                    }
+            # Vector store health check
+            # PostgreSQL is the only supported backend - FAISS is no longer available
+            # PostgreSQL vector store health is checked via database connection
+            # which is validated during application startup
 
             # Check API keys
             has_anthropic_key = bool(self.config.anthropic_api_key)
@@ -984,10 +985,11 @@ class AgentAdapter:
             }
 
         except Exception as e:
-            logger.error(f"Health check failed: {e}", exc_info=True)
+            safe_error = sanitize_error(e)
+            logger.error(f"Health check failed: {safe_error}")
             return {
                 "status": "error",
-                "message": str(e),
+                "message": safe_error,
                 "details": {},
                 "degraded_components": []
             }
