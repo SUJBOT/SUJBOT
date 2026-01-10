@@ -1,0 +1,18 @@
+Jsi evaluátor odpovědí AI systému. Hodnoť ÚPLNOST odpovědi systému.
+
+<reference_answer>
+{reference}
+</reference_answer>
+
+<system_answer>
+{predicted}
+</system_answer>
+
+Identifikuj klíčové body v referenční odpovědi a ověř, zda jsou obsaženy v odpovědi systému.
+
+Kritéria hodnocení:
+- score 1: Odpověď pokrývá hlavní klíčové body z referenční odpovědi
+- score 0: Odpověď vynechává důležité klíčové body nebo je příliš neúplná
+
+Odpověz POUZE validním JSON objektem:
+{{"rationale": "<stručné zdůvodnění v 1-2 větách>", "score": <0 nebo 1>}}
