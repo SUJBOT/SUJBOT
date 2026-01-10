@@ -1,7 +1,7 @@
 -- ============================================================================
--- SUJBOT2 PostgreSQL Database Initialization
+-- SUJBOT PostgreSQL Database Initialization
 -- ============================================================================
--- This script creates the complete database schema for SUJBOT2:
+-- This script creates the complete database schema for SUJBOT:
 -- 1. Extensions (pgvector, Apache AGE)
 -- 2. Schemas (vectors, graphs, checkpoints, metadata)
 -- 3. Tables for 3-layer vector store
@@ -470,7 +470,7 @@ GRANT USAGE ON SCHEMA metadata TO PUBLIC;
 
 DO $$
 BEGIN
-    RAISE NOTICE '✓ SUJBOT2 database initialization complete!';
+    RAISE NOTICE '✓ SUJBOT database initialization complete!';
     RAISE NOTICE '  - Extensions: pgvector, Apache AGE, pg_trgm';
     RAISE NOTICE '  - Schemas: vectors, graphs, checkpoints, metadata';
     RAISE NOTICE '  - Tables: 3 vector layers, graph tables, checkpoints';

@@ -1,6 +1,6 @@
-# SUJBOT2 Web Interface
+# SUJBOT Web Interface
 
-Modern web interface for SUJBOT2 with ChatGPT/Claude-like UI featuring real-time streaming, tool visualization, and cost tracking.
+Modern web interface for SUJBOT with ChatGPT/Claude-like UI featuring real-time streaming, tool visualization, and cost tracking.
 
 ## Features
 
@@ -339,8 +339,8 @@ For issues:
 1. Check browser console for errors
 2. Check backend logs
 3. Verify API keys and vector store
-4. See main README.md for general SUJBOT2 issues
+4. See main README.md for general SUJBOT issues
 
 ## License
 
-Same as main SUJBOT2 project.
+Same as main SUJBOT project.

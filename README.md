@@ -1,4 +1,4 @@
-# SUJBOT2 - Production RAG System for Legal/Technical Documents
+# SUJBOT - Production RAG System for Legal/Technical Documents
 
 Research-based RAG system optimized for legal and technical documentation with 7-phase pipeline and **multi-agent AI framework**.
 
@@ -6,7 +6,7 @@ Research-based RAG system optimized for legal and technical documentation with 7
 
 ## 🆕 Multi-Agent System (v2.1 - SSOT Refactoring)
 
-SUJBOT2 is a **research-backed multi-agent framework** achieving:
+SUJBOT is a **research-backed multi-agent framework** achieving:
 - ✅ **90% cost savings** via 3-level prompt caching (Harvey AI case study)
 - ✅ **8 specialized agents** for higher quality (Orchestrator, Extractor, Classifier, Compliance, Risk Verifier, Citation Auditor, Gap Synthesizer, Report Generator)
 - ✅ **State persistence** with PostgreSQL checkpointing
@@ -27,12 +27,12 @@ uv run python -m src.multi_agent.runner --interactive
 
 ## 📚 Interactive Documentation
 
-**🌐 Live Documentation:** [https://ads-teama.github.io/SUJBOT2/](https://ads-teama.github.io/SUJBOT2/)
+**🌐 Live Documentation:** [https://ads-teama.github.io/SUJBOT/](https://ads-teama.github.io/SUJBOT/)
 
 Explore our visual, interactive pipeline documentation:
-- 📥 **[Indexing Pipeline](https://ads-teama.github.io/SUJBOT2/indexing_pipeline.html)** - Phase 1-5: Document → Vector Store
-- 💬 **[User Search Pipeline](https://ads-teama.github.io/SUJBOT2/user_search_pipeline.html)** - Phase 7: Query → AI Answer (14 Tools)
-- 🗓️ **[4-Week Roadmap](https://ads-teama.github.io/SUJBOT2/roadmap.html)** - Team plans for pipeline optimization
+- 📥 **[Indexing Pipeline](https://ads-teama.github.io/SUJBOT/indexing_pipeline.html)** - Phase 1-5: Document → Vector Store
+- 💬 **[User Search Pipeline](https://ads-teama.github.io/SUJBOT/user_search_pipeline.html)** - Phase 7: Query → AI Answer (14 Tools)
+- 🗓️ **[4-Week Roadmap](https://ads-teama.github.io/SUJBOT/roadmap.html)** - Team plans for pipeline optimization
 
 ---
 
@@ -184,7 +184,7 @@ git check-ignore config.json  # Should print: config.json
 ---
 ## 🔒 Security Features
 
-SUJBOT2 implements production-grade security following OWASP best practices:
+SUJBOT implements production-grade security following OWASP best practices:
 
 ### Authentication & Authorization
 

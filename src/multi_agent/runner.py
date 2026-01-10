@@ -323,7 +323,7 @@ class MultiAgentRunner:
                                 node_labels = record.get("node_labels", [])
 
                                 # Validate required fields
-                                # Support both SUJBOT2 schema (id/type) and Graphiti schema (uuid/labels)
+                                # Support both SUJBOT schema (id/type) and Graphiti schema (uuid/labels)
                                 entity_id = node.get("id") or node.get("uuid", "")
                                 # Try multiple sources for type: direct property, entity_type, or node labels
                                 # Filter out generic "Entity" label to get the actual type
@@ -1099,7 +1099,7 @@ async def main():
     load_dotenv()
 
     # Set up argument parser
-    parser = argparse.ArgumentParser(description="SUJBOT2 Multi-Agent System")
+    parser = argparse.ArgumentParser(description="SUJBOT Multi-Agent System")
     parser.add_argument("--config", type=str, help="Path to config.json", default="config.json")
     parser.add_argument("--query", type=str, help="Query to execute")
     parser.add_argument("--interactive", action="store_true", help="Interactive mode")
@@ -1156,7 +1156,7 @@ async def main():
 
     elif args.interactive:
         # Interactive mode
-        print("SUJBOT2 Multi-Agent System (Interactive Mode)")
+        print("SUJBOT Multi-Agent System (Interactive Mode)")
         print("Type 'quit' or 'exit' to quit")
         print("=" * 80)
 

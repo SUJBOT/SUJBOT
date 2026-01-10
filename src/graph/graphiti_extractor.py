@@ -1,5 +1,5 @@
 """
-Graphiti-based Knowledge Graph Extractor for SUJBOT2.
+Graphiti-based Knowledge Graph Extractor for SUJBOT.
 
 Replaces GeminiKGExtractor with Graphiti framework for temporal KG extraction.
 Uses GPT-4o-mini for entity/relationship extraction with custom Pydantic types.

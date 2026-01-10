@@ -32,7 +32,7 @@ i18n
       // Cache user selection in localStorage
       caches: ['localStorage'],
       // localStorage key name
-      lookupLocalStorage: 'sujbot2-language',
+      lookupLocalStorage: 'sujbot-language',
     },
   });
 

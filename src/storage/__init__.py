@@ -1,5 +1,5 @@
 """
-Storage Abstraction Layer for SUJBOT2
+Storage Abstraction Layer for SUJBOT
 
 Provides unified interface for PostgreSQL pgvector storage.
 

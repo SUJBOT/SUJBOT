@@ -1,6 +1,6 @@
-# SUJBOT2 Backend
+# SUJBOT Backend
 
-FastAPI backend for SUJBOT2 web interface with SSE streaming support.
+FastAPI backend for SUJBOT web interface with SSE streaming support.
 
 ## Setup
 

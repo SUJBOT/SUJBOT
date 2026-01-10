@@ -1,5 +1,5 @@
 """
-Multi-Agent System for SUJBOT2
+Multi-Agent System for SUJBOT
 
 LangGraph-based multi-agent orchestration system implementing research-backed
 patterns from Harvey AI, Definely, and academic papers (L-MARS, PAKTON, MASLegalBench).

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
-**SUJBOT2**: Production RAG system for legal/technical documents with multi-agent orchestration.
+**SUJBOT**: Production RAG system for legal/technical documents with multi-agent orchestration.
 
 ## Debugging with LangSmith
 
@@ -26,9 +26,9 @@ Run QA evaluation on indexed documents using LLM-as-judge.
 ```bash
 uv run python scripts/langsmith_eval.py \
     --dataset-path dataset/dataset_exp_ver_2.json \
-    --dataset-name "sujbot2-eval-qa-40" \
+    --dataset-name "sujbot-eval-qa-40" \
     --replace-dataset \
-    --experiment-prefix "sujbot2-qa-40-optimized" \
+    --experiment-prefix "sujbot-qa-40-optimized" \
     --judge-model anthropic:claude-sonnet-4-5
 ```
 
@@ -50,7 +50,7 @@ uv run python scripts/langsmith_eval.py --judge-model openai:gpt-4o-mini
 - `completeness` - Are all key points covered?
 
 **Dataset:** `dataset/dataset_exp_ver_2.json` (40 Czech legal/nuclear QA pairs)
-**LangSmith Dataset:** `sujbot2-eval-qa-40`
+**LangSmith Dataset:** `sujbot-eval-qa-40`
 
 ## Common Commands
 
@@ -500,7 +500,7 @@ location ~ ^/(health|docs|openapi.json|chat|models|clarify|auth|conversations|se
 ```bash
 # .env (EU endpoint for EU workspaces)
 LANGSMITH_API_KEY=lsv2_pt_xxx
-LANGSMITH_PROJECT_NAME=sujbot2-multi-agent
+LANGSMITH_PROJECT_NAME=sujbot-multi-agent
 LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com  # US: https://api.smith.langchain.com
 ```
 

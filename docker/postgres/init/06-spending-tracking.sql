@@ -1,5 +1,5 @@
 -- ============================================================================
--- SUJBOT2 User Spending Tracking Schema
+-- SUJBOT User Spending Tracking Schema
 -- ============================================================================
 -- This script adds spending tracking columns to auth.users:
 -- 1. spending_limit_czk - Admin-configurable spending limit per user

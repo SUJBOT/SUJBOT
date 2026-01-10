@@ -1,9 +1,9 @@
 #!/bin/bash
-# SUJBOT2 Backup Export Script
+# SUJBOT Backup Export Script
 # Creates a complete backup archive for server migration
 #
 # Usage: ./scripts/backup_export.sh
-# Output: sujbot2_backup_YYYYMMDD_HHMMSS.tar.gz
+# Output: sujbot_backup_YYYYMMDD_HHMMSS.tar.gz
 
 set -e  # Exit on error
 
@@ -18,14 +18,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 BACKUP_DIR="$PROJECT_DIR/backup_$TIMESTAMP"
-ARCHIVE_NAME="sujbot2_backup_$TIMESTAMP.tar.gz"
+ARCHIVE_NAME="sujbot_backup_$TIMESTAMP.tar.gz"
 
 # Container names
 POSTGRES_CONTAINER="sujbot_postgres"
 NEO4J_CONTAINER="sujbot_neo4j"
 REDIS_CONTAINER="sujbot_redis"
 
-echo -e "${GREEN}=== SUJBOT2 Backup Export ===${NC}"
+echo -e "${GREEN}=== SUJBOT Backup Export ===${NC}"
 echo "Timestamp: $TIMESTAMP"
 echo "Output: $ARCHIVE_NAME"
 echo ""

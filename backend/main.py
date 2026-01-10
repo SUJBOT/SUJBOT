@@ -1,5 +1,5 @@
 """
-FastAPI Backend for SUJBOT2 Web Interface
+FastAPI Backend for SUJBOT Web Interface
 
 Provides RESTful API and SSE streaming for the agent.
 Strictly imports from src/ without modifications.
@@ -181,7 +181,7 @@ async def lifespan(app: FastAPI):
         logger.info("✓ Agent adapter initialized successfully")
 
         logger.info("=" * 60)
-        logger.info("🚀 SUJBOT2 Backend Ready")
+        logger.info("🚀 SUJBOT Backend Ready")
         logger.info("=" * 60)
 
     except Exception as e:
@@ -213,8 +213,8 @@ async def lifespan(app: FastAPI):
 
 # Initialize FastAPI app with lifespan
 app = FastAPI(
-    title="SUJBOT2 Web API",
-    description="Web interface for SUJBOT2 RAG system with authentication",
+    title="SUJBOT Web API",
+    description="Web interface for SUJBOT RAG system with authentication",
     version="2.0.0",  # Incremented for security update
     lifespan=lifespan
 )
@@ -845,7 +845,7 @@ async def delete_message(conversation_id: str, message_id: str):
 async def root():
     """Root endpoint with API info."""
     return {
-        "name": "SUJBOT2 Web API",
+        "name": "SUJBOT Web API",
         "version": "1.0.0",
         "status": "running",
         "docs": "/docs"

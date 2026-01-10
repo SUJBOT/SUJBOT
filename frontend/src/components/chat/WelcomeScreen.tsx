@@ -2,7 +2,7 @@
  * WelcomeScreen Component - Displayed when starting a new conversation
  *
  * Features:
- * - Large SUJBOT2 branding with serif typography
+ * - Large SUJBOT branding with serif typography
  * - Suggested prompts users can click
  * - Gradient background effects
  * - Smooth fade-in animations
@@ -140,7 +140,7 @@ export function WelcomeScreen({ onPromptClick, children }: WelcomeScreenProps) {
             )}
             style={{ fontFamily: 'var(--font-display)' }}
           >
-            SUJBOT2
+            SUJBOT
           </h1>
         </div>
 

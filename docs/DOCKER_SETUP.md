@@ -1,4 +1,4 @@
-# SUJBOT2 Docker Setup Guide
+# SUJBOT Docker Setup Guide
 
 **Status:** ✅ Complete PostgreSQL + Docker migration
 **Date:** 2025-11-12

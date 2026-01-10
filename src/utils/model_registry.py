@@ -1,5 +1,5 @@
 """
-Model registry for SUJBOT2 pipeline.
+Model registry for SUJBOT pipeline.
 
 SSOT: All model aliases are now loaded from config.json (model_registry section).
 This class provides helper methods for model resolution with backward-compatible

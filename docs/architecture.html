@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SUJBOT2 Architecture Documentation</title>
+    <title>SUJBOT Architecture Documentation</title>
     <style>
         :root {
             --bg-primary: #1a1a2e;
@@ -303,7 +303,7 @@
 </head>
 <body>
     <nav>
-        <h1>SUJBOT2</h1>
+        <h1>SUJBOT</h1>
         <p class="subtitle">Architecture Documentation</p>
         <ul>
             <li class="section-header">Overview</li>
@@ -345,7 +345,7 @@
         <!-- SYSTEM OVERVIEW -->
         <section id="overview">
             <h2>System Overview</h2>
-            <p>SUJBOT2 is a production RAG (Retrieval-Augmented Generation) system for legal and technical documents with multi-agent orchestration. It processes Czech legal documents, nuclear safety regulations, and technical specifications.</p>
+            <p>SUJBOT is a production RAG (Retrieval-Augmented Generation) system for legal and technical documents with multi-agent orchestration. It processes Czech legal documents, nuclear safety regulations, and technical specifications.</p>
 
             <pre class="diagram">
 +-------------------+     +-------------------+     +-------------------+
@@ -1477,7 +1477,7 @@ GOOGLE_API_KEY=...
 DEEPINFRA_API_KEY=...
 
 # Database
-DATABASE_URL=postgresql://user:pass@localhost:5432/sujbot2
+DATABASE_URL=postgresql://user:pass@localhost:5432/sujbot
 POSTGRES_PASSWORD=...
 
 # Auth
@@ -1485,7 +1485,7 @@ AUTH_SECRET_KEY=...
 
 # LangSmith (EU endpoint)
 LANGSMITH_API_KEY=lsv2_pt_...
-LANGSMITH_PROJECT_NAME=sujbot2-multi-agent
+LANGSMITH_PROJECT_NAME=sujbot-multi-agent
 LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com
 
 # Extraction backend (auto|gemini|unstructured)
@@ -1568,7 +1568,7 @@ EXTRACTION_BACKEND=auto</code></pre>
         </section>
 
         <footer style="margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--border); text-align: center; color: var(--text-secondary);">
-            <p>SUJBOT2 Architecture Documentation</p>
+            <p>SUJBOT Architecture Documentation</p>
             <p>Generated: December 2024</p>
         </footer>
     </main>

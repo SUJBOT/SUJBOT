@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LangSmith Evaluation Script for SUJBOT2 Multi-Agent System.
+LangSmith Evaluation Script for SUJBOT Multi-Agent System.
 
 Evaluates the multi-agent RAG system using LangSmith's evaluation framework
 with LLM-as-judge evaluators for semantic correctness, factual accuracy,
@@ -14,7 +14,7 @@ Usage:
     uv run python scripts/langsmith_eval.py --upload-only
 
     # Run evaluation on existing dataset
-    uv run python scripts/langsmith_eval.py --dataset-name "sujbot2-eval-qa"
+    uv run python scripts/langsmith_eval.py --dataset-name "sujbot-eval-qa"
 
     # Limit number of examples for testing
     uv run python scripts/langsmith_eval.py --limit 5
@@ -351,7 +351,7 @@ def load_eval_dataset(dataset_path: Path) -> list[dict[str, Any]]:
 def upload_dataset_to_langsmith(
     client: Client,
     eval_data: list[dict[str, Any]],
-    dataset_name: str = "sujbot2-eval-qa",
+    dataset_name: str = "sujbot-eval-qa",
     description: str = "Czech legal/nuclear QA evaluation pairs",
     replace: bool = False,
 ) -> str:
@@ -461,7 +461,7 @@ async def run_evaluation(
     dataset_name: str,
     evaluators: list[Any],
     eval_data: list[dict[str, Any]],
-    experiment_prefix: str = "sujbot2-qa-eval",
+    experiment_prefix: str = "sujbot-qa-eval",
     max_concurrency: int = 1,
     limit: int | None = None,
 ):
@@ -815,7 +815,7 @@ async def collect_results(results) -> list[dict[str, Any]]:
 def parse_args():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="Run LangSmith evaluation on SUJBOT2 multi-agent system",
+        description="Run LangSmith evaluation on SUJBOT multi-agent system",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
@@ -828,7 +828,7 @@ def parse_args():
     parser.add_argument(
         "--dataset-name",
         type=str,
-        default="sujbot2-eval-qa",
+        default="sujbot-eval-qa",
         help="LangSmith dataset name",
     )
     parser.add_argument(
@@ -862,7 +862,7 @@ def parse_args():
     parser.add_argument(
         "--experiment-prefix",
         type=str,
-        default="sujbot2-qa-eval",
+        default="sujbot-qa-eval",
         help="Prefix for experiment name in LangSmith",
     )
     parser.add_argument(

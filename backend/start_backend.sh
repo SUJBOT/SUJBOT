@@ -1,13 +1,13 @@
 #!/bin/bash
 #
-# Start SUJBOT2 Backend Only
+# Start SUJBOT Backend Only
 #
 # Run this in one terminal, then start frontend separately
 #
 
 set -e
 
-echo "🚀 Starting SUJBOT2 Backend..."
+echo "🚀 Starting SUJBOT Backend..."
 
 # Check if we're in the backend directory
 if [ ! -f "main.py" ]; then

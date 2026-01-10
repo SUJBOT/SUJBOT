@@ -8,7 +8,7 @@
 
 ## Overview
 
-SUJBOT2's BM25 hybrid search now includes **universal language support** with special emphasis on Czech documents. The system automatically detects document language and applies appropriate tokenization strategies with stop word filtering to improve search precision by **20-30%** for Czech and other supported languages.
+SUJBOT's BM25 hybrid search now includes **universal language support** with special emphasis on Czech documents. The system automatically detects document language and applies appropriate tokenization strategies with stop word filtering to improve search precision by **20-30%** for Czech and other supported languages.
 
 ---
 

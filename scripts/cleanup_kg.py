@@ -144,7 +144,7 @@ def run_cleanup(dry_run: bool = False):
     ]
 
     print("=" * 60)
-    print("SUJBOT2 Knowledge Graph Cleanup")
+    print("SUJBOT Knowledge Graph Cleanup")
     print("=" * 60)
     print(f"Mode: {'DRY RUN (no changes)' if dry_run else 'LIVE (applying changes)'}")
     print()

@@ -5,7 +5,7 @@
 FROM pgvector/pgvector:pg16
 
 # Metadata
-LABEL maintainer="SUJBOT2"
+LABEL maintainer="SUJBOT"
 LABEL description="PostgreSQL 16 with pgvector (vector similarity search)"
 
 # Note: Apache AGE installation skipped for initial deployment due to build complexity

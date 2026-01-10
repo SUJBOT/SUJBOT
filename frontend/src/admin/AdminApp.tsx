@@ -1,5 +1,5 @@
 /**
- * React Admin Application for SUJBOT2
+ * React Admin Application for SUJBOT
  *
  * Provides:
  * - User management (CRUD)

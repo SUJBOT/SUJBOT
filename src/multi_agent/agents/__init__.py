@@ -1,4 +1,4 @@
-"""Multi-agent implementations for SUJBOT2.
+"""Multi-agent implementations for SUJBOT.
 
 This package contains 8 specialized agents:
 - OrchestratorAgent: Query complexity analysis, routing, and report synthesis

@@ -1035,7 +1035,7 @@ quality_threshold = experiment.get_variant(user_id)
 ## Contact & Support
 
 **Implementation by**: Claude (Anthropic)
-**Project**: SUJBOT2 Multi-Agent RAG System
+**Project**: SUJBOT Multi-Agent RAG System
 **Documentation**: See `README.md`, `PIPELINE.md`, `docs/agent/README.md`
 
 **For Issues**: Create GitHub issue at project repository

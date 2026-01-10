@@ -162,7 +162,7 @@ services:
       # LangSmith observability
       LANGSMITH_TRACING: "true"
       LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
-      LANGSMITH_PROJECT_NAME: ${LANGSMITH_PROJECT_NAME:-sujbot2-multi-agent}
+      LANGSMITH_PROJECT_NAME: ${LANGSMITH_PROJECT_NAME:-sujbot-multi-agent}
       LANGSMITH_ENDPOINT: ${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}
 
       # Neo4j (for knowledge graph)

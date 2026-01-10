@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-End-to-End test for SUJBOT2 conversation persistence.
+End-to-End test for SUJBOT conversation persistence.
 
 Tests:
 1. Login with admin@example.com / admin123
@@ -25,7 +25,7 @@ from playwright.async_api import async_playwright, expect
 async def test_sujbot_conversation_flow():
     """Test full conversation flow with database persistence."""
 
-    print("🧪 Starting E2E Test for SUJBOT2 Conversation Persistence")
+    print("🧪 Starting E2E Test for SUJBOT Conversation Persistence")
     print("=" * 60)
 
     async with async_playwright() as p:

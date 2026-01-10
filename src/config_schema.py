@@ -1306,7 +1306,7 @@ class RootConfig(BaseModel):
             logging.error(f"Internal validation error (this is a bug): {e}", exc_info=True)
             raise RuntimeError(
                 f"Internal validation error. This is a bug in the validation code.\n"
-                f"Please report this issue at https://github.com/ADS-teamA/SUJBOT2/issues\n"
+                f"Please report this issue at https://github.com/ADS-teamA/SUJBOT/issues\n"
                 f"Include your config.json file (remove API keys) in the report."
             ) from e
         # DO NOT catch Exception - let unexpected errors propagate with full traceback

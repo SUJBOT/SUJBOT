@@ -7,7 +7,7 @@ All routes should import from here instead of defining their own constants.
 
 from pathlib import Path
 
-# Project root directory (SUJBOT2/)
+# Project root directory (SUJBOT/)
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 
 # PDF document storage directory

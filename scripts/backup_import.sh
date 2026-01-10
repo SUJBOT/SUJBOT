@@ -1,12 +1,12 @@
 #!/bin/bash
-# SUJBOT2 Backup Import Script
+# SUJBOT Backup Import Script
 # Restores data from a backup archive
 #
 # Usage: ./scripts/backup_import.sh <backup_archive.tar.gz>
 #
 # Prerequisites:
 #   - Docker containers must be running (docker compose up -d)
-#   - Run from the SUJBOT2 project directory
+#   - Run from the SUJBOT project directory
 
 set -e  # Exit on error
 
@@ -30,7 +30,7 @@ if [ -z "$1" ]; then
     echo -e "${RED}Usage: $0 <backup_archive.tar.gz>${NC}"
     echo ""
     echo "Example:"
-    echo "  ./scripts/backup_import.sh sujbot2_backup_20250106_143000.tar.gz"
+    echo "  ./scripts/backup_import.sh sujbot_backup_20250106_143000.tar.gz"
     exit 1
 fi
 
@@ -46,7 +46,7 @@ if [ ! -f "$ARCHIVE" ]; then
     exit 1
 fi
 
-echo -e "${GREEN}=== SUJBOT2 Backup Import ===${NC}"
+echo -e "${GREEN}=== SUJBOT Backup Import ===${NC}"
 echo "Archive: $ARCHIVE"
 echo "Project: $PROJECT_DIR"
 echo ""
@@ -109,7 +109,7 @@ if container_running "$NEO4J_CONTAINER"; then
     elif [ -f "$BACKUP_DIR/neo4j_data.tar.gz" ]; then
         echo -e "${YELLOW}  Neo4j data archive found - manual restore required${NC}"
         echo "  1. Stop Neo4j: docker compose stop neo4j"
-        echo "  2. Extract: docker run --rm -v sujbot2_neo4j_data:/data -v $BACKUP_DIR:/backup alpine tar -xzf /backup/neo4j_data.tar.gz -C /data"
+        echo "  2. Extract: docker run --rm -v sujbot_neo4j_data:/data -v $BACKUP_DIR:/backup alpine tar -xzf /backup/neo4j_data.tar.gz -C /data"
         echo "  3. Start Neo4j: docker compose up -d neo4j"
     else
         echo -e "${YELLOW}  No Neo4j backup found, skipping...${NC}"

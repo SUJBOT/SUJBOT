@@ -1,6 +1,6 @@
-# SUJBOT2 Frontend
+# SUJBOT Frontend
 
-React + TypeScript frontend for SUJBOT2 web interface with ChatGPT/Claude-like UI.
+React + TypeScript frontend for SUJBOT web interface with ChatGPT/Claude-like UI.
 
 ## Features
 
@@ -199,4 +199,4 @@ npm run build
 
 ## License
 
-Same as main SUJBOT2 project.
+Same as main SUJBOT project.

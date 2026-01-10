@@ -1,10 +1,10 @@
-# SUJBOT2 SOTA Enhancement Plan
+# SUJBOT SOTA Enhancement Plan
 
 > **Status:** Planning Complete | **Author:** Claude Code Analysis | **Date:** 2025-11-26
 
 ## Executive Summary
 
-This document provides a comprehensive implementation roadmap for enhancing SUJBOT2 with state-of-the-art (SOTA) multi-agent patterns based on deep codebase analysis and 2024/2025 research trends.
+This document provides a comprehensive implementation roadmap for enhancing SUJBOT with state-of-the-art (SOTA) multi-agent patterns based on deep codebase analysis and 2024/2025 research trends.
 
 **Key Decisions:**
 - Keep BGE-Reranker DISABLED (trust HyDE + Expansion Fusion architecture)

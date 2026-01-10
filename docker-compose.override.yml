@@ -6,7 +6,7 @@ services:
     ports:
       - "8200:8000"
     environment:
-      LANGSMITH_PROJECT_NAME: sujbot2-michal
+      LANGSMITH_PROJECT_NAME: sujbot-michal
 
   frontend:
     ports:

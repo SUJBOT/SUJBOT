@@ -199,7 +199,7 @@ services:
     container_name: sujbot_backend_experiment  # Jiný název
     environment:
       RAG_PROFILE: ${RAG_PROFILE:-baseline}    # Profil z env
-      LANGSMITH_PROJECT_NAME: sujbot2-experiment
+      LANGSMITH_PROJECT_NAME: sujbot-experiment
     ports:
       - "8081:8000"                             # Jiný port
 
@@ -249,7 +249,7 @@ curl http://localhost:8081/health
 
 # 4. Spustit evaluaci proti experimentu
 RAG_PROFILE=high-hyde uv run python scripts/langsmith_eval.py \
-  --experiment-prefix "sujbot2-qa-40-high-hyde"
+  --experiment-prefix "sujbot-qa-40-high-hyde"
 
 # 5. Zastavit experiment
 docker compose -f docker-compose.yml -f docker-compose.experiment.yml down
@@ -264,9 +264,9 @@ docker compose -f docker-compose.yml -f docker-compose.experiment.yml down
 Používejte konzistentní pojmenování pro snadné porovnání:
 
 ```
-sujbot2-qa-40-baseline          # Baseline
-sujbot2-qa-40-high-hyde         # Experiment 1
-sujbot2-qa-40-no-graph-boost    # Experiment 2
+sujbot-qa-40-baseline          # Baseline
+sujbot-qa-40-high-hyde         # Experiment 1
+sujbot-qa-40-no-graph-boost    # Experiment 2
 ```
 
 ### Automatické pojmenování v eval scriptu
@@ -279,7 +279,7 @@ def main():
     rag_profile = os.getenv("RAG_PROFILE", "baseline")
 
     # Automaticky přidej profil do experiment prefix
-    experiment_prefix = f"sujbot2-qa-40-{rag_profile}"
+    experiment_prefix = f"sujbot-qa-40-{rag_profile}"
 
     print(f"Running evaluation with RAG profile: {rag_profile}")
     print(f"LangSmith experiment: {experiment_prefix}")
@@ -289,7 +289,7 @@ def main():
 
 1. Otevřete LangSmith UI
 2. Jděte do **Datasets & Experiments**
-3. Vyberte dataset `sujbot2-eval-qa-40`
+3. Vyberte dataset `sujbot-eval-qa-40`
 4. Klikněte na **Compare** a vyberte experimenty k porovnání
 5. Porovnejte metriky:
    - `semantic_correctness`
@@ -304,7 +304,7 @@ def main():
 # Použijte mcp__langsmith__list_projects
 
 # Fetch runs z konkrétního experimentu
-# Použijte mcp__langsmith__fetch_runs s project_name="sujbot2-qa-40-high-hyde"
+# Použijte mcp__langsmith__fetch_runs s project_name="sujbot-qa-40-high-hyde"
 ```
 
 ---
@@ -321,7 +321,7 @@ git pull origin main
 
 # 1.2 Spusťte baseline evaluaci (pokud nemáte)
 uv run python scripts/langsmith_eval.py \
-  --experiment-prefix "sujbot2-qa-40-baseline"
+  --experiment-prefix "sujbot-qa-40-baseline"
 
 
 # === FÁZE 2: Experiment ===
@@ -341,7 +341,7 @@ curl http://localhost:8081/health
 
 # 2.4 Spusťte evaluaci
 RAG_PROFILE=high-hyde uv run python scripts/langsmith_eval.py \
-  --experiment-prefix "sujbot2-qa-40-high-hyde"
+  --experiment-prefix "sujbot-qa-40-high-hyde"
 
 
 # === FÁZE 3: Analýza ===
@@ -392,7 +392,7 @@ case "$1" in
     ;;
   eval)
     RAG_PROFILE="$2" uv run python scripts/langsmith_eval.py \
-      --experiment-prefix "sujbot2-qa-40-$2"
+      --experiment-prefix "sujbot-qa-40-$2"
     ;;
   status)
     docker ps --filter "name=experiment"

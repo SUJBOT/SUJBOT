@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Start SUJBOT2 Web Interface
+# Start SUJBOT Web Interface
 #
 # This script starts both backend (FastAPI) and frontend (Vite) servers
 # for the web interface.
@@ -13,7 +13,7 @@ RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 echo -e "${BLUE}========================================${NC}"
-echo -e "${BLUE}   SUJBOT2 Web Interface Startup${NC}"
+echo -e "${BLUE}   SUJBOT Web Interface Startup${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo
 
@@ -142,7 +142,7 @@ echo -e "${GREEN}✓ Frontend starting in background${NC}"
 
 echo
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}   SUJBOT2 Web Interface Ready!${NC}"
+echo -e "${GREEN}   SUJBOT Web Interface Ready!${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo
 echo -e "  Frontend: ${BLUE}http://localhost:5173${NC}"
