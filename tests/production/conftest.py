@@ -4,6 +4,7 @@ Shared fixtures for production tests.
 These fixtures provide authenticated HTTP clients for testing production services.
 """
 
+import json
 import os
 import subprocess
 import warnings
@@ -226,9 +227,9 @@ def parse_sse_events(response, track_failures: bool = True) -> tuple[list, list]
             try:
                 data = {"event_type": current_event, "data": None}
                 if data_str:
-                    data["data"] = __import__("json").loads(data_str)
+                    data["data"] = json.loads(data_str)
                 events.append(data)
-            except __import__("json").JSONDecodeError as e:
+            except json.JSONDecodeError as e:
                 if track_failures:
                     parse_failures.append({
                         "line": line[:100],
