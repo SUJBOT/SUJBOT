@@ -1,11 +1,15 @@
 """
 Cost tracking for API usage (LLM and Embeddings).
 
-Tracks token usage and calculates costs for:
-- Anthropic Claude (Haiku, Sonnet, Opus)
-- OpenAI (GPT-4o, o-series, embeddings)
-- Voyage AI (embeddings)
-- Local models (free)
+SSOT: Pricing is now loaded from config.json model_registry section.
+The hardcoded PRICING dict below serves as a FALLBACK for:
+- Models not yet migrated to config.json
+- Backward compatibility with existing code
+
+NEW FLOW:
+1. Try ModelRegistry.get_pricing() (from config.json)
+2. Fall back to PRICING dict (for unmigrated models)
+3. Return $0 with warning if not found anywhere
 
 Usage:
     from src.cost_tracker import CostTracker
@@ -15,7 +19,7 @@ Usage:
     # Track LLM usage
     tracker.track_llm(
         provider="anthropic",
-        model="claude-haiku-4-5",
+        model="claude-haiku-4-5",  # Pricing from config.json
         input_tokens=1000,
         output_tokens=500
     )
@@ -23,7 +27,7 @@ Usage:
     # Track embedding usage
     tracker.track_embedding(
         provider="openai",
-        model="text-embedding-3-large",
+        model="text-embedding-3-large",  # Pricing from config.json
         tokens=10000
     )
 
@@ -35,7 +39,7 @@ Usage:
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Optional, List, Any, Union
+from typing import Any, Dict, List, Optional, Union
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -111,17 +115,24 @@ PRICING = {
         "gemini-pro": {"input": 1.25, "output": 10.00},
     },
     # DeepInfra models (per 1M tokens)
-    # Source: https://deepinfra.com/pricing
+    # Source: https://api.deepinfra.com/models/list (API, updated 2026-01-10)
+    # Run: uv run python scripts/fetch_deepinfra_pricing.py --configured
     "deepinfra": {
-        # LLM models
-        "Qwen/Qwen2.5-72B-Instruct": {"input": 0.35, "output": 0.40},
-        "Qwen/Qwen2.5-7B-Instruct": {"input": 0.06, "output": 0.06},
-        "qwen-72b": {"input": 0.35, "output": 0.40},
-        "qwen-7b": {"input": 0.06, "output": 0.06},
-        # Llama models
-        "meta-llama/Meta-Llama-3.1-70B-Instruct": {"input": 0.35, "output": 0.40},
-        "meta-llama/Meta-Llama-3.1-8B-Instruct": {"input": 0.06, "output": 0.06},
-        "llama-70b": {"input": 0.35, "output": 0.40},
+        # Llama 4 Scout (MoE, 17B active / 109B total)
+        "meta-llama/Llama-4-Scout-17B-16E-Instruct": {"input": 0.08, "output": 0.30},
+        "llama-4-scout": {"input": 0.08, "output": 0.30},
+        # MiniMax M2 (MoE, 10B active / 230B total)
+        "MiniMaxAI/MiniMax-M2": {"input": 0.25, "output": 1.02},
+        "minimax-m2": {"input": 0.25, "output": 1.02},
+        # Qwen models
+        "Qwen/Qwen2.5-72B-Instruct": {"input": 0.12, "output": 0.39},
+        "Qwen/Qwen2.5-7B-Instruct": {"input": 0.04, "output": 0.10},
+        "qwen-72b": {"input": 0.12, "output": 0.39},
+        "qwen-7b": {"input": 0.04, "output": 0.10},
+        # Llama 3.1 models
+        "meta-llama/Meta-Llama-3.1-70B-Instruct": {"input": 0.40, "output": 0.40},
+        "meta-llama/Meta-Llama-3.1-8B-Instruct": {"input": 0.03, "output": 0.05},
+        "llama-70b": {"input": 0.40, "output": 0.40},
         # Embedding models
         "Qwen/Qwen3-Embedding-8B": {"input": 0.03, "output": 0.0},
         "qwen3-embedding-8b": {"input": 0.03, "output": 0.0},
@@ -362,6 +373,29 @@ class CostTracker:
 
         return cost
 
+    def _get_pricing_from_config(self, model: str, model_type: str = "llm") -> Optional[Dict[str, float]]:
+        """
+        Get pricing from config.json via ModelRegistry.
+
+        This is the PRIMARY source for pricing data (SSOT).
+
+        Args:
+            model: Model name or alias
+            model_type: "llm" or "embedding"
+
+        Returns:
+            Dict with "input" and "output" prices, or None if not found
+        """
+        try:
+            from src.utils.model_registry import ModelRegistry
+            pricing = ModelRegistry.get_pricing(model, model_type)
+            # Only return if pricing is non-zero (configured in config.json)
+            if pricing["input"] > 0 or pricing["output"] > 0:
+                return pricing
+        except (ImportError, KeyError, ValueError):
+            pass
+        return None
+
     def _calculate_llm_cost(
         self,
         provider: str,
@@ -373,9 +407,11 @@ class CostTracker:
         """
         Calculate cost for LLM usage, including cache discount.
 
+        Pricing lookup order:
+        1. ModelRegistry (config.json) - SSOT
+        2. PRICING dict (fallback for unmigrated models)
+
         Cache reads are billed at 10% of the regular input price (Anthropic prompt caching).
-        Note: Cache calculation applies to all calls, even though only Anthropic supports it.
-        Non-Anthropic providers should pass cache_read_tokens=0.
 
         Args:
             provider: Provider name
@@ -387,13 +423,17 @@ class CostTracker:
         Returns:
             Total cost in USD
         """
-        # Get pricing for this model
-        pricing = PRICING.get(provider, {}).get(model)
+        # Try config.json first (SSOT)
+        pricing = self._get_pricing_from_config(model, "llm")
+
+        # Fallback to hardcoded PRICING dict
+        if pricing is None:
+            pricing = PRICING.get(provider, {}).get(model)
 
         if not pricing:
             logger.warning(
                 f"No pricing data for {provider}/{model}. "
-                f"Cost calculation skipped. Add pricing to PRICING dict."
+                f"Add to config.json model_registry or PRICING dict."
             )
             return 0.0
 
@@ -407,12 +447,25 @@ class CostTracker:
         return input_cost + output_cost + cache_cost
 
     def _calculate_embedding_cost(self, provider: str, model: str, tokens: int) -> float:
-        """Calculate cost for embedding usage."""
-        # Get pricing for this model
-        pricing = PRICING.get(provider, {}).get(model)
+        """
+        Calculate cost for embedding usage.
+
+        Pricing lookup order:
+        1. ModelRegistry (config.json) - SSOT
+        2. PRICING dict (fallback for unmigrated models)
+        """
+        # Try config.json first (SSOT)
+        pricing = self._get_pricing_from_config(model, "embedding")
+
+        # Fallback to hardcoded PRICING dict
+        if pricing is None:
+            pricing = PRICING.get(provider, {}).get(model)
 
         if not pricing:
-            logger.warning(f"No pricing data for {provider}/{model}. " f"Cost calculation skipped.")
+            logger.warning(
+                f"No pricing data for {provider}/{model}. "
+                f"Add to config.json model_registry or PRICING dict."
+            )
             return 0.0
 
         # Calculate cost (prices are per 1M tokens)
@@ -777,6 +830,42 @@ def reset_global_tracker():
     global _global_tracker
     if _global_tracker is not None:
         _global_tracker.reset()
+
+
+def validate_pricing_coverage(config: Dict[str, Any]) -> List[str]:
+    """
+    Check if all configured models have pricing data.
+
+    Validates that all models in agent_variants.deepinfra_supported_models
+    and agent_variants.variants have corresponding entries in PRICING dict.
+
+    Args:
+        config: Application config dict (from config.json)
+
+    Returns:
+        List of missing model identifiers (e.g., ["deepinfra/model-name"])
+    """
+    missing = []
+
+    agent_variants = config.get("agent_variants", {})
+
+    # Check deepinfra_supported_models
+    for model in agent_variants.get("deepinfra_supported_models", []):
+        if model not in PRICING.get("deepinfra", {}):
+            missing.append(f"deepinfra/{model}")
+
+    # Check variant models (opus_model, default_model)
+    for variant_name, variant in agent_variants.get("variants", {}).items():
+        for key in ["opus_model", "default_model"]:
+            model = variant.get(key, "")
+            # Skip Anthropic/OpenAI models (handled by their providers)
+            if not model or model.startswith("claude-") or model.startswith("gpt-"):
+                continue
+            # Check if it's a DeepInfra model (contains "/" = HuggingFace-style path)
+            if "/" in model and model not in PRICING.get("deepinfra", {}):
+                missing.append(f"deepinfra/{model} (variant: {variant_name})")
+
+    return missing
 
 
 # Example usage

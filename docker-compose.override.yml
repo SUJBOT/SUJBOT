@@ -52,12 +52,14 @@ services:
   certbot:
     container_name: sujbot_dev_certbot
 
-# Use same network as production (containers distinguished by name)
-# Pre-requisite: production must be running OR run: docker network create sujbot_sujbot_net
+# Isolated dev network (separate from production to avoid DNS conflicts)
 networks:
   sujbot_net:
-    external: true
-    name: sujbot_sujbot_net
+    driver: bridge
+    name: sujbot_dev_net
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16
 
 # Uncomment below for isolated dev volumes (prevents data sharing with prod)
 # volumes:

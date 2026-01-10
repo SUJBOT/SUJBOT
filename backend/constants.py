@@ -53,15 +53,17 @@ _BUILTIN_VARIANT_CONFIG = {
         "default_model": "claude-haiku-4-5-20251001",
     },
     "local": {
-        "display_name": "Local (Llama 3.1 70B)",
-        "opus_model": "meta-llama/Meta-Llama-3.1-70B-Instruct",
-        "default_model": "meta-llama/Meta-Llama-3.1-70B-Instruct",
+        "display_name": "Local (MiniMax-M2)",
+        "opus_model": "MiniMaxAI/MiniMax-M2",
+        "default_model": "MiniMaxAI/MiniMax-M2",
     },
 }
 
 _BUILTIN_DEFAULT_VARIANT = "cheap"
 
 _BUILTIN_DEEPINFRA_SUPPORTED_MODELS = frozenset({
+    "MiniMaxAI/MiniMax-M2",
+    "meta-llama/Llama-4-Scout-17B-16E-Instruct",
     "meta-llama/Meta-Llama-3.1-70B-Instruct",
     "meta-llama/Meta-Llama-3.1-8B-Instruct",
     "Qwen/Qwen2.5-72B-Instruct",
@@ -126,8 +128,11 @@ def _ensure_config_loaded() -> None:
             logger.debug("No agent_variants in config, using built-in defaults")
             _load_builtin_defaults()
 
-        # DeepInfra models are not in config.json yet, use built-in
-        _DEEPINFRA_SUPPORTED_MODELS = _BUILTIN_DEEPINFRA_SUPPORTED_MODELS
+        # Load DeepInfra supported models from config
+        if hasattr(config.agent_variants, 'deepinfra_supported_models'):
+            _DEEPINFRA_SUPPORTED_MODELS = frozenset(config.agent_variants.deepinfra_supported_models)
+        else:
+            _DEEPINFRA_SUPPORTED_MODELS = _BUILTIN_DEEPINFRA_SUPPORTED_MODELS
 
         _config_loaded = True
 

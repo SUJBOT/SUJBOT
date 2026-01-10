@@ -19,6 +19,125 @@ from typing import List, Literal, Optional
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+# Type alias for providers
+LLMProvider = Literal["anthropic", "openai", "google", "deepinfra"]
+EmbeddingProvider = Literal["openai", "deepinfra", "voyage", "huggingface"]
+
+
+# =============================================================================
+# Unified Model Configuration (SSOT for pricing, provider, metadata)
+# =============================================================================
+
+
+class ModelPricing(BaseModel):
+    """
+    Model pricing per 1M tokens.
+
+    All prices are in USD. Input and output prices are separate
+    because most providers charge differently for each.
+    """
+
+    input: float = Field(
+        ...,
+        ge=0.0,
+        description="Price per 1M input tokens (USD)"
+    )
+    output: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Price per 1M output tokens (USD). Default 0.0 for embeddings."
+    )
+
+
+class LLMModelConfig(BaseModel):
+    """
+    Full LLM model configuration with all metadata.
+
+    This is the new unified format for model configuration.
+    Provider and pricing are explicit - no pattern guessing needed.
+    """
+
+    id: str = Field(
+        ...,
+        description="Full model identifier (e.g., 'claude-haiku-4-5-20251001')"
+    )
+    provider: LLMProvider = Field(
+        ...,
+        description="Provider name: anthropic, openai, google, deepinfra"
+    )
+    pricing: ModelPricing = Field(
+        ...,
+        description="Pricing per 1M tokens"
+    )
+    context_window: int = Field(
+        default=128000,
+        ge=1000,
+        description="Maximum context window in tokens"
+    )
+    supports_caching: bool = Field(
+        default=False,
+        description="Whether model supports prompt caching (Anthropic feature)"
+    )
+    supports_extended_thinking: bool = Field(
+        default=False,
+        description="Whether model supports extended thinking (Claude 3.5+)"
+    )
+
+
+class EmbeddingModelConfig(BaseModel):
+    """
+    Full embedding model configuration with all metadata.
+
+    Embedding models only have input pricing (no output tokens).
+    Dimensions are required for vector store configuration.
+    """
+
+    id: str = Field(
+        ...,
+        description="Full model identifier (e.g., 'Qwen/Qwen3-Embedding-8B')"
+    )
+    provider: EmbeddingProvider = Field(
+        ...,
+        description="Provider name: openai, deepinfra, voyage, huggingface"
+    )
+    pricing: ModelPricing = Field(
+        ...,
+        description="Pricing per 1M tokens (output price typically 0)"
+    )
+    dimensions: int = Field(
+        ...,
+        ge=1,
+        description="Embedding vector dimensions"
+    )
+    is_local: bool = Field(
+        default=False,
+        description="Whether model runs locally (no API costs)"
+    )
+
+
+class RerankerModelConfig(BaseModel):
+    """
+    Reranker model configuration.
+
+    Rerankers are typically local models with no API pricing.
+    """
+
+    id: str = Field(
+        ...,
+        description="Full model identifier (e.g., 'BAAI/bge-reranker-large')"
+    )
+    is_local: bool = Field(
+        default=True,
+        description="Whether model runs locally"
+    )
+
+
+# Type aliases for backward compatibility with string-based configs
+# Allows: "haiku": "claude-haiku..." (old) OR "haiku": { "id": "...", ... } (new)
+LLMModelEntry = str | LLMModelConfig
+EmbeddingModelEntry = str | EmbeddingModelConfig
+RerankerModelEntry = str | RerankerModelConfig
+
 
 class APIKeysConfig(BaseModel):
     """
@@ -949,25 +1068,43 @@ class ModelRegistryConfig(BaseModel):
     """
     Model registry configuration - SSOT for all model aliases.
 
-    Provides centralized mapping from short aliases to full model identifiers.
-    Used by ModelRegistry class which reads from this config.
+    Supports TWO formats for backward compatibility:
+
+    OLD FORMAT (string - still supported):
+        "haiku": "claude-haiku-4-5-20251001"
+
+    NEW FORMAT (object - preferred):
+        "haiku": {
+            "id": "claude-haiku-4-5-20251001",
+            "provider": "anthropic",
+            "pricing": { "input": 1.00, "output": 5.00 },
+            "context_window": 200000,
+            "supports_caching": true
+        }
+
+    The new format eliminates the need for:
+    - Pattern-based provider detection in factory.py
+    - Hardcoded PRICING dict in cost_tracker.py
+    - Separate embedding_dimensions dict
     """
 
-    llm_models: dict[str, str] = Field(
+    llm_models: dict[str, LLMModelEntry] = Field(
         ...,
-        description="LLM model aliases (e.g., 'haiku' -> 'claude-haiku-4-5-20251001')"
+        description="LLM models: alias -> model_id (string) or full config (object)"
     )
-    embedding_models: dict[str, str] = Field(
+    embedding_models: dict[str, EmbeddingModelEntry] = Field(
         ...,
-        description="Embedding model aliases (e.g., 'bge-m3' -> 'BAAI/bge-m3')"
+        description="Embedding models: alias -> model_id (string) or full config (object)"
     )
-    reranker_models: dict[str, str] = Field(
+    reranker_models: dict[str, RerankerModelEntry] = Field(
         ...,
-        description="Reranker model aliases (e.g., 'sota' -> 'BAAI/bge-reranker-large')"
+        description="Reranker models: alias -> model_id (string) or full config (object)"
     )
+    # DEPRECATED: Use dimensions in EmbeddingModelConfig instead
+    # Kept for backward compatibility with old string-based configs
     embedding_dimensions: dict[str, int] = Field(
-        ...,
-        description="Embedding dimensions per model (e.g., 'Qwen/Qwen3-Embedding-8B' -> 4096)"
+        default_factory=dict,
+        description="[DEPRECATED] Embedding dimensions - use EmbeddingModelConfig.dimensions instead"
     )
 
 

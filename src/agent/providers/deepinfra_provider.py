@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 # Supported models for validation
 SUPPORTED_MODELS: FrozenSet[str] = frozenset({
+    "MiniMaxAI/MiniMax-M2",
+    "meta-llama/Llama-4-Scout-17B-16E-Instruct",
     "meta-llama/Meta-Llama-3.1-70B-Instruct",
     "meta-llama/Meta-Llama-3.1-8B-Instruct",
     "Qwen/Qwen2.5-72B-Instruct",
@@ -31,19 +33,20 @@ class DeepInfraProvider(BaseProvider):
 
     Uses OpenAI-compatible API format (https://api.deepinfra.com/v1/openai).
     Supports:
-    - meta-llama/Meta-Llama-3.1-70B-Instruct (recommended for agents)
+    - meta-llama/Llama-4-Scout-17B-16E-Instruct (recommended for agents)
+    - meta-llama/Meta-Llama-3.1-70B-Instruct
     - meta-llama/Meta-Llama-3.1-8B-Instruct (lighter model)
     - Qwen/Qwen2.5-72B-Instruct
     - Qwen/Qwen2.5-7B-Instruct
     """
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "meta-llama/Meta-Llama-3.1-70B-Instruct"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "meta-llama/Llama-4-Scout-17B-16E-Instruct"):
         """
         Initialize DeepInfra provider.
 
         Args:
             api_key: DeepInfra API key (defaults to DEEPINFRA_API_KEY env var)
-            model: Model identifier (default: meta-llama/Meta-Llama-3.1-70B-Instruct)
+            model: Model identifier (default: meta-llama/Llama-4-Scout-17B-16E-Instruct)
 
         Raises:
             ValueError: If API key is missing or model is not supported

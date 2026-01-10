@@ -494,6 +494,23 @@ location ~ ^/(health|docs|openapi.json|chat|models|clarify|auth|conversations|se
 - **Development:** `gpt-4o-mini` (best cost/performance)
 - **Budget:** `claude-haiku-4-5` (fastest)
 
+### Adding New Models
+
+**IMPORTANT:** When adding a new model, ALWAYS fetch current pricing from the provider API first!
+
+**Pricing sources:**
+- **Anthropic:** https://docs.anthropic.com/en/docs/about-claude/models#model-comparison-table
+- **OpenAI:** https://platform.openai.com/docs/models
+- **DeepInfra:** https://deepinfra.com/models (or API: `curl https://api.deepinfra.com/models/list`)
+- **Google:** https://ai.google.dev/gemini-api/docs/models/gemini
+
+**Checklist for adding a new model:**
+1. Fetch current pricing (input/output per 1M tokens)
+2. Add model to `config.json` → `model_aliases` section
+3. If DeepInfra: add to `deepinfra_supported_models` list and `src/agent/providers/deepinfra_provider.py`
+4. Update `src/utils/model_registry.py` if pricing tracking is needed
+5. Test the model works: `uv run python -c "from src.agent.providers.factory import create_provider; p = create_provider('model-name'); print(p.complete('test'))"`
+
 ### LangSmith Observability
 
 **Configuration:**
@@ -552,5 +569,5 @@ curl -s "https://eu.api.smith.langchain.com/api/v1/runs/query" \
 
 ---
 
-**Last Updated:** 2025-12-15
+**Last Updated:** 2026-01-10
 **Version:** PHASE 1-7 + Multi-Agent + Graphiti KG + Gemini Extractor + Exception Hierarchy + SSOT Refactoring + LangSmith Evaluation + Prompts SSOT

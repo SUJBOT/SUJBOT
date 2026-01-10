@@ -65,6 +65,9 @@ from backend.routes.admin import router as admin_router, set_admin_dependencies
 # Import PostgreSQL adapter for user/conversation storage
 from src.storage.postgres_adapter import PostgreSQLStorageAdapter
 
+# Import cost tracking validation
+from src.cost_tracker import validate_pricing_coverage
+
 # Import title generator service
 from backend.services.title_generator import title_generator
 
@@ -179,6 +182,29 @@ async def lifespan(app: FastAPI):
             raise RuntimeError("Multi-agent system initialization failed")
 
         logger.info("✓ Agent adapter initialized successfully")
+
+        # =====================================================================
+        # 5. Validate Pricing Coverage for Configured Models
+        # =====================================================================
+
+        try:
+            from src.config import get_config
+            config = get_config()
+            missing_pricing = validate_pricing_coverage(config)
+            if missing_pricing:
+                logger.warning("=" * 60)
+                logger.warning("⚠️  MISSING PRICING DATA")
+                logger.warning("Cost tracking will return $0.00 for these models:")
+                for model in missing_pricing:
+                    logger.warning(f"  - {model}")
+                logger.warning("")
+                logger.warning("Fix: Run 'uv run python scripts/fetch_deepinfra_pricing.py'")
+                logger.warning("Then update src/cost_tracker.py PRICING dict")
+                logger.warning("=" * 60)
+            else:
+                logger.info("✓ All configured models have pricing data")
+        except Exception as e:
+            logger.warning(f"Could not validate pricing coverage: {e}")
 
         logger.info("=" * 60)
         logger.info("🚀 SUJBOT Backend Ready")
