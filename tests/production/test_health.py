@@ -12,6 +12,8 @@ import pytest
 import httpx
 import subprocess
 
+from .conftest import run_docker_command, get_container_name
+
 
 class TestBackendHealth:
     """Test backend API health."""
@@ -45,22 +47,22 @@ class TestDatabaseHealth:
 
     def test_postgres_connection(self):
         """PostgreSQL is accessible via docker exec."""
-        result = subprocess.run(
-            ["docker", "exec", "sujbot_postgres", "pg_isready", "-U", "postgres"],
-            capture_output=True,
+        container = get_container_name("sujbot_postgres")
+        result = run_docker_command(
+            ["docker", "exec", container, "pg_isready", "-U", "postgres"],
             timeout=10
         )
         assert result.returncode == 0, f"PostgreSQL not ready: {result.stderr.decode()}"
 
     def test_postgres_sujbot_db_exists(self):
         """sujbot database exists and has tables."""
-        result = subprocess.run(
+        container = get_container_name("sujbot_postgres")
+        result = run_docker_command(
             [
-                "docker", "exec", "sujbot_postgres",
+                "docker", "exec", container,
                 "psql", "-U", "postgres", "-d", "sujbot",
                 "-c", "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'vectors';"
             ],
-            capture_output=True,
             timeout=10
         )
         assert result.returncode == 0, f"Cannot query sujbot DB: {result.stderr.decode()}"
@@ -70,13 +72,13 @@ class TestDatabaseHealth:
 
     def test_redis_connection(self):
         """Redis is accessible and responding."""
-        result = subprocess.run(
-            ["docker", "exec", "sujbot_redis", "redis-cli", "ping"],
-            capture_output=True,
+        container = get_container_name("sujbot_redis")
+        result = run_docker_command(
+            ["docker", "exec", container, "redis-cli", "ping"],
             timeout=10
         )
-        assert result.returncode == 0
-        assert b"PONG" in result.stdout
+        assert result.returncode == 0, f"Redis not responding: {result.stderr.decode()}"
+        assert b"PONG" in result.stdout, f"Expected PONG, got: {result.stdout.decode()}"
 
 
 class TestContainerHealth:
@@ -85,11 +87,12 @@ class TestContainerHealth:
     @pytest.fixture
     def running_containers(self) -> list:
         """Get list of running container names."""
-        result = subprocess.run(
+        result = run_docker_command(
             ["docker", "ps", "--format", "{{.Names}}"],
-            capture_output=True,
             timeout=10
         )
+        if result.returncode != 0:
+            pytest.fail(f"Cannot list containers: {result.stderr.decode()}")
         return result.stdout.decode().strip().split("\n")
 
     @pytest.mark.parametrize("container", [
@@ -106,25 +109,16 @@ class TestContainerHealth:
 
     def test_backend_container_healthy(self):
         """Backend container responds to health check."""
-        result = subprocess.run(
+        container = get_container_name("sujbot_backend")
+        result = run_docker_command(
             [
-                "docker", "exec", "sujbot_backend",
+                "docker", "exec", container,
                 "curl", "-sf", "http://localhost:8000/health"
             ],
-            capture_output=True,
             timeout=15
         )
-        # Try dev container if prod fails
-        if result.returncode != 0:
-            result = subprocess.run(
-                [
-                    "docker", "exec", "sujbot_dev_backend",
-                    "curl", "-sf", "http://localhost:8000/health"
-                ],
-                capture_output=True,
-                timeout=15
-            )
-        assert result.returncode == 0, "Backend health check failed inside container"
+        assert result.returncode == 0, \
+            f"Backend health check failed inside container: {result.stderr.decode()}"
 
 
 class TestNetworkHealth:
@@ -132,51 +126,27 @@ class TestNetworkHealth:
 
     def test_backend_can_reach_postgres(self):
         """Backend can connect to PostgreSQL."""
-        # This is implicitly tested by /health if it queries DB
-        # But we can also check explicitly
-        result = subprocess.run(
+        container = get_container_name("sujbot_backend")
+        result = run_docker_command(
             [
-                "docker", "exec", "sujbot_backend",
+                "docker", "exec", container,
                 "python", "-c",
                 "import asyncpg; import asyncio; "
                 "asyncio.run(asyncpg.connect('postgresql://postgres:postgres@postgres:5432/sujbot'))"
             ],
-            capture_output=True,
             timeout=15
         )
-        if result.returncode != 0:
-            # Try dev container
-            result = subprocess.run(
-                [
-                    "docker", "exec", "sujbot_dev_backend",
-                    "python", "-c",
-                    "import asyncpg; import asyncio; "
-                    "asyncio.run(asyncpg.connect('postgresql://postgres:postgres@postgres:5432/sujbot'))"
-                ],
-                capture_output=True,
-                timeout=15
-            )
         assert result.returncode == 0, f"Backend cannot reach PostgreSQL: {result.stderr.decode()}"
 
     def test_backend_can_reach_redis(self):
         """Backend can connect to Redis."""
-        result = subprocess.run(
+        container = get_container_name("sujbot_backend")
+        result = run_docker_command(
             [
-                "docker", "exec", "sujbot_backend",
+                "docker", "exec", container,
                 "python", "-c",
                 "import redis; r = redis.Redis(host='redis', port=6379); r.ping()"
             ],
-            capture_output=True,
             timeout=10
         )
-        if result.returncode != 0:
-            result = subprocess.run(
-                [
-                    "docker", "exec", "sujbot_dev_backend",
-                    "python", "-c",
-                    "import redis; r = redis.Redis(host='redis', port=6379); r.ping()"
-                ],
-                capture_output=True,
-                timeout=10
-            )
         assert result.returncode == 0, f"Backend cannot reach Redis: {result.stderr.decode()}"

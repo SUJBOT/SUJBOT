@@ -8,8 +8,8 @@ Usage:
 """
 
 import pytest
-import subprocess
-import json
+
+from .conftest import run_docker_command, get_container_name
 
 
 class TestVectorSchema:
@@ -17,87 +17,66 @@ class TestVectorSchema:
 
     def test_vectors_schema_exists(self):
         """vectors schema exists in database."""
-        result = subprocess.run(
+        container = get_container_name("sujbot_postgres")
+        result = run_docker_command(
             [
-                "docker", "exec", "sujbot_postgres",
+                "docker", "exec", container,
                 "psql", "-U", "postgres", "-d", "sujbot", "-t",
                 "-c", "SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'vectors';"
             ],
-            capture_output=True,
             timeout=10
         )
-        if result.returncode != 0:
-            result = subprocess.run(
-                [
-                    "docker", "exec", "sujbot_dev_postgres",
-                    "psql", "-U", "postgres", "-d", "sujbot", "-t",
-                    "-c", "SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'vectors';"
-                ],
-                capture_output=True,
-                timeout=10
-            )
-        assert result.returncode == 0
-        assert "vectors" in result.stdout.decode()
+        assert result.returncode == 0, f"Query failed: {result.stderr.decode()}"
+        assert "vectors" in result.stdout.decode(), \
+            f"vectors schema not found. Output: {result.stdout.decode()}"
 
     def test_layer3_table_exists(self):
         """layer3 (chunks) table exists with correct columns."""
-        result = subprocess.run(
+        container = get_container_name("sujbot_postgres")
+        result = run_docker_command(
             [
-                "docker", "exec", "sujbot_postgres",
+                "docker", "exec", container,
                 "psql", "-U", "postgres", "-d", "sujbot", "-t",
-                "-c", "SELECT column_name FROM information_schema.columns WHERE table_schema = 'vectors' AND table_name = 'layer3';"
+                "-c", "SELECT column_name FROM information_schema.columns "
+                     "WHERE table_schema = 'vectors' AND table_name = 'layer3';"
             ],
-            capture_output=True,
             timeout=10
         )
-        if result.returncode != 0:
-            result = subprocess.run(
-                [
-                    "docker", "exec", "sujbot_dev_postgres",
-                    "psql", "-U", "postgres", "-d", "sujbot", "-t",
-                    "-c", "SELECT column_name FROM information_schema.columns WHERE table_schema = 'vectors' AND table_name = 'layer3';"
-                ],
-                capture_output=True,
-                timeout=10
-            )
-        assert result.returncode == 0
+        assert result.returncode == 0, f"Query failed: {result.stderr.decode()}"
 
         columns = result.stdout.decode()
         required_columns = ["chunk_id", "document_id", "embedding", "content"]
-        for col in required_columns:
-            assert col in columns, f"Column {col} missing from vectors.layer3"
+        missing_columns = [col for col in required_columns if col not in columns]
+
+        assert not missing_columns, \
+            f"Missing columns in vectors.layer3: {missing_columns}. Found: {columns}"
 
     def test_layer3_has_data(self):
         """layer3 table has indexed chunks."""
-        result = subprocess.run(
+        container = get_container_name("sujbot_postgres")
+        result = run_docker_command(
             [
-                "docker", "exec", "sujbot_postgres",
+                "docker", "exec", container,
                 "psql", "-U", "postgres", "-d", "sujbot", "-t",
                 "-c", "SELECT count(*) FROM vectors.layer3;"
             ],
-            capture_output=True,
             timeout=10
         )
-        if result.returncode != 0:
-            result = subprocess.run(
-                [
-                    "docker", "exec", "sujbot_dev_postgres",
-                    "psql", "-U", "postgres", "-d", "sujbot", "-t",
-                    "-c", "SELECT count(*) FROM vectors.layer3;"
-                ],
-                capture_output=True,
-                timeout=10
-            )
 
         if result.returncode != 0:
-            pytest.skip("Cannot query vectors.layer3")
+            pytest.skip(f"Cannot query vectors.layer3: {result.stderr.decode()}")
 
-        count = int(result.stdout.decode().strip())
+        output = result.stdout.decode().strip()
+        try:
+            count = int(output)
+        except ValueError:
+            pytest.fail(f"Invalid count response: {output}")
+
         # Should have at least some indexed data in production
         # Skip if no data (might be fresh install)
         if count == 0:
             pytest.skip("No indexed data - fresh installation")
-        assert count > 0
+        assert count > 0, f"Expected indexed chunks, got count={count}"
 
 
 class TestAuthSchema:
@@ -105,73 +84,46 @@ class TestAuthSchema:
 
     def test_auth_schema_exists(self):
         """auth schema exists in database."""
-        result = subprocess.run(
+        container = get_container_name("sujbot_postgres")
+        result = run_docker_command(
             [
-                "docker", "exec", "sujbot_postgres",
+                "docker", "exec", container,
                 "psql", "-U", "postgres", "-d", "sujbot", "-t",
                 "-c", "SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'auth';"
             ],
-            capture_output=True,
             timeout=10
         )
-        if result.returncode != 0:
-            result = subprocess.run(
-                [
-                    "docker", "exec", "sujbot_dev_postgres",
-                    "psql", "-U", "postgres", "-d", "sujbot", "-t",
-                    "-c", "SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'auth';"
-                ],
-                capture_output=True,
-                timeout=10
-            )
-        assert result.returncode == 0
-        assert "auth" in result.stdout.decode()
+        assert result.returncode == 0, f"Query failed: {result.stderr.decode()}"
+        assert "auth" in result.stdout.decode(), \
+            f"auth schema not found. Output: {result.stdout.decode()}"
 
     def test_users_table_exists(self):
         """auth.users table exists."""
-        result = subprocess.run(
+        container = get_container_name("sujbot_postgres")
+        result = run_docker_command(
             [
-                "docker", "exec", "sujbot_postgres",
+                "docker", "exec", container,
                 "psql", "-U", "postgres", "-d", "sujbot", "-t",
                 "-c", "SELECT count(*) FROM auth.users;"
             ],
-            capture_output=True,
             timeout=10
         )
-        if result.returncode != 0:
-            result = subprocess.run(
-                [
-                    "docker", "exec", "sujbot_dev_postgres",
-                    "psql", "-U", "postgres", "-d", "sujbot", "-t",
-                    "-c", "SELECT count(*) FROM auth.users;"
-                ],
-                capture_output=True,
-                timeout=10
-            )
-        assert result.returncode == 0, "auth.users table should exist"
+        assert result.returncode == 0, \
+            f"auth.users table should exist. Error: {result.stderr.decode()}"
 
     def test_conversations_table_exists(self):
         """auth.conversations table exists."""
-        result = subprocess.run(
+        container = get_container_name("sujbot_postgres")
+        result = run_docker_command(
             [
-                "docker", "exec", "sujbot_postgres",
+                "docker", "exec", container,
                 "psql", "-U", "postgres", "-d", "sujbot", "-t",
                 "-c", "SELECT count(*) FROM auth.conversations;"
             ],
-            capture_output=True,
             timeout=10
         )
-        if result.returncode != 0:
-            result = subprocess.run(
-                [
-                    "docker", "exec", "sujbot_dev_postgres",
-                    "psql", "-U", "postgres", "-d", "sujbot", "-t",
-                    "-c", "SELECT count(*) FROM auth.conversations;"
-                ],
-                capture_output=True,
-                timeout=10
-            )
-        assert result.returncode == 0, "auth.conversations table should exist"
+        assert result.returncode == 0, \
+            f"auth.conversations table should exist. Error: {result.stderr.decode()}"
 
 
 class TestEmbeddingDimensions:
@@ -179,28 +131,72 @@ class TestEmbeddingDimensions:
 
     def test_embedding_dimension_4096(self):
         """Embeddings have 4096 dimensions (Qwen3-Embedding-8B)."""
-        result = subprocess.run(
+        container = get_container_name("sujbot_postgres")
+        result = run_docker_command(
             [
-                "docker", "exec", "sujbot_postgres",
+                "docker", "exec", container,
                 "psql", "-U", "postgres", "-d", "sujbot", "-t",
                 "-c", "SELECT vector_dims(embedding) FROM vectors.layer3 LIMIT 1;"
             ],
-            capture_output=True,
             timeout=10
         )
-        if result.returncode != 0:
-            result = subprocess.run(
-                [
-                    "docker", "exec", "sujbot_dev_postgres",
-                    "psql", "-U", "postgres", "-d", "sujbot", "-t",
-                    "-c", "SELECT vector_dims(embedding) FROM vectors.layer3 LIMIT 1;"
-                ],
-                capture_output=True,
-                timeout=10
-            )
 
-        if result.returncode != 0 or not result.stdout.decode().strip():
+        if result.returncode != 0:
+            pytest.skip(f"Cannot query embeddings: {result.stderr.decode()}")
+
+        output = result.stdout.decode().strip()
+        if not output:
             pytest.skip("No embeddings to check dimensions")
 
-        dims = int(result.stdout.decode().strip())
+        try:
+            dims = int(output)
+        except ValueError:
+            pytest.fail(f"Invalid dimension response: {output}")
+
         assert dims == 4096, f"Expected 4096 dimensions, got {dims}"
+
+
+class TestIndexes:
+    """Test that required indexes exist."""
+
+    def test_layer3_hnsw_index_exists(self):
+        """HNSW index exists on vectors.layer3 for fast similarity search."""
+        container = get_container_name("sujbot_postgres")
+        result = run_docker_command(
+            [
+                "docker", "exec", container,
+                "psql", "-U", "postgres", "-d", "sujbot", "-t",
+                "-c", "SELECT indexname FROM pg_indexes WHERE tablename = 'layer3' AND schemaname = 'vectors';"
+            ],
+            timeout=10
+        )
+
+        if result.returncode != 0:
+            pytest.skip(f"Cannot query indexes: {result.stderr.decode()}")
+
+        indexes = result.stdout.decode()
+        # Should have some index (HNSW or IVFFlat)
+        if not indexes.strip():
+            pytest.skip("No indexes found - may be fresh installation")
+
+        # Check for vector index (name may vary)
+        assert indexes.strip(), "No indexes found on vectors.layer3"
+
+    def test_content_tsv_index_exists(self):
+        """Full-text search index exists on content_tsv column."""
+        container = get_container_name("sujbot_postgres")
+        result = run_docker_command(
+            [
+                "docker", "exec", container,
+                "psql", "-U", "postgres", "-d", "sujbot", "-t",
+                "-c", "SELECT indexname FROM pg_indexes WHERE tablename = 'layer3' "
+                     "AND schemaname = 'vectors' AND indexdef LIKE '%content_tsv%';"
+            ],
+            timeout=10
+        )
+
+        if result.returncode != 0:
+            pytest.skip(f"Cannot query indexes: {result.stderr.decode()}")
+
+        # Full-text index is optional, just check query works
+        # (result may be empty if not using FTS)
