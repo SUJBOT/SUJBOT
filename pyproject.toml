@@ -15,7 +15,6 @@ dependencies = [
     # Unstructured.io - Multi-format document extraction (PDF, DOCX, PPTX, HTML, TXT, LaTeX)
     "unstructured[all-docs]>=0.10.0",  # All format support (including detectron2 for PDF)
     "pdf2image>=1.17.0",
-
     # IBM Docling - Advanced document structure extraction
     "docling>=2.57.0",
     "docling-core>=2.48.0",
@@ -88,6 +87,10 @@ dependencies = [
     "json-repair>=0.54.1",
     "pyvis>=0.3.2",
     "langchain-anthropic>=1.0.4",
+    "textgrad>=0.1.8",
+    "zss>=1.2.0",
+    "rapidfuzz>=3.14.3",
+    "sacrebleu>=2.5.1",
 ]
 
 [project.optional-dependencies]
@@ -123,6 +126,13 @@ language-support = [
     "spacy>=3.7.0",  # Lemmatization + stop words (best quality)
     "langdetect>=1.0.9",  # Auto language detection
     "nltk>=3.8.0",  # Stop words fallback
+]
+
+# Extraction evaluation metrics
+eval = [
+    "zss>=1.2.0",  # Zhang-Shasha Tree Edit Distance
+    "rapidfuzz>=3.0.0",  # Fast fuzzy string matching
+    "sacrebleu>=2.0.0",  # BLEU score calculation
 ]
 
 # All optional features
