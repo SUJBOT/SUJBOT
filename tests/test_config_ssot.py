@@ -34,7 +34,6 @@ class TestConfigSchema:
         assert "model_registry" in config_data
         assert "llm_models" in config_data["model_registry"]
         assert "embedding_models" in config_data["model_registry"]
-        assert "embedding_dimensions" in config_data["model_registry"]
 
     def test_defaults_section_exists(self, config_data):
         """Verify defaults section exists in config.json."""
@@ -59,15 +58,20 @@ class TestConfigSchema:
 
     def test_embedding_dimensions_qwen3(self, config_data):
         """Verify Qwen3-Embedding-8B has 4096 dimensions (NOT 3072)."""
-        dims = config_data["model_registry"]["embedding_dimensions"]
-        assert dims["Qwen/Qwen3-Embedding-8B"] == 4096
-        # OpenAI is 3072 - but we should NOT be using it as default
-        assert dims.get("text-embedding-3-large") == 3072
+        embedding_models = config_data["model_registry"]["embedding_models"]
+        # Dimensions are now inside each model definition
+        qwen_model = embedding_models.get("qwen3-embedding", {})
+        assert qwen_model.get("dimensions") == 4096
+        # OpenAI is 3072
+        openai_model = embedding_models.get("text-embedding-3-large", {})
+        assert openai_model.get("dimensions") == 3072
 
-    def test_default_embedding_model(self, config_data):
-        """Verify default embedding model is Qwen3 (not OpenAI)."""
-        default = config_data["model_registry"]["embedding_models"]["default"]
-        assert default == "BAAI/bge-m3"  # Or Qwen3 if configured
+    def test_embedding_models_have_dimensions(self, config_data):
+        """Verify all embedding models have dimensions defined."""
+        embedding_models = config_data["model_registry"]["embedding_models"]
+        for model_name, model_config in embedding_models.items():
+            assert "dimensions" in model_config, f"Missing dimensions for {model_name}"
+            assert model_config["dimensions"] > 0, f"Invalid dimensions for {model_name}"
 
     def test_variant_models_are_valid(self, config_data):
         """Verify all variant models reference real model IDs."""

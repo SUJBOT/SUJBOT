@@ -172,7 +172,9 @@ class TestEpisodeHydration:
             mock_episodic_node.get_by_uuids = AsyncMock(return_value=[mock_episode])
 
             await mock_graphiti_search_tool._append_episodes(
-                search_result_with_episodes, episode_limit=10
+                mock_graphiti_search_tool._graphiti,
+                search_result_with_episodes,
+                episode_limit=10,
             )
 
             # Check get_by_uuids was called with unique IDs
@@ -200,7 +202,9 @@ class TestEpisodeHydration:
         with patch("graphiti_core.nodes.EpisodicNode") as mock_episodic_node:
             mock_episodic_node.get_by_uuids = AsyncMock(return_value=[])
 
-            await mock_graphiti_search_tool._append_episodes(result, episode_limit=5)
+            await mock_graphiti_search_tool._append_episodes(
+                mock_graphiti_search_tool._graphiti, result, episode_limit=5
+            )
 
             call_args = mock_episodic_node.get_by_uuids.call_args
             episode_ids = call_args[0][1]
@@ -227,7 +231,9 @@ class TestEpisodeHydration:
             mock_episodic_node.get_by_uuids = AsyncMock(return_value=[])
 
             # Should not call get_by_uuids when no episode IDs
-            await mock_graphiti_search_tool._append_episodes(result, episode_limit=10)
+            await mock_graphiti_search_tool._append_episodes(
+                mock_graphiti_search_tool._graphiti, result, episode_limit=10
+            )
 
             mock_episodic_node.get_by_uuids.assert_not_called()
 
@@ -243,7 +249,9 @@ class TestEpisodeHydration:
 
             # Should not raise, just log warning
             await mock_graphiti_search_tool._append_episodes(
-                search_result_with_episodes, episode_limit=10
+                mock_graphiti_search_tool._graphiti,
+                search_result_with_episodes,
+                episode_limit=10,
             )
 
             # Episodes should remain empty (not crash)
@@ -272,7 +280,9 @@ class TestEpisodeHydration:
         with patch("graphiti_core.nodes.EpisodicNode") as mock_episodic_node:
             mock_episodic_node.get_by_uuids = AsyncMock(return_value=[mock_episode])
 
-            await mock_graphiti_search_tool._append_episodes(result, episode_limit=10)
+            await mock_graphiti_search_tool._append_episodes(
+                mock_graphiti_search_tool._graphiti, result, episode_limit=10
+            )
 
             assert len(result.episodes) == 1
             ep = result.episodes[0]

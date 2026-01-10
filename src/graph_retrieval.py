@@ -283,6 +283,8 @@ class GraphBooster:
 
             if not chunk_entities:
                 chunk["centrality_boost"] = 0.0
+                base_score = chunk.get("boosted_score", chunk.get("rrf_score", chunk.get("score", 0.0)))
+                chunk["boosted_score"] = base_score
                 continue
 
             # Get max centrality of entities in this chunk

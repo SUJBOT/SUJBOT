@@ -17,6 +17,8 @@ Based on research:
 import sys
 from pathlib import Path
 
+import pytest
+
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "src"))
 
@@ -24,6 +26,7 @@ from indexing_pipeline import IndexingPipeline, IndexingConfig
 from config import ExtractionConfig, SummarizationConfig, ChunkingConfig, EmbeddingConfig
 
 
+@pytest.mark.skip(reason="Integration test - requires actual PDF files and models")
 def test_single_document():
     """Test PHASE 4 on a single document."""
 

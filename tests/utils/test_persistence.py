@@ -224,7 +224,7 @@ class TestVectorStoreLoader:
 
     def test_missing_files_raises_error(self, tmp_path):
         """Test error when no valid format found."""
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises(ValueError, match="Cannot determine vector store format"):
             VectorStoreLoader.detect_format(tmp_path)
 
     def test_detect_format_with_path_string(self, tmp_path):
