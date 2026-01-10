@@ -66,6 +66,12 @@ uv run pytest tests/test_phase4_indexing.py -v             # Single file
 uv run pytest tests/agent/test_tool_registry.py::test_name -v  # Single test
 uv run pytest tests/ --cov=src --cov-report=html           # With coverage
 
+# Production tests (requires running Docker stack)
+PROD_BASE_URL="http://localhost:8200" \
+PROD_TEST_USER="prodtest@example.com" \
+PROD_TEST_PASSWORD="ProdTest123!" \
+uv run pytest tests/production/ -v
+
 # Linting & Type Checking
 uv run black src/ tests/ --line-length 100                 # Format code
 uv run isort src/ tests/ --profile black                   # Sort imports
@@ -398,6 +404,17 @@ prompt = (prompts_dir / "document_summary.txt").read_text()
 - Graceful degradation (e.g., reranker unavailable → fall back)
 - TDD: Write tests BEFORE implementing features
 - Narrow exception catches - catch specific exceptions, not bare `Exception`
+
+### Post-Implementation Code Review
+
+**IMPORTANT:** After completing any implementation, ALWAYS run the Code Simplifier agent to review and refactor the code.
+
+```
+# Use the code-simplifier agent after implementation
+Task tool → subagent_type: "code-simplifier:code-simplifier"
+```
+
+**Why:** Ensures code clarity, consistency, and maintainability. Catches over-engineering, redundant code, and opportunities for simplification while the implementation is fresh.
 
 ### Error Handling
 
