@@ -40,6 +40,33 @@ __all__ = [
 ]
 
 
+def _validate_postgresql_backend(**kwargs) -> tuple:
+    """
+    Validate PostgreSQL backend configuration.
+
+    Returns:
+        Tuple of (connection_string, pool_size, dimensions)
+
+    Raises:
+        ImportError: If asyncpg not installed
+        ValueError: If connection_string missing
+    """
+    if not POSTGRES_AVAILABLE:
+        raise ImportError(
+            "PostgreSQL backend requires 'asyncpg' package. "
+            "Install with: pip install asyncpg"
+        )
+
+    connection_string = kwargs.get("connection_string") or kwargs.get("path")
+    if not connection_string:
+        raise ValueError("PostgreSQL backend requires 'connection_string' argument")
+
+    pool_size = kwargs.get("pool_size", 20)
+    dimensions = kwargs.get("dimensions", 4096)  # Qwen3-Embedding-8B
+
+    return connection_string, pool_size, dimensions
+
+
 def create_vector_store_adapter(backend: str = "postgresql", **kwargs) -> VectorStoreAdapter:
     """
     Factory function to create vector store adapter.
@@ -65,30 +92,15 @@ def create_vector_store_adapter(backend: str = "postgresql", **kwargs) -> Vector
         ...     pool_size=20
         ... )
     """
-    if backend == "postgresql":
-        if not POSTGRES_AVAILABLE:
-            raise ImportError(
-                "PostgreSQL backend requires 'asyncpg' package. "
-                "Install with: pip install asyncpg"
-            )
+    if backend != "postgresql":
+        raise ValueError(f"Unknown backend: {backend}. Only 'postgresql' is supported.")
 
-        connection_string = kwargs.get("connection_string")
-        if not connection_string:
-            raise ValueError("PostgreSQL backend requires 'connection_string' argument")
-
-        pool_size = kwargs.get("pool_size", 20)
-        dimensions = kwargs.get("dimensions", 4096)  # Qwen3-Embedding-8B
-
-        return PostgresVectorStoreAdapter(
-            connection_string=connection_string,
-            pool_size=pool_size,
-            dimensions=dimensions,
-        )
-
-    else:
-        raise ValueError(
-            f"Unknown backend: {backend}. Only 'postgresql' is supported."
-        )
+    connection_string, pool_size, dimensions = _validate_postgresql_backend(**kwargs)
+    return PostgresVectorStoreAdapter(
+        connection_string=connection_string,
+        pool_size=pool_size,
+        dimensions=dimensions,
+    )
 
 
 async def load_vector_store_adapter(backend: str = "postgresql", path: str = None, **kwargs) -> VectorStoreAdapter:
@@ -112,27 +124,18 @@ async def load_vector_store_adapter(backend: str = "postgresql", path: str = Non
         ...     connection_string="postgresql://..."
         ... )
     """
-    if backend == "postgresql":
-        if not POSTGRES_AVAILABLE:
-            raise ImportError(
-                "PostgreSQL backend requires 'asyncpg' package. "
-                "Install with: pip install asyncpg"
-            )
-
-        connection_string = kwargs.get("connection_string", path)
-        if not connection_string:
-            raise ValueError("PostgreSQL backend requires 'connection_string' argument")
-
-        pool_size = kwargs.get("pool_size", 20)
-        dimensions = kwargs.get("dimensions", 4096)  # Qwen3-Embedding-8B
-
-        adapter = PostgresVectorStoreAdapter(
-            connection_string=connection_string,
-            pool_size=pool_size,
-            dimensions=dimensions,
-        )
-        await adapter.initialize()
-        return adapter
-
-    else:
+    if backend != "postgresql":
         raise ValueError(f"Unknown backend: {backend}. Only 'postgresql' is supported.")
+
+    # Allow path as fallback for connection_string (interface compatibility)
+    if path and "connection_string" not in kwargs:
+        kwargs["connection_string"] = path
+
+    connection_string, pool_size, dimensions = _validate_postgresql_backend(**kwargs)
+    adapter = PostgresVectorStoreAdapter(
+        connection_string=connection_string,
+        pool_size=pool_size,
+        dimensions=dimensions,
+    )
+    await adapter.initialize()
+    return adapter

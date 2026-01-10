@@ -20,9 +20,9 @@ Usage:
     await queries.update_last_login(user_id)
 """
 
-from typing import Optional, Dict, List
-from datetime import datetime, timezone
+from typing import Dict, List, Optional
 import logging
+
 import asyncpg
 
 logger = logging.getLogger(__name__)

@@ -13,8 +13,8 @@ Usage:
         return {"user_id": user["id"], "email": user["email"]}
 """
 
-from typing import Optional, Dict, Callable
-from fastapi import Request, HTTPException, status, Depends
+from typing import Dict, Optional
+from fastapi import Request, HTTPException, status
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 import logging
@@ -58,7 +58,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         self.auth_manager = auth_manager
         self.auth_queries = auth_queries
 
-    async def dispatch(self, request: Request, call_next: Callable):
+    async def dispatch(self, request: Request, call_next):
         """
         Process request and validate authentication.
 

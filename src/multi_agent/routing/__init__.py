@@ -1,12 +1,13 @@
 """Routing system for multi-agent framework.
 
 This package handles:
-- Query complexity analysis
 - Agent sequence determination
 - LangGraph workflow construction
+
+Note: ComplexityAnalyzer was removed (deprecated 2024-11-28).
+Complexity scoring is now handled by orchestrator's unified LLM analysis.
 """
 
-from .complexity_analyzer import ComplexityAnalyzer
 from .workflow_builder import WorkflowBuilder
 
-__all__ = ["ComplexityAnalyzer", "WorkflowBuilder"]
+__all__ = ["WorkflowBuilder"]

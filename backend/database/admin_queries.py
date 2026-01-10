@@ -20,10 +20,10 @@ Usage:
         raise HTTPException(400, "Cannot demote the last admin")
 """
 
-from typing import Optional, Dict, List, NoReturn
-from datetime import datetime, timezone
-import logging
+from typing import Dict, List, NoReturn, Optional
 import json
+import logging
+
 import asyncpg
 
 from src.exceptions import DatabaseConnectionError, StorageError

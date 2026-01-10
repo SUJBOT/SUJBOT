@@ -18,13 +18,13 @@ Usage:
     )
 """
 
-from typing import Dict, Tuple, Optional
+from datetime import datetime, timedelta
+from typing import Dict, Tuple
+import logging
+
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
-from datetime import datetime, timedelta
-import asyncio
-import logging
 
 logger = logging.getLogger(__name__)
 

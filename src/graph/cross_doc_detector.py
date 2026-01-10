@@ -14,9 +14,9 @@ Supported cross-document relationship types:
 
 import logging
 import re
-from typing import List, Dict, Set, Optional, Tuple
-from datetime import datetime
 from collections import defaultdict
+from datetime import datetime
+from typing import Dict, List, Optional, Set
 
 from .models import Entity, Relationship, KnowledgeGraph, EntityType, RelationshipType
 

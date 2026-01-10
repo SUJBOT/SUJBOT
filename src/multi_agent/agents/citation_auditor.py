@@ -10,9 +10,7 @@ Responsibilities:
 """
 
 import logging
-import re
-from typing import Any, Dict, List
-
+from typing import Any, Dict
 
 from ..core.agent_base import BaseAgent
 from ..core.agent_initializer import initialize_agent
@@ -104,5 +102,3 @@ class CitationAuditorAgent(BaseAgent):
             state["errors"] = state.get("errors", [])
             state["errors"].append(f"citation auditor error: {str(e)}")
             return state
-
-    # Old hardcoded methods removed - autonomous pattern handles everything via LLM

@@ -27,7 +27,7 @@ from typing import Optional, Dict, List, Tuple
 import jwt
 import re
 from argon2 import PasswordHasher, Type
-from argon2.exceptions import VerifyMismatchError, VerificationError, InvalidHashError
+from argon2.exceptions import InvalidHashError
 from pydantic import BaseModel
 
 

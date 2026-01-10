@@ -9,8 +9,7 @@ Responsibilities:
 """
 
 import logging
-from typing import Any, Dict, List
-
+from typing import Any, Dict
 
 from ..core.agent_base import BaseAgent
 from ..core.agent_initializer import initialize_agent
@@ -102,5 +101,3 @@ class RiskVerifierAgent(BaseAgent):
             state["errors"] = state.get("errors", [])
             state["errors"].append(f"Risk verification error: {str(e)}")
             return state
-
-    # Old hardcoded methods removed - autonomous pattern handles everything via LLM

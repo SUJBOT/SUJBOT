@@ -11,7 +11,6 @@ Responsibilities:
 import logging
 from typing import Any, Dict
 
-
 from ..core.agent_base import BaseAgent
 from ..core.agent_initializer import initialize_agent
 from ..core.agent_registry import register_agent
@@ -102,5 +101,3 @@ class ClassifierAgent(BaseAgent):
             state["errors"] = state.get("errors", [])
             state["errors"].append(f"classifier error: {str(e)}")
             return state
-
-    # Old hardcoded methods removed - autonomous pattern handles everything via LLM

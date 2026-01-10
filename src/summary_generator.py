@@ -17,9 +17,9 @@ Prompts are loaded from prompts/ directory as I/O.
 
 import logging
 import os
-from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from typing import Optional
 
 # Import centralized configuration
 try:

@@ -6,12 +6,12 @@ Auto-extracted and cleaned from tier2_advanced.py
 
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Literal
+from typing import List, Optional
 from pydantic import Field
 
 from ._base import BaseTool, ToolInput, ToolResult
 from ._registry import register_tool
-from ._utils import format_chunk_result, generate_citation, validate_k_parameter
+from ._utils import format_chunk_result
 
 logger = logging.getLogger(__name__)
 
@@ -244,43 +244,4 @@ class BrowseEntitiesTool(BaseTool):
                     "min_confidence": min_confidence,
                 },
             )
-
-
-# ----------------------------------------------------------------------------
-# Cluster Search Tool
-# ----------------------------------------------------------------------------
-
-
-class ClusterSearchInput(ToolInput):
-    """Input for cluster_search tool."""
-
-    query: str = Field(
-        ...,
-        description="Search query to find relevant chunks",
-    )
-
-    cluster_ids: Optional[List[int]] = Field(
-        None,
-        description=(
-            "Filter to specific cluster IDs (optional). "
-            "If None, searches all clusters. "
-            "Use get_stats tool first to see available clusters."
-        ),
-    )
-
-    diversity_mode: bool = Field(
-        False,
-        description=(
-            "Enable diversity mode: return max 1 result per cluster. "
-            "Useful to avoid redundant results from the same topic."
-        ),
-    )
-
-    k: int = Field(
-        10,
-        description="Maximum number of results to return",
-        ge=1,
-        le=50,
-    )
-
 

@@ -28,8 +28,8 @@ Requirements:
     - Documents in eval.json must be indexed in PostgreSQL
 """
 
-import asyncio
 import argparse
+import asyncio
 import json
 import logging
 import os
@@ -37,7 +37,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import anthropic
 import numpy as np
@@ -173,6 +173,7 @@ Odpověz POUZE validním JSON objektem v tomto formátu:
 
 class EvaluationResult(BaseModel):
     """Pydantic model for LLM-as-judge structured output."""
+
     rationale: str = Field(description="Stručné zdůvodnění hodnocení v 1-2 větách")
     score: int = Field(description="Binární skóre: 0 = neuspokojivé, 1 = uspokojivé")
 
@@ -198,7 +199,6 @@ def create_structured_evaluator(
     """
     client = anthropic.Anthropic()
 
-    # Define the evaluation tool schema
     evaluation_tool = {
         "name": "submit_evaluation",
         "description": "Submit the evaluation result with rationale and binary score",
@@ -219,7 +219,7 @@ def create_structured_evaluator(
         },
     }
 
-    def evaluator(inputs: Dict, outputs: Dict, reference_outputs: Dict) -> Dict:
+    def evaluator(inputs: dict, outputs: dict, reference_outputs: dict) -> dict:
         """Evaluate using Anthropic tool use for structured output."""
         logger.debug(f"[EVALUATOR] Running evaluator for key={feedback_key}")
         logger.debug(f"[EVALUATOR] {feedback_key}: inputs type={type(inputs)}, outputs type={type(outputs)}")
@@ -285,7 +285,7 @@ def create_structured_evaluator(
 class MultiAgentEvaluator:
     """Wrapper for MultiAgentRunner that runs queries and returns answers."""
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         self.config = config
         self.runner = None
         self._initialized = False
@@ -302,7 +302,7 @@ class MultiAgentEvaluator:
         self._initialized = True
         logger.info("MultiAgentRunner initialized successfully")
 
-    async def run_query(self, question: str) -> Dict[str, Any]:
+    async def run_query(self, question: str) -> dict[str, Any]:
         """Run a single query through the multi-agent system."""
         if not self._initialized:
             await self.initialize()
@@ -340,7 +340,7 @@ class MultiAgentEvaluator:
 # LangSmith Integration
 # =============================================================================
 
-def load_eval_dataset(dataset_path: Path) -> List[Dict[str, Any]]:
+def load_eval_dataset(dataset_path: Path) -> list[dict[str, Any]]:
     """Load evaluation dataset from JSON file."""
     with open(dataset_path) as f:
         data = json.load(f)
@@ -350,7 +350,7 @@ def load_eval_dataset(dataset_path: Path) -> List[Dict[str, Any]]:
 
 def upload_dataset_to_langsmith(
     client: Client,
-    eval_data: List[Dict[str, Any]],
+    eval_data: list[dict[str, Any]],
     dataset_name: str = "sujbot2-eval-qa",
     description: str = "Czech legal/nuclear QA evaluation pairs",
     replace: bool = False,
@@ -407,14 +407,13 @@ def upload_dataset_to_langsmith(
     return dataset.id
 
 
-def create_evaluators(judge_model: str = "anthropic:claude-sonnet-4-5") -> List[Any]:
+def create_evaluators(judge_model: str = "anthropic:claude-sonnet-4-5") -> list[Any]:
     """
     Create LLM-as-judge evaluators using Anthropic's tool use for structured outputs.
 
     Uses tool_choice with forced tool selection to guarantee JSON output with
     binary scores (0/1) and rationale-first pattern for better reasoning.
     """
-    # Extract model name from provider:model format (e.g., "anthropic:claude-sonnet-4-5")
     if ":" in judge_model:
         provider, model_name = judge_model.split(":", 1)
         if provider != "anthropic":
@@ -447,7 +446,7 @@ def create_evaluators(judge_model: str = "anthropic:claude-sonnet-4-5") -> List[
 
 def wrap_evaluator(evaluator):
     """Wrap evaluator function for LangSmith evaluate() signature compatibility."""
-    def wrapped(inputs: Dict, outputs: Dict, reference_outputs: Dict) -> Dict:
+    def wrapped(inputs: dict, outputs: dict, reference_outputs: dict) -> dict:
         return evaluator(
             inputs=inputs,
             outputs=outputs,
@@ -460,17 +459,16 @@ async def run_evaluation(
     client: Client,
     evaluator: MultiAgentEvaluator,
     dataset_name: str,
-    evaluators: List[Any],
-    eval_data: List[Dict[str, Any]],  # Original eval.json data for ordering
+    evaluators: list[Any],
+    eval_data: list[dict[str, Any]],
     experiment_prefix: str = "sujbot2-qa-eval",
-    max_concurrency: int = 1,  # Use 1 to avoid async/DB pool conflicts
-    limit: Optional[int] = None,
+    max_concurrency: int = 1,
+    limit: int | None = None,
 ):
     """Run evaluation using LangSmith async evaluate."""
     logger.info(f"Starting evaluation on dataset: {dataset_name}")
 
-    # Create async target function with response time tracking
-    async def async_target_function(inputs: Dict[str, Any]) -> Dict[str, Any]:
+    async def async_target_function(inputs: dict[str, Any]) -> dict[str, Any]:
         """Async target function for LangSmith aevaluate()."""
         start_time = time.time()
         try:
@@ -487,11 +485,6 @@ async def run_evaluation(
     # Wrap evaluators for LangSmith signature
     wrapped_evaluators = [wrap_evaluator(e) for e in evaluators]
 
-    # Use examples in ORDER from the original eval.json file
-    # LangSmith's list_examples() doesn't preserve upload order, so we:
-    # 1. Fetch all examples from LangSmith
-    # 2. Reorder them to match eval.json order
-    # 3. Take first N if limit is specified
     if limit:
         # Fetch all examples from LangSmith dataset
         all_examples = list(client.list_examples(dataset_name=dataset_name))
@@ -538,7 +531,7 @@ async def run_evaluation(
 # =============================================================================
 
 def generate_summary(
-    results_data: List[Dict[str, Any]],
+    results_data: list[dict[str, Any]],
     experiment_prefix: str,
     judge_model: str,
     output_dir: Path = PROJECT_ROOT / "evaluations",
@@ -604,8 +597,7 @@ def generate_summary(
             "cost_cents": outputs.get("cost_cents"),
         })
 
-    # Calculate statistics
-    def stats(arr: List[float]) -> Dict[str, float]:
+    def stats(arr: list[float]) -> dict[str, float]:
         if not arr:
             return {"mean": 0, "std": 0, "p50": 0, "p99": 0}
         arr_np = np.array(arr)
@@ -744,7 +736,7 @@ def generate_summary(
     return output_path
 
 
-async def collect_results(results) -> List[Dict[str, Any]]:
+async def collect_results(results) -> list[dict[str, Any]]:
     """
     Collect all results from async iterator and transform to summary format.
 

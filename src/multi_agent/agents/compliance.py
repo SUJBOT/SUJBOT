@@ -8,8 +8,9 @@ Responsibilities:
 4. Gap analysis for missing requirements
 """
 
+import json
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from ..core.agent_base import BaseAgent
 from ..core.agent_initializer import initialize_agent
@@ -174,5 +175,3 @@ class ComplianceAgent(BaseAgent):
             state["errors"] = state.get("errors", [])
             state["errors"].append(f"Compliance error: {str(e)}")
             return state
-
-    # Old hardcoded methods removed - autonomous pattern handles everything via LLM

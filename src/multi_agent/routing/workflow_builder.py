@@ -11,12 +11,12 @@ Builds executable workflow graphs with:
 import logging
 from typing import Any, Dict, List, Optional
 
-from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.graph import END, StateGraph
 
-from ..core.state import MultiAgentState, ExecutionPhase
 from ..core.agent_registry import AgentRegistry
 from ..core.event_bus import EventType
+from ..core.state import ExecutionPhase, MultiAgentState
 
 logger = logging.getLogger(__name__)
 

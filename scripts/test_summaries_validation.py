@@ -14,11 +14,10 @@ Usage:
     python scripts/test_summaries_validation.py --check-postgres
 """
 
+import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
-import argparse
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -51,7 +50,7 @@ def check_config() -> bool:
         return False
 
 
-def validate_phase2_summaries(output_dir: Path) -> Dict:
+def validate_phase2_summaries(output_dir: Path) -> dict:
     """Validuj phase2_summaries.json soubor"""
     print(f"\n" + "="*80)
     print(f"KROK 2: Validace {output_dir}/phase2_summaries.json")

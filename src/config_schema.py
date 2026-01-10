@@ -11,12 +11,13 @@ Migration from .env to config.json (2025-11-10):
 - Hierarchical JSON structure for better organization
 """
 
-from typing import Optional, List, Literal
-from pydantic import BaseModel, Field, field_validator, ValidationError, ConfigDict, model_validator
-from pathlib import Path
 import json
 import os
+from pathlib import Path
+from typing import List, Literal, Optional
+
 from dotenv import load_dotenv
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 
 class APIKeysConfig(BaseModel):

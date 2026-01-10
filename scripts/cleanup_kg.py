@@ -17,12 +17,12 @@ import os
 import sys
 from pathlib import Path
 
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from dotenv import load_dotenv
 from neo4j import GraphDatabase
-from neo4j.exceptions import ServiceUnavailable, AuthError, Neo4jError
+from neo4j.exceptions import AuthError, Neo4jError, ServiceUnavailable
+
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 load_dotenv()
 

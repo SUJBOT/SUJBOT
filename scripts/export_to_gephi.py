@@ -29,14 +29,12 @@ import argparse
 import csv
 import re
 import sys
-from datetime import datetime
 from pathlib import Path
-from typing import Any
+
+import networkx as nx
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
-
-import networkx as nx
 
 
 def sanitize_text(text: str | None) -> str:
@@ -48,15 +46,9 @@ def sanitize_text(text: str | None) -> str:
     return cleaned
 
 from src.graph.config import Neo4jConfig
-from src.graph.entity_display import (
-    ENTITY_CATEGORIES,
-    CATEGORY_COLORS_RGB,
-    get_entity_category,
-    get_category_rgb,
-)
+from src.graph.entity_display import CATEGORY_COLORS_RGB, ENTITY_CATEGORIES
 from src.graph.neo4j_manager import Neo4jManager
 
-# Alias for backwards compatibility
 CATEGORY_COLORS = CATEGORY_COLORS_RGB
 
 

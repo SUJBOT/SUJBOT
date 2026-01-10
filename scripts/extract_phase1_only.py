@@ -11,14 +11,14 @@ Usage:
     uv run python scripts/extract_phase1_only.py data/single.pdf    # Single document
 """
 
-import sys
+import argparse
 import json
 import logging
-import argparse
+import sys
 from pathlib import Path
 
-# Apply nest_asyncio early (required for some extraction backends)
 import nest_asyncio
+
 nest_asyncio.apply()
 
 # Setup logging
@@ -28,7 +28,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Import extraction pipeline
 from src.unified_extraction_pipeline import UnifiedDocumentPipeline
 from src.unstructured_extractor import ExtractionConfig
 

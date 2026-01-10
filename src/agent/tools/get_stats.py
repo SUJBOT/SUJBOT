@@ -5,12 +5,10 @@ Auto-extracted and cleaned from tier3_analysis.py
 """
 
 import logging
-from typing import Any, Dict, List, Optional
 from pydantic import Field
 
 from ._base import BaseTool, ToolInput, ToolResult
 from ._registry import register_tool
-from ._utils import format_chunk_result, generate_citation
 
 logger = logging.getLogger(__name__)
 

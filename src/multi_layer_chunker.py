@@ -19,10 +19,9 @@ Contextual Retrieval:
 """
 
 import logging
-from typing import List, Dict, Optional
 from dataclasses import dataclass
+from typing import Dict, List, Optional
 
-# Token-aware chunking (no Docling dependency)
 import tiktoken
 
 # HuggingFace tokenizer support for Qwen and other models

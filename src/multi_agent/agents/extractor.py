@@ -157,6 +157,3 @@ class ExtractorAgent(BaseAgent):
             state["errors"] = state.get("errors", [])
             state["errors"].append(f"Extraction error: {str(e)}")
             return state
-
-
-    # Old hardcoded methods removed - autonomous pattern handles everything via LLM

@@ -5,12 +5,12 @@ Auto-extracted and cleaned from tier2_advanced.py
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Literal
+from typing import Dict, List
 from pydantic import Field
 
 from ._base import BaseTool, ToolInput, ToolResult
 from ._registry import register_tool
-from ._utils import format_chunk_result, generate_citation, validate_k_parameter
+from ._utils import format_chunk_result
 
 logger = logging.getLogger(__name__)
 
@@ -126,8 +126,6 @@ class MultiDocSynthesizerTool(BaseTool):
                     chunks = results.get("layer3", [])
 
                     # Format chunks for consistency
-                    from ._utils import format_chunk_result
-
                     formatted_chunks = [format_chunk_result(c) for c in chunks]
 
                     document_chunks[doc_id] = formatted_chunks
@@ -260,28 +258,4 @@ class MultiDocSynthesizerTool(BaseTool):
         except Exception as e:
             logger.error(f"LLM synthesis failed: {e}")
             return f"Synthesis failed due to error: {str(e)}. Please review the retrieved chunks directly."
-
-
-# ============================================================================
-# Contextual Chunk Enricher Tool (NEW 2025-01) - Anthropic Contextual Retrieval
-# ============================================================================
-
-
-class ContextualChunkEnricherInput(ToolInput):
-    """Input for contextual_chunk_enricher tool."""
-
-    chunk_ids: List[str] = Field(
-        ...,
-        description="Chunk IDs to enrich with contextual information",
-        min_items=1,
-        max_items=50,
-    )
-    enrichment_mode: str = Field(
-        "auto",
-        description="Enrichment mode: 'auto' (detect best mode), 'document_summary', 'section_summary', 'both'",
-    )
-    include_metadata: bool = Field(
-        True, description="Include metadata (page numbers, section titles) in enriched output"
-    )
-
 
