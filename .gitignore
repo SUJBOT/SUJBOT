@@ -114,3 +114,7 @@ extraction_dataset/TODO.md
 TODO.md
 
 .env*
+
+# Backup archives
+backups/
+sujbot_backup_*.tar.gz

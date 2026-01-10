@@ -156,6 +156,15 @@ tar -czf "$ARCHIVE_NAME" -C "$PROJECT_DIR" "backup_$TIMESTAMP"
 # Cleanup
 rm -rf "$BACKUP_DIR"
 
+# Verify archive integrity
+echo -e "${YELLOW}Verifying archive integrity...${NC}"
+if tar -tzf "$ARCHIVE_NAME" > /dev/null 2>&1; then
+    echo -e "${GREEN}  Archive verification: OK${NC}"
+else
+    echo -e "${RED}  ERROR: Archive verification failed!${NC}"
+    exit 1
+fi
+
 # Summary
 ARCHIVE_SIZE=$(du -h "$PROJECT_DIR/$ARCHIVE_NAME" | cut -f1)
 echo ""

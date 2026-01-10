@@ -2,20 +2,45 @@
 # Auto-generated - customize as needed
 
 services:
+  neo4j:
+    container_name: sujbot_dev_neo4j
+    ports:
+      - "7475:7474"
+      - "7688:7687"
+
+  postgres:
+    container_name: sujbot_dev_postgres
+
+  redis:
+    container_name: sujbot_dev_redis
+    ports:
+      - "6380:6379"
+
   backend:
+    container_name: sujbot_dev_backend
     ports:
       - "8200:8000"
     environment:
       LANGSMITH_PROJECT_NAME: sujbot-michal
 
   frontend:
+    container_name: sujbot_dev_frontend
     ports:
       - "5175:5173"
 
   nginx:
-    ports:
-      - "8280:80"
+    container_name: sujbot_dev_nginx
 
   pgadmin:
+    container_name: sujbot_dev_pgadmin
     ports:
       - "5052:80"
+
+  certbot:
+    container_name: sujbot_dev_certbot
+
+# Use same network as production (containers distinguished by name)
+networks:
+  sujbot_net:
+    external: true
+    name: sujbot_sujbot_net
