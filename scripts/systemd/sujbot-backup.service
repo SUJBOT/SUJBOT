@@ -14,7 +14,8 @@ StandardError=journal
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/home/michal/SUJBOT/backups /home/michal/SUJBOT/logs
+# NOTE: Needs write access to entire project for temporary backup directory
+ReadWritePaths=/home/michal/SUJBOT
 
 [Install]
 WantedBy=multi-user.target

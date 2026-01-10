@@ -1,46 +1,77 @@
 # Docker Compose override for developer: michal
 # Auto-generated - customize as needed
+#
+# NOTE: This override requires production to be running first (for sujbot_sujbot_net network)
+# To start dev without prod: docker network create sujbot_sujbot_net
+#
+# WARNING: Dev and prod share the same Docker volumes by default.
+# Running both simultaneously may cause data corruption!
+# For isolated dev volumes, uncomment the volumes section at the bottom.
 
 services:
   neo4j:
     container_name: sujbot_dev_neo4j
     ports:
-      - "7475:7474"
-      - "7688:7687"
+      - "7475:7474"   # Browser (prod: 7474)
+      - "7688:7687"   # Bolt (prod: 7687)
 
   postgres:
     container_name: sujbot_dev_postgres
+    ports:
+      - "5433:5432"   # For pgAdmin/DBeaver access (prod: 5432)
 
   redis:
     container_name: sujbot_dev_redis
     ports:
-      - "6380:6379"
+      - "6380:6379"   # Redis CLI access (prod: 6379)
 
   backend:
     container_name: sujbot_dev_backend
     ports:
-      - "8200:8000"
+      - "8200:8000"   # API (prod: 8000)
     environment:
       LANGSMITH_PROJECT_NAME: sujbot-michal
+      LOG_LEVEL: DEBUG
 
   frontend:
     container_name: sujbot_dev_frontend
     ports:
-      - "5175:5173"
+      - "5175:5173"   # Vite dev server (prod: 80)
 
   nginx:
     container_name: sujbot_dev_nginx
+    ports:
+      - "8280:80"     # HTTP (prod: 80)
+      - "8443:443"    # HTTPS (prod: 443)
 
   pgadmin:
     container_name: sujbot_dev_pgadmin
     ports:
-      - "5052:80"
+      - "5052:80"     # pgAdmin UI (prod: 5050)
 
   certbot:
     container_name: sujbot_dev_certbot
 
 # Use same network as production (containers distinguished by name)
+# Pre-requisite: production must be running OR run: docker network create sujbot_sujbot_net
 networks:
   sujbot_net:
     external: true
     name: sujbot_sujbot_net
+
+# Uncomment below for isolated dev volumes (prevents data sharing with prod)
+# volumes:
+#   postgres_data:
+#     name: sujbot_dev_postgres_data
+#   neo4j_data:
+#     name: sujbot_dev_neo4j_data
+#   redis_data:
+#     name: sujbot_dev_redis_data
+#   model_cache:
+#     name: sujbot_dev_model_cache
+#   pgadmin_data:
+#     name: sujbot_dev_pgadmin_data
+#   certbot_certs:
+#     name: sujbot_dev_certbot_certs
+#   certbot_www:
+#     name: sujbot_dev_certbot_www

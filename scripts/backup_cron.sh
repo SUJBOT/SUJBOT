@@ -36,18 +36,24 @@ if "$SCRIPT_DIR/backup_export.sh" >> "$LOG_FILE" 2>&1; then
     log "Backup completed successfully"
 
     # Move backup to backups directory
-    LATEST_BACKUP=$(ls -t sujbot_backup_*.tar.gz 2>/dev/null | head -1)
-    if [ -n "$LATEST_BACKUP" ]; then
-        mv "$LATEST_BACKUP" "$BACKUP_DIR/"
-        log "Moved $LATEST_BACKUP to $BACKUP_DIR/"
+    LATEST_BACKUP=$(ls -t sujbot_backup_[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_[0-9][0-9][0-9][0-9][0-9][0-9].tar.gz 2>/dev/null | head -1)
+    if [ -z "$LATEST_BACKUP" ]; then
+        log "ERROR: No backup archive found after export!"
+        exit 1
+    fi
 
-        # Verify archive integrity
-        if tar -tzf "$BACKUP_DIR/$LATEST_BACKUP" > /dev/null 2>&1; then
-            log "Archive verification: OK"
-        else
-            log "ERROR: Archive verification failed!"
-            exit 1
-        fi
+    if ! mv "$LATEST_BACKUP" "$BACKUP_DIR/"; then
+        log "ERROR: Failed to move backup to $BACKUP_DIR/"
+        exit 1
+    fi
+    log "Moved $LATEST_BACKUP to $BACKUP_DIR/"
+
+    # Verify archive integrity
+    if tar -tzf "$BACKUP_DIR/$LATEST_BACKUP" > /dev/null 2>&1; then
+        log "Archive verification: OK"
+    else
+        log "ERROR: Archive verification failed!"
+        exit 1
     fi
 else
     log "ERROR: Backup failed!"
@@ -57,13 +63,16 @@ fi
 # Rotate old backups (keep last N)
 log "Rotating old backups (keeping last $MAX_BACKUPS)..."
 cd "$BACKUP_DIR"
-BACKUP_COUNT=$(ls -1 sujbot_backup_*.tar.gz 2>/dev/null | wc -l)
+BACKUP_COUNT=$(ls -1 sujbot_backup_[0-9]*.tar.gz 2>/dev/null | wc -l)
 if [ "$BACKUP_COUNT" -gt "$MAX_BACKUPS" ]; then
     REMOVE_COUNT=$((BACKUP_COUNT - MAX_BACKUPS))
-    ls -t sujbot_backup_*.tar.gz | tail -n "$REMOVE_COUNT" | while read -r old_backup; do
+    # Use process substitution to avoid subshell issues
+    while IFS= read -r old_backup; do
         log "Removing old backup: $old_backup"
-        rm -f "$old_backup"
-    done
+        if ! rm -f "$old_backup"; then
+            log "WARNING: Failed to remove $old_backup"
+        fi
+    done < <(ls -t sujbot_backup_[0-9]*.tar.gz | tail -n "$REMOVE_COUNT")
 fi
 
 # Report disk usage

@@ -73,18 +73,28 @@ echo -e "${GREEN}  Extracted to: $BACKUP_DIR${NC}"
 echo -e "${YELLOW}[2/6] Restoring PostgreSQL database...${NC}"
 if [ -f "$BACKUP_DIR/postgres.sql" ]; then
     if container_running "$POSTGRES_CONTAINER"; then
+        # Verify connection first
+        if ! docker exec "$POSTGRES_CONTAINER" psql -U postgres -d sujbot -c "SELECT 1;" >/dev/null 2>&1; then
+            echo -e "${RED}  ERROR: Cannot connect to PostgreSQL!${NC}"
+            exit 1
+        fi
+
         # Drop and recreate database to ensure clean state
         echo "  Dropping existing data..."
-        docker exec "$POSTGRES_CONTAINER" psql -U postgres -c "DROP SCHEMA IF EXISTS vectors CASCADE;" 2>/dev/null || true
-        docker exec "$POSTGRES_CONTAINER" psql -U postgres -c "DROP SCHEMA IF EXISTS graphs CASCADE;" 2>/dev/null || true
-        docker exec "$POSTGRES_CONTAINER" psql -U postgres -c "DROP SCHEMA IF EXISTS checkpoints CASCADE;" 2>/dev/null || true
-        docker exec "$POSTGRES_CONTAINER" psql -U postgres -c "DROP SCHEMA IF EXISTS metadata CASCADE;" 2>/dev/null || true
-        docker exec "$POSTGRES_CONTAINER" psql -U postgres -c "DROP SCHEMA IF EXISTS bm25 CASCADE;" 2>/dev/null || true
-        docker exec "$POSTGRES_CONTAINER" psql -U postgres -c "DROP SCHEMA IF EXISTS graph CASCADE;" 2>/dev/null || true
-        docker exec "$POSTGRES_CONTAINER" psql -U postgres -c "DROP SCHEMA IF EXISTS auth CASCADE;" 2>/dev/null || true
+        # Note: DROP IF EXISTS with || true is OK here - we just verified connection works
+        docker exec "$POSTGRES_CONTAINER" psql -U postgres -d sujbot -c "DROP SCHEMA IF EXISTS vectors CASCADE;" 2>/dev/null || true
+        docker exec "$POSTGRES_CONTAINER" psql -U postgres -d sujbot -c "DROP SCHEMA IF EXISTS graphs CASCADE;" 2>/dev/null || true
+        docker exec "$POSTGRES_CONTAINER" psql -U postgres -d sujbot -c "DROP SCHEMA IF EXISTS checkpoints CASCADE;" 2>/dev/null || true
+        docker exec "$POSTGRES_CONTAINER" psql -U postgres -d sujbot -c "DROP SCHEMA IF EXISTS metadata CASCADE;" 2>/dev/null || true
+        docker exec "$POSTGRES_CONTAINER" psql -U postgres -d sujbot -c "DROP SCHEMA IF EXISTS bm25 CASCADE;" 2>/dev/null || true
+        docker exec "$POSTGRES_CONTAINER" psql -U postgres -d sujbot -c "DROP SCHEMA IF EXISTS graph CASCADE;" 2>/dev/null || true
+        docker exec "$POSTGRES_CONTAINER" psql -U postgres -d sujbot -c "DROP SCHEMA IF EXISTS auth CASCADE;" 2>/dev/null || true
 
         echo "  Importing database dump..."
-        docker exec -i "$POSTGRES_CONTAINER" psql -U postgres -d sujbot < "$BACKUP_DIR/postgres.sql"
+        if ! docker exec -i "$POSTGRES_CONTAINER" psql -U postgres -d sujbot < "$BACKUP_DIR/postgres.sql"; then
+            echo -e "${RED}  ERROR: PostgreSQL import failed!${NC}"
+            exit 1
+        fi
         echo -e "${GREEN}  PostgreSQL restored successfully${NC}"
     else
         echo -e "${RED}  ERROR: PostgreSQL container not running!${NC}"
@@ -99,13 +109,16 @@ fi
 echo -e "${YELLOW}[3/6] Restoring Neo4j database...${NC}"
 if container_running "$NEO4J_CONTAINER"; then
     if [ -f "$BACKUP_DIR/neo4j_backup.cypher" ]; then
-        # Import Cypher backup
-        docker cp "$BACKUP_DIR/neo4j_backup.cypher" "$NEO4J_CONTAINER:/var/lib/neo4j/import/"
-        docker exec "$NEO4J_CONTAINER" cypher-shell -u neo4j -p "${NEO4J_PASSWORD:-neo4j}" \
-            "CALL apoc.cypher.runFile('/var/lib/neo4j/import/neo4j_backup.cypher')" 2>/dev/null || {
-            echo -e "${YELLOW}  Cypher import failed, may need manual import${NC}"
-        }
-        echo -e "${GREEN}  Neo4j restored from Cypher export${NC}"
+        # Import Cypher backup (pass password via env var)
+        if ! docker cp "$BACKUP_DIR/neo4j_backup.cypher" "$NEO4J_CONTAINER:/var/lib/neo4j/import/"; then
+            echo -e "${RED}  ERROR: Failed to copy Cypher file to Neo4j container${NC}"
+        elif docker exec -e NEO4J_PASSWORD="${NEO4J_PASSWORD:-neo4j}" "$NEO4J_CONTAINER" \
+            cypher-shell -u neo4j -p "\$NEO4J_PASSWORD" \
+            "CALL apoc.cypher.runFile('/var/lib/neo4j/import/neo4j_backup.cypher')" 2>/dev/null; then
+            echo -e "${GREEN}  Neo4j restored from Cypher export${NC}"
+        else
+            echo -e "${YELLOW}  WARNING: Neo4j Cypher import failed - may need manual import${NC}"
+        fi
     elif [ -f "$BACKUP_DIR/neo4j_data.tar.gz" ]; then
         echo -e "${YELLOW}  Neo4j data archive found - manual restore required${NC}"
         echo "  1. Stop Neo4j: docker compose stop neo4j"
@@ -115,18 +128,30 @@ if container_running "$NEO4J_CONTAINER"; then
         echo -e "${YELLOW}  No Neo4j backup found, skipping...${NC}"
     fi
 else
-    echo -e "${RED}  WARNING: Neo4j container not running, skipping...${NC}"
+    echo -e "${YELLOW}  WARNING: Neo4j container not running, skipping...${NC}"
 fi
 
 # 4. Restore Redis
 echo -e "${YELLOW}[4/6] Restoring Redis snapshot...${NC}"
 if [ -f "$BACKUP_DIR/dump.rdb" ]; then
     if container_running "$REDIS_CONTAINER"; then
-        docker cp "$BACKUP_DIR/dump.rdb" "$REDIS_CONTAINER:/data/"
-        docker restart "$REDIS_CONTAINER"
-        echo -e "${GREEN}  Redis snapshot restored${NC}"
+        if docker cp "$BACKUP_DIR/dump.rdb" "$REDIS_CONTAINER:/data/"; then
+            if docker restart "$REDIS_CONTAINER"; then
+                # Wait for Redis to be ready
+                sleep 2
+                if docker exec "$REDIS_CONTAINER" redis-cli ping >/dev/null 2>&1; then
+                    echo -e "${GREEN}  Redis snapshot restored${NC}"
+                else
+                    echo -e "${YELLOW}  WARNING: Redis restarted but not responding${NC}"
+                fi
+            else
+                echo -e "${RED}  ERROR: Failed to restart Redis${NC}"
+            fi
+        else
+            echo -e "${RED}  ERROR: Failed to copy dump.rdb to Redis container${NC}"
+        fi
     else
-        echo -e "${RED}  WARNING: Redis container not running, skipping...${NC}"
+        echo -e "${YELLOW}  WARNING: Redis container not running, skipping...${NC}"
     fi
 else
     echo -e "${YELLOW}  No Redis snapshot found, skipping...${NC}"
@@ -164,41 +189,31 @@ fi
 # 6. Restore data directories
 echo -e "${YELLOW}[6/6] Restoring data directories...${NC}"
 
-if [ -d "$BACKUP_DIR/data" ]; then
-    mkdir -p data
-    cp -r "$BACKUP_DIR/data/"* data/ 2>/dev/null || true
-    echo -e "${GREEN}  data/ restored${NC}"
-fi
+# Helper function to restore a directory with proper error handling
+restore_directory() {
+    local src="$1"
+    local dst="$2"
+    local name="$3"
 
-if [ -d "$BACKUP_DIR/prompts" ]; then
-    mkdir -p prompts
-    cp -r "$BACKUP_DIR/prompts/"* prompts/ 2>/dev/null || true
-    echo -e "${GREEN}  prompts/ restored${NC}"
-fi
+    if [ -d "$src" ]; then
+        mkdir -p "$dst"
+        # Check if source directory has files
+        if [ -z "$(ls -A "$src" 2>/dev/null)" ]; then
+            echo -e "${YELLOW}  $name/ was empty in backup${NC}"
+        elif cp -r "$src/"* "$dst/" 2>/dev/null; then
+            echo -e "${GREEN}  $name/ restored${NC}"
+        else
+            echo -e "${RED}  ERROR: Failed to restore $name/${NC}"
+        fi
+    fi
+}
 
-if [ -d "$BACKUP_DIR/output" ]; then
-    mkdir -p output
-    cp -r "$BACKUP_DIR/output/"* output/ 2>/dev/null || true
-    echo -e "${GREEN}  output/ restored${NC}"
-fi
-
-if [ -d "$BACKUP_DIR/logs" ]; then
-    mkdir -p logs
-    cp -r "$BACKUP_DIR/logs/"* logs/ 2>/dev/null || true
-    echo -e "${GREEN}  logs/ restored${NC}"
-fi
-
-if [ -d "$BACKUP_DIR/dataset" ]; then
-    mkdir -p dataset
-    cp -r "$BACKUP_DIR/dataset/"* dataset/ 2>/dev/null || true
-    echo -e "${GREEN}  dataset/ restored${NC}"
-fi
-
-if [ -d "$BACKUP_DIR/postgres_init" ]; then
-    mkdir -p docker/postgres/init
-    cp -r "$BACKUP_DIR/postgres_init/"* docker/postgres/init/ 2>/dev/null || true
-    echo -e "${GREEN}  postgres_init/ restored${NC}"
-fi
+restore_directory "$BACKUP_DIR/data" "data" "data"
+restore_directory "$BACKUP_DIR/prompts" "prompts" "prompts"
+restore_directory "$BACKUP_DIR/output" "output" "output"
+restore_directory "$BACKUP_DIR/logs" "logs" "logs"
+restore_directory "$BACKUP_DIR/dataset" "dataset" "dataset"
+restore_directory "$BACKUP_DIR/postgres_init" "docker/postgres/init" "postgres_init"
 
 # Cleanup
 echo ""
