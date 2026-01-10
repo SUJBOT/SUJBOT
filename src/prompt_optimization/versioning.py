@@ -6,7 +6,6 @@ Manages versioning, checkpoints, and rollback for optimized prompts.
 
 import json
 import logging
-import shutil
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path

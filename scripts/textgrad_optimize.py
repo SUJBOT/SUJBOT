@@ -54,6 +54,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Import optimization components
+from src.exceptions import APIKeyError
 from src.prompt_optimization.variables import PromptVariableManager, AGENT_NAMES
 from src.prompt_optimization.loss import MultiMetricLoss
 from src.prompt_optimization.credit_assignment import CreditAssigner
@@ -164,10 +165,11 @@ class TextGradPromptOptimizer:
             )
         except anthropic.AuthenticationError as e:
             logger.error(f"Anthropic authentication failed: {e}")
-            raise RuntimeError(
-                "ANTHROPIC_API_KEY is invalid or missing. "
-                "Please set a valid API key in .env file."
-            ) from e
+            raise APIKeyError(
+                "ANTHROPIC_API_KEY is invalid or missing",
+                details={"model": self.backward_engine, "provider": "anthropic"},
+                cause=e,
+            )
         except Exception as e:
             # Log warning but try fallback - user should be aware
             logger.warning(
@@ -178,10 +180,17 @@ class TextGradPromptOptimizer:
                 tg.set_backward_engine("gpt-4o", override=True)
                 logger.info("Successfully set fallback engine: gpt-4o")
             except Exception as fallback_error:
-                raise RuntimeError(
-                    f"Failed to set both primary ({self.backward_engine}) and fallback (gpt-4o) engines. "
-                    f"Primary error: {e}, Fallback error: {fallback_error}"
-                ) from fallback_error
+                from src.exceptions import ProviderError
+                raise ProviderError(
+                    f"Failed to set both primary ({self.backward_engine}) and fallback (gpt-4o) engines",
+                    details={
+                        "primary_engine": self.backward_engine,
+                        "primary_error": str(e),
+                        "fallback_engine": "gpt-4o",
+                        "fallback_error": str(fallback_error),
+                    },
+                    cause=fallback_error,
+                )
 
     async def run_forward_pass(
         self,
@@ -224,7 +233,11 @@ class TextGradPromptOptimizer:
             raise  # Re-raise to allow clean shutdown
         except anthropic.AuthenticationError as e:
             logger.error(f"Anthropic authentication error: {e}")
-            raise RuntimeError("API authentication failed - check ANTHROPIC_API_KEY") from e
+            raise APIKeyError(
+                "API authentication failed during forward pass",
+                details={"provider": "anthropic"},
+                cause=e,
+            )
         except anthropic.RateLimitError as e:
             logger.warning(f"Rate limit hit: {e}")
             result["errors"].append(f"Rate limit: {e}")
@@ -367,9 +380,11 @@ class TextGradPromptOptimizer:
                     loss_var.backward()
                 except anthropic.AuthenticationError as e:
                     logger.error(f"  Backward pass authentication error: {e}")
-                    raise RuntimeError(
-                        "API authentication failed during backward pass - check ANTHROPIC_API_KEY"
-                    ) from e
+                    raise APIKeyError(
+                        "API authentication failed during backward pass",
+                        details={"provider": "anthropic"},
+                        cause=e,
+                    )
                 except anthropic.RateLimitError as e:
                     logger.warning(f"  Backward pass rate limited: {e}. Skipping optimizer step.")
                     # Skip optimizer step for this iteration
@@ -385,13 +400,35 @@ class TextGradPromptOptimizer:
                     continue  # Skip to next iteration
                 except anthropic.APIError as e:
                     logger.error(f"  Backward pass API error: {e}")
-                    # Non-recoverable API error, skip this iteration
+                    # Record failed iteration
+                    self.metrics_history.append({
+                        "iteration": iteration + 1,
+                        "scores": avg_scores,
+                        "combined_score": combined_score,
+                        "failed_metrics": failed_metrics,
+                        "blame": blame.agent_weights,
+                        "timestamp": datetime.now().isoformat(),
+                        "backward_pass_failed": True,
+                        "error": f"APIError: {e}",
+                    })
                     continue
                 except Exception as e:
                     logger.warning(
                         f"  Backward pass error ({type(e).__name__}: {e}). "
                         f"Skipping optimizer step for this iteration."
                     )
+                    # Record failed iteration and skip to next
+                    self.metrics_history.append({
+                        "iteration": iteration + 1,
+                        "scores": avg_scores,
+                        "combined_score": combined_score,
+                        "failed_metrics": failed_metrics,
+                        "blame": blame.agent_weights,
+                        "timestamp": datetime.now().isoformat(),
+                        "backward_pass_failed": True,
+                        "error": f"{type(e).__name__}: {e}",
+                    })
+                    continue  # Skip optimizer step for this iteration
 
                 # Scale gradients by credit assignment
                 self._scale_gradients_by_blame(prompt_variables, blame)

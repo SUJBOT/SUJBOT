@@ -9,7 +9,7 @@ Implements:
 """
 
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 import logging
 
 logger = logging.getLogger(__name__)
@@ -201,7 +201,7 @@ class PromptLoader:
             self._cache[agent_name] = prompt_text
         logger.debug(f"Injected {len(prompts)} prompts into cache")
 
-    def get_prompt_stats(self) -> Dict[str, any]:
+    def get_prompt_stats(self) -> Dict[str, Any]:
         """
         Get prompt loading statistics.
 
