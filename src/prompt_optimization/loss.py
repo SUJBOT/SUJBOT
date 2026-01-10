@@ -11,6 +11,7 @@ Generates textual feedback for TextGrad backward pass.
 
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -18,6 +19,10 @@ import anthropic
 import textgrad as tg
 
 logger = logging.getLogger(__name__)
+
+# Retry configuration for API calls
+MAX_RETRIES = 3
+RETRY_DELAY_SECONDS = 2.0
 
 # =============================================================================
 # Evaluation Prompts (Czech-aware, from langsmith_eval.py)
@@ -239,52 +244,98 @@ class MultiMetricLoss:
         )
 
         response_text = ""
-        try:
-            response = self.client.messages.create(
-                model=self.judge_model,
-                max_tokens=256,
-                temperature=self.temperature,
-                messages=[{"role": "user", "content": prompt}],
-            )
+        last_error = None
 
-            response_text = response.content[0].text.strip()
+        # Retry loop for transient API errors
+        for attempt in range(MAX_RETRIES):
+            try:
+                response = self.client.messages.create(
+                    model=self.judge_model,
+                    max_tokens=256,
+                    temperature=self.temperature,
+                    messages=[{"role": "user", "content": prompt}],
+                )
 
-            # Try to extract JSON from response (may have extra text before/after)
-            result = self._extract_json(response_text)
-            score = int(result.get("score", 0))
-            rationale = result.get("rationale", "No rationale provided")
+                response_text = response.content[0].text.strip()
 
-            return EvaluationResult(
-                metric=metric,
-                score=score,
-                rationale=rationale,
-                raw_response=response_text,
-            )
+                # Try to extract JSON from response (may have extra text before/after)
+                result = self._extract_json(response_text)
+                score = int(result.get("score", 0))
+                rationale = result.get("rationale", "No rationale provided")
 
-        except json.JSONDecodeError as e:
-            # Try regex extraction as fallback
-            score, rationale = self._extract_score_regex(response_text)
-            if score is not None:
                 return EvaluationResult(
                     metric=metric,
                     score=score,
-                    rationale=rationale or "Extracted via regex",
+                    rationale=rationale,
                     raw_response=response_text,
                 )
-            logger.warning(f"Failed to parse {metric} evaluation: {e}")
-            return EvaluationResult(
-                metric=metric,
-                score=0,
-                rationale=f"Evaluation parse error: {e}",
-                raw_response=response_text,
-            )
-        except Exception as e:
-            logger.error(f"Error evaluating {metric}: {e}")
-            return EvaluationResult(
-                metric=metric,
-                score=0,
-                rationale=f"Evaluation error: {e}",
-            )
+
+            except anthropic.RateLimitError as e:
+                last_error = e
+                if attempt < MAX_RETRIES - 1:
+                    wait_time = RETRY_DELAY_SECONDS * (2 ** attempt)  # Exponential backoff
+                    logger.warning(
+                        f"Rate limited on {metric} evaluation (attempt {attempt + 1}/{MAX_RETRIES}). "
+                        f"Retrying in {wait_time:.1f}s..."
+                    )
+                    time.sleep(wait_time)
+                    continue
+                logger.error(f"Rate limit exceeded for {metric} evaluation after {MAX_RETRIES} retries")
+
+            except anthropic.APIConnectionError as e:
+                last_error = e
+                if attempt < MAX_RETRIES - 1:
+                    wait_time = RETRY_DELAY_SECONDS * (2 ** attempt)
+                    logger.warning(
+                        f"API connection error on {metric} (attempt {attempt + 1}/{MAX_RETRIES}). "
+                        f"Retrying in {wait_time:.1f}s..."
+                    )
+                    time.sleep(wait_time)
+                    continue
+                logger.error(f"API connection failed for {metric} after {MAX_RETRIES} retries: {e}")
+
+            except anthropic.AuthenticationError as e:
+                # Don't retry authentication errors - they won't resolve
+                logger.error(f"Authentication error evaluating {metric}: {e}")
+                return EvaluationResult(
+                    metric=metric,
+                    score=0,
+                    rationale=f"Authentication error: API key invalid or missing",
+                )
+
+            except anthropic.APIError as e:
+                # Other API errors - log and fail
+                logger.error(f"API error evaluating {metric}: {e}")
+                return EvaluationResult(
+                    metric=metric,
+                    score=0,
+                    rationale=f"API error: {e}",
+                )
+
+            except json.JSONDecodeError as e:
+                # Try regex extraction as fallback
+                score, rationale = self._extract_score_regex(response_text)
+                if score is not None:
+                    return EvaluationResult(
+                        metric=metric,
+                        score=score,
+                        rationale=rationale or "Extracted via regex",
+                        raw_response=response_text,
+                    )
+                logger.warning(f"Failed to parse {metric} evaluation: {e}")
+                return EvaluationResult(
+                    metric=metric,
+                    score=0,
+                    rationale=f"Evaluation parse error: {e}",
+                    raw_response=response_text,
+                )
+
+        # All retries exhausted
+        return EvaluationResult(
+            metric=metric,
+            score=0,
+            rationale=f"Evaluation failed after {MAX_RETRIES} retries: {last_error}",
+        )
 
     def compute_loss(
         self,

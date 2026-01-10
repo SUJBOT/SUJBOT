@@ -176,10 +176,25 @@ class PromptVariableManager:
         Args:
             prompt_loader: PromptLoader instance from src.multi_agent.prompts.loader
         """
-        for agent_name, variable in self.variables.items():
-            prompt_loader._cache[agent_name] = variable.value
-
+        prompts = {name: var.value for name, var in self.variables.items()}
+        prompt_loader.inject_prompts(prompts)
         logger.debug(f"Injected {len(self.variables)} prompts into loader cache")
+
+    def restore_from_checkpoint(self, prompt_values: Dict[str, str]) -> None:
+        """
+        Restore prompt values from a checkpoint.
+
+        Args:
+            prompt_values: Dict mapping agent_name -> prompt_text from checkpoint
+        """
+        for agent_name, prompt_text in prompt_values.items():
+            if agent_name in self.variables:
+                self.variables[agent_name].value = prompt_text
+                logger.debug(f"Restored prompt for {agent_name} ({len(prompt_text)} chars)")
+            else:
+                logger.warning(f"Agent {agent_name} not in variables, skipping restore")
+
+        logger.info(f"Restored {len(prompt_values)} prompts from checkpoint")
 
     def __len__(self) -> int:
         return len(self.variables)

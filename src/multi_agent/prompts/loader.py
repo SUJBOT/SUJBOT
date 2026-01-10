@@ -187,6 +187,20 @@ class PromptLoader:
         self._load_all_prompts()
         logger.info("Reloaded all prompts from disk")
 
+    def inject_prompts(self, prompts: Dict[str, str]) -> None:
+        """
+        Inject prompts directly into cache (for testing/optimization).
+
+        This allows TextGrad optimization to test modified prompts without
+        writing to disk.
+
+        Args:
+            prompts: Dict mapping agent_name -> prompt_text
+        """
+        for agent_name, prompt_text in prompts.items():
+            self._cache[agent_name] = prompt_text
+        logger.debug(f"Injected {len(prompts)} prompts into cache")
+
     def get_prompt_stats(self) -> Dict[str, any]:
         """
         Get prompt loading statistics.

@@ -30,6 +30,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import anthropic
 import textgrad as tg
 from dotenv import load_dotenv
 
@@ -161,9 +162,26 @@ class TextGradPromptOptimizer:
                 tg.get_engine(f"experimental:anthropic/{self.backward_engine}"),
                 override=True
             )
+        except anthropic.AuthenticationError as e:
+            logger.error(f"Anthropic authentication failed: {e}")
+            raise RuntimeError(
+                "ANTHROPIC_API_KEY is invalid or missing. "
+                "Please set a valid API key in .env file."
+            ) from e
         except Exception as e:
-            logger.warning(f"Failed to set experimental engine, trying default: {e}")
-            tg.set_backward_engine("gpt-4o", override=True)
+            # Log warning but try fallback - user should be aware
+            logger.warning(
+                f"Failed to set Anthropic backward engine ({e}). "
+                f"Falling back to gpt-4o - this will use OpenAI API and may incur different costs."
+            )
+            try:
+                tg.set_backward_engine("gpt-4o", override=True)
+                logger.info("Successfully set fallback engine: gpt-4o")
+            except Exception as fallback_error:
+                raise RuntimeError(
+                    f"Failed to set both primary ({self.backward_engine}) and fallback (gpt-4o) engines. "
+                    f"Primary error: {e}, Fallback error: {fallback_error}"
+                ) from fallback_error
 
     async def run_forward_pass(
         self,
@@ -201,8 +219,23 @@ class TextGradPromptOptimizer:
                     result["success"] = True
                     break
 
+        except KeyboardInterrupt:
+            logger.info("Forward pass interrupted by user")
+            raise  # Re-raise to allow clean shutdown
+        except anthropic.AuthenticationError as e:
+            logger.error(f"Anthropic authentication error: {e}")
+            raise RuntimeError("API authentication failed - check ANTHROPIC_API_KEY") from e
+        except anthropic.RateLimitError as e:
+            logger.warning(f"Rate limit hit: {e}")
+            result["errors"].append(f"Rate limit: {e}")
+        except anthropic.APIError as e:
+            logger.error(f"Anthropic API error: {e}")
+            result["errors"].append(f"API error: {e}")
+        except asyncio.TimeoutError as e:
+            logger.error(f"Forward pass timeout: {e}")
+            result["errors"].append(f"Timeout: {e}")
         except Exception as e:
-            logger.error(f"Forward pass error: {e}")
+            logger.error(f"Forward pass error: {type(e).__name__}: {e}", exc_info=True)
             result["errors"].append(str(e))
 
         return result
@@ -332,8 +365,33 @@ class TextGradPromptOptimizer:
                 logger.info("  Running backward pass...")
                 try:
                     loss_var.backward()
+                except anthropic.AuthenticationError as e:
+                    logger.error(f"  Backward pass authentication error: {e}")
+                    raise RuntimeError(
+                        "API authentication failed during backward pass - check ANTHROPIC_API_KEY"
+                    ) from e
+                except anthropic.RateLimitError as e:
+                    logger.warning(f"  Backward pass rate limited: {e}. Skipping optimizer step.")
+                    # Skip optimizer step for this iteration
+                    self.metrics_history.append({
+                        "iteration": iteration + 1,
+                        "scores": avg_scores,
+                        "combined_score": combined_score,
+                        "failed_metrics": failed_metrics,
+                        "blame": blame.agent_weights,
+                        "timestamp": datetime.now().isoformat(),
+                        "backward_pass_failed": True,
+                    })
+                    continue  # Skip to next iteration
+                except anthropic.APIError as e:
+                    logger.error(f"  Backward pass API error: {e}")
+                    # Non-recoverable API error, skip this iteration
+                    continue
                 except Exception as e:
-                    logger.warning(f"  Backward pass error: {e}")
+                    logger.warning(
+                        f"  Backward pass error ({type(e).__name__}: {e}). "
+                        f"Skipping optimizer step for this iteration."
+                    )
 
                 # Scale gradients by credit assignment
                 self._scale_gradients_by_blame(prompt_variables, blame)
@@ -523,8 +581,13 @@ async def main():
         if checkpoint_path.exists():
             checkpoint = optimizer.version_manager.load_checkpoint(checkpoint_path)
             optimizer.metrics_history = checkpoint.metrics_history
-            # TODO: Restore prompt values
+            # Restore prompt values from checkpoint
+            if checkpoint.prompt_values:
+                optimizer.variable_manager.restore_from_checkpoint(checkpoint.prompt_values)
+                logger.info(f"Restored {len(checkpoint.prompt_values)} prompt values from checkpoint")
             logger.info(f"Resumed from checkpoint at iteration {checkpoint.iteration}")
+        else:
+            logger.warning(f"Checkpoint file not found: {checkpoint_path}, starting fresh")
 
     # Run optimization
     logger.info(f"Starting optimization: {args.iterations} iterations, batch_size={args.batch_size}")

@@ -88,8 +88,36 @@ class Document:
 
     @classmethod
     def from_json(cls, path: Path) -> "Document":
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        """
+        Load document from JSON file.
+
+        Args:
+            path: Path to JSON file
+
+        Returns:
+            Document instance
+
+        Raises:
+            FileNotFoundError: If file does not exist
+            json.JSONDecodeError: If file contains invalid JSON
+            ValueError: If JSON structure is invalid
+        """
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Document file not found: {path}")
+        except json.JSONDecodeError as e:
+            raise json.JSONDecodeError(
+                f"Invalid JSON in document file {path}: {e.msg}",
+                e.doc,
+                e.pos
+            )
+        except PermissionError:
+            raise PermissionError(f"Permission denied reading file: {path}")
+
+        if not isinstance(data, dict):
+            raise ValueError(f"Invalid document structure in {path}: expected dict, got {type(data).__name__}")
 
         sections = [Section.from_dict(s) for s in data.get("sections", [])]
 
@@ -176,6 +204,7 @@ def compute_bleu(pred: str, ref: str) -> float:
         float: 0.0 to 100.0 (higher is better)
     """
     if sacrebleu is None:
+        # Log at debug level - missing dependency is already warned at startup
         return 0.0
 
     if not pred or not ref:
@@ -185,7 +214,15 @@ def compute_bleu(pred: str, ref: str) -> float:
     try:
         result = sacrebleu.sentence_bleu(pred, [ref])
         return result.score
-    except Exception:
+    except ValueError as e:
+        # Empty strings or invalid input
+        import logging
+        logging.getLogger(__name__).debug(f"BLEU computation skipped for invalid input: {e}")
+        return 0.0
+    except TypeError as e:
+        # Wrong type passed to sacrebleu
+        import logging
+        logging.getLogger(__name__).warning(f"BLEU computation failed due to type error: {e}")
         return 0.0
 
 
