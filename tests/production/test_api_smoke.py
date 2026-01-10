@@ -114,7 +114,8 @@ class TestDocumentEndpoints:
 
     def test_list_documents_without_auth(self, http_client: httpx.Client):
         """Listing documents without auth returns 401."""
-        response = http_client.get("/documents")
+        # Use trailing slash to avoid redirect
+        response = http_client.get("/documents/")
         assert response.status_code == 401, \
             f"Expected 401 for unauthenticated access, got {response.status_code}"
 
