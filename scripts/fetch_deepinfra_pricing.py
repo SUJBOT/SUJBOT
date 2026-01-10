@@ -49,11 +49,20 @@ def fetch_deepinfra_models() -> list[dict]:
         )
         response.raise_for_status()
         return response.json()
-    except httpx.HTTPError as e:
-        print(f"ERROR: Failed to fetch from DeepInfra API: {e}")
+    except httpx.TimeoutException:
+        print("ERROR: Request to DeepInfra API timed out after 30s. Try again later.")
         return []
-    except json.JSONDecodeError:
-        print("ERROR: Invalid JSON response from DeepInfra API")
+    except httpx.ConnectError as e:
+        print(f"ERROR: Cannot connect to DeepInfra API (network/DNS issue): {e}")
+        return []
+    except httpx.HTTPStatusError as e:
+        print(f"ERROR: DeepInfra API returned HTTP {e.response.status_code}: {e.response.text[:200]}")
+        return []
+    except httpx.HTTPError as e:
+        print(f"ERROR: HTTP error fetching from DeepInfra API: {e}")
+        return []
+    except json.JSONDecodeError as e:
+        print(f"ERROR: Invalid JSON response from DeepInfra API at position {e.pos}: {e.msg}")
         return []
 
 
@@ -190,8 +199,14 @@ def update_config_json(pricing: dict[str, dict]) -> bool:
         print(f"\nUpdated {config_path}")
         return True
 
-    except (json.JSONDecodeError, KeyError) as e:
-        print(f"ERROR: Failed to update config.json: {e}")
+    except json.JSONDecodeError as e:
+        print(f"ERROR: config.json has invalid JSON at line {e.lineno}: {e.msg}")
+        return False
+    except KeyError as e:
+        print(f"ERROR: config.json missing expected key: {e}")
+        return False
+    except OSError as e:
+        print(f"ERROR: Cannot write to {config_path}: {e}")
         return False
 
 
@@ -199,6 +214,7 @@ def get_configured_models() -> list[str]:
     """Get models from config.json that need pricing."""
     config_path = Path(__file__).parent.parent / "config.json"
     if not config_path.exists():
+        print(f"WARNING: config.json not found at {config_path}")
         return []
 
     try:
@@ -219,7 +235,14 @@ def get_configured_models() -> list[str]:
                     models.add(model)
 
         return list(models)
-    except (json.JSONDecodeError, KeyError):
+    except json.JSONDecodeError as e:
+        print(f"WARNING: config.json has invalid JSON at line {e.lineno}: {e.msg}")
+        return []
+    except KeyError as e:
+        print(f"WARNING: config.json missing expected key: {e}")
+        return []
+    except OSError as e:
+        print(f"WARNING: Cannot read config.json: {e}")
         return []
 
 

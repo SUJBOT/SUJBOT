@@ -166,8 +166,10 @@ def detect_provider_from_model(model: str) -> str:
     try:
         from ...utils.model_registry import ModelRegistry
         return ModelRegistry.get_provider(model, "llm")
-    except (ImportError, ValueError, KeyError):
-        pass
+    except ImportError as e:
+        logger.debug(f"ModelRegistry unavailable, using pattern fallback: {e}")
+    except (ValueError, KeyError) as e:
+        logger.debug(f"ModelRegistry lookup failed for '{model}', using pattern fallback: {e}")
 
     # Fallback: pattern matching for models not in config
     model_lower = model.lower()

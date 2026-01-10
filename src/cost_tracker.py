@@ -392,8 +392,13 @@ class CostTracker:
             # Only return if pricing is non-zero (configured in config.json)
             if pricing["input"] > 0 or pricing["output"] > 0:
                 return pricing
-        except (ImportError, KeyError, ValueError):
-            pass
+            logger.debug(f"Config has zero pricing for {model_type}/{model}, will check fallback")
+        except ImportError as e:
+            logger.debug(f"ModelRegistry unavailable for pricing lookup: {e}")
+        except KeyError as e:
+            logger.debug(f"Pricing key not found for {model_type}/{model}: {e}")
+        except ValueError as e:
+            logger.debug(f"Invalid pricing lookup for {model_type}/{model}: {e}")
         return None
 
     def _calculate_llm_cost(
@@ -832,37 +837,60 @@ def reset_global_tracker():
         _global_tracker.reset()
 
 
-def validate_pricing_coverage(config: Dict[str, Any]) -> List[str]:
+def validate_pricing_coverage(config: Any) -> List[str]:
     """
     Check if all configured models have pricing data.
 
     Validates that all models in agent_variants.deepinfra_supported_models
-    and agent_variants.variants have corresponding entries in PRICING dict.
+    and agent_variants.variants have pricing in config.json model_registry
+    or fallback PRICING dict.
 
     Args:
-        config: Application config dict (from config.json)
+        config: Application config (RootConfig Pydantic model or dict)
 
     Returns:
         List of missing model identifiers (e.g., ["deepinfra/model-name"])
     """
     missing = []
 
-    agent_variants = config.get("agent_variants", {})
+    # Handle both Pydantic RootConfig and dict
+    if hasattr(config, "agent_variants"):
+        agent_variants = config.agent_variants
+        deepinfra_models = agent_variants.deepinfra_supported_models if agent_variants else []
+        variants = agent_variants.variants if agent_variants else {}
+    else:
+        agent_variants = config.get("agent_variants", {})
+        deepinfra_models = agent_variants.get("deepinfra_supported_models", [])
+        variants = agent_variants.get("variants", {})
+
+    def _has_pricing(model: str) -> bool:
+        """Check if model has pricing in SSOT (config.json) or fallback PRICING dict."""
+        # Check SSOT first (ModelRegistry -> config.json)
+        try:
+            from src.utils.model_registry import ModelRegistry
+            if ModelRegistry.has_pricing(model, "llm"):
+                return True
+        except (ImportError, KeyError, ValueError):
+            pass
+        # Fallback: check PRICING dict
+        return model in PRICING.get("deepinfra", {})
 
     # Check deepinfra_supported_models
-    for model in agent_variants.get("deepinfra_supported_models", []):
-        if model not in PRICING.get("deepinfra", {}):
+    for model in deepinfra_models:
+        if not _has_pricing(model):
             missing.append(f"deepinfra/{model}")
 
     # Check variant models (opus_model, default_model)
-    for variant_name, variant in agent_variants.get("variants", {}).items():
+    for variant_name, variant in (variants.items() if isinstance(variants, dict) else []):
+        # Handle both dict and Pydantic object
+        variant_dict = variant if isinstance(variant, dict) else variant.model_dump() if hasattr(variant, "model_dump") else {}
         for key in ["opus_model", "default_model"]:
-            model = variant.get(key, "")
+            model = variant_dict.get(key, "")
             # Skip Anthropic/OpenAI models (handled by their providers)
             if not model or model.startswith("claude-") or model.startswith("gpt-"):
                 continue
             # Check if it's a DeepInfra model (contains "/" = HuggingFace-style path)
-            if "/" in model and model not in PRICING.get("deepinfra", {}):
+            if "/" in model and not _has_pricing(model):
                 missing.append(f"deepinfra/{model} (variant: {variant_name})")
 
     return missing

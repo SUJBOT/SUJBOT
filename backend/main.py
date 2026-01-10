@@ -198,8 +198,8 @@ async def lifespan(app: FastAPI):
                 for model in missing_pricing:
                     logger.warning(f"  - {model}")
                 logger.warning("")
-                logger.warning("Fix: Run 'uv run python scripts/fetch_deepinfra_pricing.py'")
-                logger.warning("Then update src/cost_tracker.py PRICING dict")
+                logger.warning("Fix: Add pricing to config.json model_registry.llm_models")
+                logger.warning("Or run: uv run python scripts/fetch_deepinfra_pricing.py --config-format --update")
                 logger.warning("=" * 60)
             else:
                 logger.info("✓ All configured models have pricing data")

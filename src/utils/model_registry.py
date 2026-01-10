@@ -56,12 +56,22 @@ logger = logging.getLogger(__name__)
 # Data classes for model configuration (lightweight, no Pydantic dependency)
 # ============================================================================
 
+# Valid provider literals (keep in sync with config_schema.py)
+LLM_PROVIDERS = frozenset({"anthropic", "openai", "google", "deepinfra"})
+EMBEDDING_PROVIDERS = frozenset({"openai", "deepinfra", "voyage", "huggingface"})
+
 
 @dataclass
 class ModelPricingData:
     """Pricing per 1M tokens."""
     input: float
     output: float = 0.0
+
+    def __post_init__(self):
+        if self.input < 0:
+            raise ValueError(f"Input pricing cannot be negative: {self.input}")
+        if self.output < 0:
+            raise ValueError(f"Output pricing cannot be negative: {self.output}")
 
 
 @dataclass
@@ -74,6 +84,14 @@ class LLMModelData:
     supports_caching: bool = False
     supports_extended_thinking: bool = False
 
+    def __post_init__(self):
+        if not self.id:
+            raise ValueError("Model ID cannot be empty")
+        if self.provider not in LLM_PROVIDERS:
+            raise ValueError(f"Invalid LLM provider '{self.provider}'. Valid: {sorted(LLM_PROVIDERS)}")
+        if self.context_window < 1000:
+            raise ValueError(f"Context window must be >= 1000: {self.context_window}")
+
 
 @dataclass
 class EmbeddingModelData:
@@ -84,12 +102,24 @@ class EmbeddingModelData:
     dimensions: int
     is_local: bool = False
 
+    def __post_init__(self):
+        if not self.id:
+            raise ValueError("Model ID cannot be empty")
+        if self.provider not in EMBEDDING_PROVIDERS:
+            raise ValueError(f"Invalid embedding provider '{self.provider}'. Valid: {sorted(EMBEDDING_PROVIDERS)}")
+        if self.dimensions < 1:
+            raise ValueError(f"Dimensions must be >= 1: {self.dimensions}")
+
 
 @dataclass
 class RerankerModelData:
     """Reranker model configuration data."""
     id: str
     is_local: bool = True
+
+    def __post_init__(self):
+        if not self.id:
+            raise ValueError("Model ID cannot be empty")
 
 
 # Union type for any model config
