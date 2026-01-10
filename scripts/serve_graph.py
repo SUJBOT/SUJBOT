@@ -150,10 +150,11 @@ def generate_graph_html():
 
 def serve():
     """Start HTTP server."""
+    import os
+
     html_path = generate_graph_html()
 
     # Change to output directory
-    import os
     os.chdir(html_path.parent)
 
     handler = http.server.SimpleHTTPRequestHandler

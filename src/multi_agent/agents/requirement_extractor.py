@@ -12,7 +12,7 @@ Based on Legal AI Research (2024): Requirement-First Compliance Checking
 
 import json
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from ..core.agent_base import BaseAgent
 from ..core.agent_initializer import initialize_agent
@@ -153,5 +153,3 @@ class RequirementExtractorAgent(BaseAgent):
             state["errors"] = state.get("errors", [])
             state["errors"].append(f"RequirementExtractor error: {str(e)}")
             return state
-
-    # Note: No hardcoded methods needed - autonomous pattern handles everything via LLM

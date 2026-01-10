@@ -1,4 +1,4 @@
-# SUJBOT2 Multi-Agent System - Quick Reference Guide
+# SUJBOT Multi-Agent System - Quick Reference Guide
 
 ## Quick Start
 
@@ -267,7 +267,7 @@ SELECT * FROM langgraph_checkpoints;
         "langsmith": {
             "enabled": false,
             "api_key": null,
-            "project_name": "sujbot2-multi-agent"
+            "project_name": "sujbot-multi-agent"
         }
     }
 }

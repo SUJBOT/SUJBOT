@@ -14,13 +14,11 @@ Or via Docker:
 """
 
 import asyncio
-import asyncpg
 import os
 import sys
-from argon2 import PasswordHasher
 
-# Add project root to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import asyncpg
+from argon2 import PasswordHasher
 
 
 async def create_user(email: str, password: str, full_name: str = None, is_admin: bool = False):
@@ -95,9 +93,9 @@ async def create_user(email: str, password: str, full_name: str = None, is_admin
         return True
 
     except Exception as e:
-        print(f"\n❌ User creation failed: {e}")
+        print(f"\n❌ User creation failed: {e}", file=sys.stderr)
         import traceback
-        traceback.print_exc()
+        traceback.print_exc(file=sys.stderr)
         return False
 
 

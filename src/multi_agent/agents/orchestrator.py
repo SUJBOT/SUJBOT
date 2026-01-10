@@ -15,9 +15,9 @@ PHASE 2 - SYNTHESIS:
 
 import json
 import logging
-import time  # For LLM response time measurement
-from typing import Any, Dict, List, Optional
 import re
+import time
+from typing import Any, Dict, List, Optional
 
 from ..core.agent_base import BaseAgent
 from ..core.agent_initializer import initialize_agent
@@ -247,11 +247,6 @@ class OrchestratorAgent(BaseAgent):
                     f"Please check system configuration and try again."
                 )
             }
-
-    # NOTE: _rewrite_query_with_context has been REMOVED
-    # Follow-up detection and query rewriting is now handled by unified analysis
-    # in the orchestrator system prompt. The LLM returns analysis.is_follow_up
-    # and analysis.follow_up_rewrite directly in the routing response.
 
     async def _analyze_and_route(
         self, query: str, conversation_history: Optional[List[Dict[str, str]]] = None
@@ -561,7 +556,6 @@ Ensure language matching and proper citations."""
                 system = self.system_prompt
 
             # Call LLM for synthesis with timing
-            import time
             llm_start_time = time.time()
             response = self.provider.create_message(
                 messages=[{"role": "user", "content": user_message}],
@@ -642,7 +636,6 @@ Ensure language matching and proper citations."""
 
             try:
                 # Try parsing response as JSON (iteration request)
-                import json
                 iteration_request = json.loads(final_answer.strip())
 
                 if iteration_request.get("needs_iteration"):
@@ -931,9 +924,6 @@ Ensure language matching and proper citations."""
             return "standard"
         else:
             return "complex"
-
-    # Removed rule-based fallback methods (get_agent_capabilities, suggest_agents_for_query)
-    # All routing decisions are now made autonomously by the LLM orchestrator
 
     def _extract_available_chunk_ids(self, agent_outputs: Dict[str, Any]) -> List[str]:
         """

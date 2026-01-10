@@ -1,5 +1,5 @@
 -- ============================================================================
--- SUJBOT2 Authentication & Authorization Schema
+-- SUJBOT Authentication & Authorization Schema
 -- ============================================================================
 -- This script creates authentication and user management tables:
 -- 1. Users table (authentication credentials)

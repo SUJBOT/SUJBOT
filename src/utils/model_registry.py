@@ -1,16 +1,30 @@
 """
-Model registry for SUJBOT2 pipeline.
+Model registry for SUJBOT pipeline.
 
-SSOT: All model aliases are now loaded from config.json (model_registry section).
-This class provides helper methods for model resolution with backward-compatible
-fallbacks if config.json doesn't have the model_registry section.
+SSOT: All model configuration is loaded from config.json (model_registry section).
+This class provides helper methods for model resolution, provider detection, and
+pricing lookup - all from config.json.
 
 Features:
-- Single source of truth for model aliases (config.json)
+- Single source of truth for model configuration (config.json)
+- Supports both OLD format (string) and NEW format (object with metadata)
+- Provider detection from config (no pattern matching needed for new format)
+- Pricing lookup from config (no hardcoded PRICING dict needed)
+- Embedding dimensions from config
 - Lazy loading - config loaded on first access
 - Backward compatible - falls back to built-in defaults if config missing
-- Separate registries for LLM, embedding, and reranker models
-- Embedding dimensions lookup
+
+NEW CONFIG FORMAT (preferred):
+    "haiku": {
+        "id": "claude-haiku-4-5-20251001",
+        "provider": "anthropic",
+        "pricing": {"input": 1.00, "output": 5.00},
+        "context_window": 200000,
+        "supports_caching": true
+    }
+
+OLD CONFIG FORMAT (still supported):
+    "haiku": "claude-haiku-4-5-20251001"
 
 Usage:
     from src.utils.model_registry import ModelRegistry
@@ -19,29 +33,267 @@ Usage:
     model = ModelRegistry.resolve_llm("haiku")
     # Returns: "claude-haiku-4-5-20251001"
 
-    # Get embedding dimensions
-    dims = ModelRegistry.get_embedding_dimensions("Qwen/Qwen3-Embedding-8B")
-    # Returns: 4096
+    # Get provider (from config, no pattern guessing)
+    provider = ModelRegistry.get_provider("haiku", "llm")
+    # Returns: "anthropic"
 
-    # Check if model is local
-    is_local = ModelRegistry.is_local_embedding("bge-m3")
-    # Returns: True
+    # Get pricing (from config)
+    pricing = ModelRegistry.get_pricing("haiku", "llm")
+    # Returns: {"input": 1.00, "output": 5.00}
+
+    # Get full model config
+    config = ModelRegistry.get_model_config("haiku", "llm")
+    # Returns: LLMModelConfig object with all metadata
 """
 
 import logging
-from typing import Dict, Optional
+from dataclasses import dataclass
+from typing import Any, Dict, Optional, Union
 
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# Data classes for model configuration (lightweight, no Pydantic dependency)
+# ============================================================================
+
+# Valid provider literals (keep in sync with config_schema.py)
+LLM_PROVIDERS = frozenset({"anthropic", "openai", "google", "deepinfra"})
+EMBEDDING_PROVIDERS = frozenset({"openai", "deepinfra", "voyage", "huggingface"})
+
+
+@dataclass
+class ModelPricingData:
+    """Pricing per 1M tokens."""
+    input: float
+    output: float = 0.0
+
+    def __post_init__(self):
+        if self.input < 0:
+            raise ValueError(f"Input pricing cannot be negative: {self.input}")
+        if self.output < 0:
+            raise ValueError(f"Output pricing cannot be negative: {self.output}")
+
+
+@dataclass
+class LLMModelData:
+    """LLM model configuration data."""
+    id: str
+    provider: str
+    pricing: ModelPricingData
+    context_window: int = 128000
+    supports_caching: bool = False
+    supports_extended_thinking: bool = False
+
+    def __post_init__(self):
+        if not self.id:
+            raise ValueError("Model ID cannot be empty")
+        if self.provider not in LLM_PROVIDERS:
+            raise ValueError(f"Invalid LLM provider '{self.provider}'. Valid: {sorted(LLM_PROVIDERS)}")
+        if self.context_window < 1000:
+            raise ValueError(f"Context window must be >= 1000: {self.context_window}")
+
+
+@dataclass
+class EmbeddingModelData:
+    """Embedding model configuration data."""
+    id: str
+    provider: str
+    pricing: ModelPricingData
+    dimensions: int
+    is_local: bool = False
+
+    def __post_init__(self):
+        if not self.id:
+            raise ValueError("Model ID cannot be empty")
+        if self.provider not in EMBEDDING_PROVIDERS:
+            raise ValueError(f"Invalid embedding provider '{self.provider}'. Valid: {sorted(EMBEDDING_PROVIDERS)}")
+        if self.dimensions < 1:
+            raise ValueError(f"Dimensions must be >= 1: {self.dimensions}")
+
+
+@dataclass
+class RerankerModelData:
+    """Reranker model configuration data."""
+    id: str
+    is_local: bool = True
+
+    def __post_init__(self):
+        if not self.id:
+            raise ValueError("Model ID cannot be empty")
+
+
+# Union type for any model config
+ModelConfigData = Union[LLMModelData, EmbeddingModelData, RerankerModelData]
+
 
 # ============================================================================
 # Global cache for config-loaded models (lazy initialization)
 # ============================================================================
 
 _config_loaded = False
-_LLM_MODELS: Dict[str, str] = {}
-_EMBEDDING_MODELS: Dict[str, str] = {}
-_RERANKER_MODELS: Dict[str, str] = {}
+# Raw config entries (can be string or dict)
+_LLM_MODELS_RAW: Dict[str, Any] = {}
+_EMBEDDING_MODELS_RAW: Dict[str, Any] = {}
+_RERANKER_MODELS_RAW: Dict[str, Any] = {}
+# Legacy dimensions dict (for backward compatibility)
 _EMBEDDING_DIMENSIONS: Dict[str, int] = {}
+
+
+def _parse_pricing(pricing_data: dict) -> ModelPricingData:
+    """Parse pricing dict into ModelPricingData."""
+    return ModelPricingData(
+        input=float(pricing_data.get("input", 0.0)),
+        output=float(pricing_data.get("output", 0.0)),
+    )
+
+
+def _parse_llm_config(alias: str, entry: Any) -> LLMModelData:
+    """
+    Parse LLM config entry (string, dict, or Pydantic model) into LLMModelData.
+
+    For string entries (old format), we infer provider from patterns.
+    For dict/Pydantic entries (new format), we read provider directly.
+    """
+    if isinstance(entry, str):
+        # Old format: "haiku": "claude-haiku-4-5-20251001"
+        model_id = entry
+        provider = _infer_provider_from_model_id(model_id)
+        return LLMModelData(
+            id=model_id,
+            provider=provider,
+            pricing=ModelPricingData(input=0.0, output=0.0),  # Unknown pricing
+        )
+    elif isinstance(entry, dict):
+        # New format from raw JSON (before Pydantic validation)
+        return LLMModelData(
+            id=entry["id"],
+            provider=entry["provider"],
+            pricing=_parse_pricing(entry.get("pricing", {})),
+            context_window=entry.get("context_window", 128000),
+            supports_caching=entry.get("supports_caching", False),
+            supports_extended_thinking=entry.get("supports_extended_thinking", False),
+        )
+    elif hasattr(entry, "id") and hasattr(entry, "provider"):
+        # Pydantic model object (LLMModelConfig) - after Pydantic validation
+        pricing_data = ModelPricingData(
+            input=entry.pricing.input if entry.pricing else 0.0,
+            output=entry.pricing.output if entry.pricing else 0.0,
+        )
+        return LLMModelData(
+            id=entry.id,
+            provider=entry.provider,
+            pricing=pricing_data,
+            context_window=getattr(entry, "context_window", 128000),
+            supports_caching=getattr(entry, "supports_caching", False),
+            supports_extended_thinking=getattr(entry, "supports_extended_thinking", False),
+        )
+    else:
+        raise ValueError(f"Invalid LLM config entry for '{alias}': {type(entry)}")
+
+
+def _parse_embedding_config(alias: str, entry: Any) -> EmbeddingModelData:
+    """Parse embedding config entry (string, dict, or Pydantic model) into EmbeddingModelData."""
+    if isinstance(entry, str):
+        # Old format
+        model_id = entry
+        provider = _infer_provider_from_model_id(model_id, "embedding")
+        dims = _EMBEDDING_DIMENSIONS.get(model_id, 1024)
+        return EmbeddingModelData(
+            id=model_id,
+            provider=provider,
+            pricing=ModelPricingData(input=0.0),
+            dimensions=dims,
+            is_local=provider == "huggingface",
+        )
+    elif isinstance(entry, dict):
+        # New format from raw JSON
+        return EmbeddingModelData(
+            id=entry["id"],
+            provider=entry["provider"],
+            pricing=_parse_pricing(entry.get("pricing", {})),
+            dimensions=entry["dimensions"],
+            is_local=entry.get("is_local", False),
+        )
+    elif hasattr(entry, "id") and hasattr(entry, "provider"):
+        # Pydantic model object (EmbeddingModelConfig)
+        pricing_data = ModelPricingData(
+            input=entry.pricing.input if entry.pricing else 0.0,
+            output=entry.pricing.output if entry.pricing else 0.0,
+        )
+        return EmbeddingModelData(
+            id=entry.id,
+            provider=entry.provider,
+            pricing=pricing_data,
+            dimensions=entry.dimensions,
+            is_local=getattr(entry, "is_local", False),
+        )
+    else:
+        raise ValueError(f"Invalid embedding config entry for '{alias}': {type(entry)}")
+
+
+def _parse_reranker_config(alias: str, entry: Any) -> RerankerModelData:
+    """Parse reranker config entry (string, dict, or Pydantic model) into RerankerModelData."""
+    if isinstance(entry, str):
+        return RerankerModelData(id=entry, is_local=True)
+    elif isinstance(entry, dict):
+        return RerankerModelData(
+            id=entry["id"],
+            is_local=entry.get("is_local", True),
+        )
+    elif hasattr(entry, "id"):
+        # Pydantic model object (RerankerModelConfig)
+        return RerankerModelData(
+            id=entry.id,
+            is_local=getattr(entry, "is_local", True),
+        )
+    else:
+        raise ValueError(f"Invalid reranker config entry for '{alias}': {type(entry)}")
+
+
+def _extract_model_id(entry: Any) -> str:
+    """Extract model ID from entry (string, dict, or Pydantic object)."""
+    if isinstance(entry, str):
+        return entry
+    elif isinstance(entry, dict):
+        return entry["id"]
+    elif hasattr(entry, "id"):
+        return entry.id
+    else:
+        raise ValueError(f"Cannot extract model ID from entry: {type(entry)}")
+
+
+def _infer_provider_from_model_id(model_id: str, model_type: str = "llm") -> str:
+    """
+    Infer provider from model ID patterns (for backward compatibility).
+
+    Used only for old string-based config entries.
+    New object entries have explicit provider field.
+    """
+    model_lower = model_id.lower()
+
+    # LLM patterns
+    if any(kw in model_lower for kw in ["claude", "haiku", "sonnet", "opus"]):
+        return "anthropic"
+    if any(kw in model_lower for kw in ["gpt-", "o1", "o3", "o4"]):
+        return "openai"
+    if "gemini" in model_lower:
+        return "google"
+    if any(kw in model_id for kw in ["Qwen/", "meta-llama/", "MiniMaxAI/"]):
+        return "deepinfra"
+    if any(kw in model_lower for kw in ["qwen", "llama", "minimax"]):
+        return "deepinfra"
+
+    # Embedding patterns
+    if model_type == "embedding":
+        if "text-embedding" in model_lower:
+            return "openai"
+        if "voyage" in model_lower:
+            return "voyage"
+        if any(p in model_id for p in ["BAAI/", "intfloat/", "sentence-transformers/"]):
+            return "huggingface"
+
+    # Default to unknown
+    return "unknown"
 
 
 def _load_builtin_defaults():
@@ -50,95 +302,47 @@ def _load_builtin_defaults():
 
     These are used when config.json doesn't have model_registry section.
     """
-    global _LLM_MODELS, _EMBEDDING_MODELS, _RERANKER_MODELS, _EMBEDDING_DIMENSIONS
+    global _LLM_MODELS_RAW, _EMBEDDING_MODELS_RAW, _RERANKER_MODELS_RAW, _EMBEDDING_DIMENSIONS
 
-    _LLM_MODELS = {
-        # Claude models (Anthropic)
+    _LLM_MODELS_RAW = {
         "haiku": "claude-haiku-4-5-20251001",
-        "claude-haiku": "claude-haiku-4-5-20251001",
-        "claude-haiku-4-5": "claude-haiku-4-5-20251001",
         "sonnet": "claude-sonnet-4-5-20250929",
-        "claude-sonnet": "claude-sonnet-4-5-20250929",
-        "claude-sonnet-4-5": "claude-sonnet-4-5-20250929",
         "opus": "claude-opus-4-5-20251101",
-        "claude-opus": "claude-opus-4-5-20251101",
-        "claude-opus-4-5": "claude-opus-4-5-20251101",
-        # OpenAI models
         "gpt-4o": "gpt-4o",
         "gpt-4o-mini": "gpt-4o-mini",
-        # O-series reasoning models
         "o1": "o1",
         "o1-mini": "o1-mini",
         "o3-mini": "o3-mini",
-        # DeepInfra models (Qwen)
-        "qwen-72b": "Qwen/Qwen2.5-72B-Instruct",
-        "qwen-7b": "Qwen/Qwen2.5-7B-Instruct",
-        "Qwen/Qwen2.5-72B-Instruct": "Qwen/Qwen2.5-72B-Instruct",
-        "Qwen/Qwen2.5-7B-Instruct": "Qwen/Qwen2.5-7B-Instruct",
-        # Google Gemini models (2025)
-        "gemini": "gemini-2.5-flash",
         "gemini-flash": "gemini-2.5-flash",
         "gemini-pro": "gemini-2.5-pro",
-        "gemini-2.5-flash": "gemini-2.5-flash",
-        "gemini-2.5-pro": "gemini-2.5-pro",
-        "gemini-2.5-flash-lite": "gemini-2.5-flash-lite",
-        # Local models
-        "saul-7b": "Equall/Saul-7B-Instruct-v1",
-        "saul": "Equall/Saul-7B-Instruct-v1",
+        "qwen-72b": "Qwen/Qwen2.5-72B-Instruct",
+        "qwen-7b": "Qwen/Qwen2.5-7B-Instruct",
+        "minimax-m2": "MiniMaxAI/MiniMax-M2",
     }
 
-    _EMBEDDING_MODELS = {
-        # OpenAI embeddings
+    _EMBEDDING_MODELS_RAW = {
         "text-embedding-3-large": "text-embedding-3-large",
         "text-embedding-3-small": "text-embedding-3-small",
-        "text-embedding-ada-002": "text-embedding-ada-002",
-        # Voyage AI embeddings
-        "voyage-3-large": "voyage-3-large",
-        "voyage-3": "voyage-3",
-        "voyage-3-lite": "voyage-3-lite",
-        "voyage-law-2": "voyage-law-2",
-        # HuggingFace embeddings (local)
         "bge-m3": "BAAI/bge-m3",
         "bge-large": "BAAI/bge-large-en-v1.5",
-        "bge-base": "BAAI/bge-base-en-v1.5",
-        "bge-small": "BAAI/bge-small-en-v1.5",
-        # DeepInfra embeddings
+        "voyage-3-large": "voyage-3-large",
+        "voyage-3": "voyage-3",
         "qwen3-embedding": "Qwen/Qwen3-Embedding-8B",
-        # Aliases
-        "default": "BAAI/bge-m3",
     }
 
-    _RERANKER_MODELS = {
-        # MS MARCO models (cross-encoders)
+    _RERANKER_MODELS_RAW = {
         "ms-marco-mini": "cross-encoder/ms-marco-MiniLM-L-6-v2",
-        "ms-marco-base": "cross-encoder/ms-marco-MiniLM-L-12-v2",
-        # BAAI rerankers
-        "bge-reranker-base": "BAAI/bge-reranker-base",
         "bge-reranker-large": "BAAI/bge-reranker-large",
-        "bge-reranker-v2-m3": "BAAI/bge-reranker-v2-m3",
-        # Aliases
-        "default": "cross-encoder/ms-marco-MiniLM-L-6-v2",
-        "fast": "cross-encoder/ms-marco-MiniLM-L-6-v2",
-        "accurate": "cross-encoder/ms-marco-MiniLM-L-12-v2",
-        "sota": "BAAI/bge-reranker-large",
     }
 
     _EMBEDDING_DIMENSIONS = {
-        # DeepInfra / Qwen
         "Qwen/Qwen3-Embedding-8B": 4096,
-        # OpenAI
         "text-embedding-3-large": 3072,
         "text-embedding-3-small": 1536,
-        "text-embedding-ada-002": 1536,
-        # Voyage AI
-        "voyage-3-large": 1024,
-        "voyage-3": 1024,
-        "voyage-3-lite": 512,
-        # HuggingFace / BGE
         "BAAI/bge-m3": 1024,
         "BAAI/bge-large-en-v1.5": 1024,
-        "BAAI/bge-base-en-v1.5": 768,
-        "BAAI/bge-small-en-v1.5": 384,
+        "voyage-3-large": 1024,
+        "voyage-3": 1024,
     }
 
 
@@ -149,7 +353,8 @@ def _ensure_config_loaded():
     This function is called automatically before any registry access.
     Falls back to built-in defaults if config.json doesn't have model_registry.
     """
-    global _config_loaded, _LLM_MODELS, _EMBEDDING_MODELS, _RERANKER_MODELS, _EMBEDDING_DIMENSIONS
+    global _config_loaded, _LLM_MODELS_RAW, _EMBEDDING_MODELS_RAW, _RERANKER_MODELS_RAW
+    global _EMBEDDING_DIMENSIONS
 
     if _config_loaded:
         return
@@ -159,35 +364,39 @@ def _ensure_config_loaded():
         config = get_config()
 
         if config.model_registry is not None:
-            # Load from config.json (SSOT)
-            _LLM_MODELS = dict(config.model_registry.llm_models)
-            _EMBEDDING_MODELS = dict(config.model_registry.embedding_models)
-            _RERANKER_MODELS = dict(config.model_registry.reranker_models)
+            # Load raw entries from config.json (SSOT)
+            # These can be strings (old format) or dicts (new format)
+            _LLM_MODELS_RAW = dict(config.model_registry.llm_models)
+            _EMBEDDING_MODELS_RAW = dict(config.model_registry.embedding_models)
+            _RERANKER_MODELS_RAW = dict(config.model_registry.reranker_models)
             _EMBEDDING_DIMENSIONS = dict(config.model_registry.embedding_dimensions)
+
+            # Count new format vs old format entries
+            new_format_count = sum(
+                1 for v in _LLM_MODELS_RAW.values() if isinstance(v, dict)
+            )
+            total_count = len(_LLM_MODELS_RAW)
 
             logger.info(
                 f"ModelRegistry loaded from config.json: "
-                f"{len(_LLM_MODELS)} LLM, {len(_EMBEDDING_MODELS)} embedding, "
-                f"{len(_RERANKER_MODELS)} reranker models"
+                f"{total_count} LLM ({new_format_count} with metadata), "
+                f"{len(_EMBEDDING_MODELS_RAW)} embedding, "
+                f"{len(_RERANKER_MODELS_RAW)} reranker models"
             )
         else:
-            # Fallback to built-in defaults (backward compatibility)
             logger.warning(
-                "model_registry section not found in config.json, using built-in defaults. "
-                "Consider adding model_registry to config.json for SSOT."
+                "model_registry section not found in config.json, using built-in defaults."
             )
             _load_builtin_defaults()
 
         _config_loaded = True
 
     except ImportError as e:
-        # Config module not available - expected during testing
         logger.info(f"Config module not available: {e}. Using built-in model registry.")
         _load_builtin_defaults()
         _config_loaded = True
 
     except (KeyError, AttributeError, TypeError) as e:
-        # Config schema mismatch - log with traceback for debugging
         logger.warning(
             f"Model registry config schema error: {e}. Using built-in defaults.",
             exc_info=True,
@@ -209,57 +418,146 @@ def reload_registry():
 
 class ModelRegistry:
     """
-    Central registry for all model aliases - reads from config.json.
+    Central registry for all model configuration - reads from config.json.
 
-    Maintains separate registries for:
-    - LLM models (Claude, OpenAI, Gemini, Qwen)
-    - Embedding models (OpenAI, Voyage, HuggingFace)
-    - Reranker models (MS MARCO, BGE)
-    - Embedding dimensions per model
+    Provides:
+    - Model alias resolution (alias → full model ID)
+    - Provider detection (from config or pattern inference)
+    - Pricing lookup (from config)
+    - Embedding dimensions (from config)
 
     SSOT: All data comes from config.json model_registry section.
     Built-in fallbacks used only if config section is missing.
     """
 
     # ========================================================================
-    # PROPERTY ACCESSORS (load config on first access)
+    # MODEL CONFIG ACCESS (NEW API)
     # ========================================================================
 
     @classmethod
-    def _get_llm_models(cls) -> Dict[str, str]:
-        """Get LLM models dict (internal)."""
+    def get_model_config(cls, alias: str, model_type: str = "llm") -> ModelConfigData:
+        """
+        Get full model configuration including provider and pricing.
+
+        This is the primary API for accessing model metadata.
+
+        Args:
+            alias: Model alias or full model ID
+            model_type: "llm", "embedding", or "reranker"
+
+        Returns:
+            Model configuration dataclass (LLMModelData, EmbeddingModelData, etc.)
+
+        Raises:
+            KeyError: If alias not found in registry
+
+        Example:
+            >>> config = ModelRegistry.get_model_config("haiku", "llm")
+            >>> print(config.provider)  # "anthropic"
+            >>> print(config.pricing.input)  # 1.00
+        """
         _ensure_config_loaded()
-        return _LLM_MODELS
+
+        if model_type == "llm":
+            if alias in _LLM_MODELS_RAW:
+                return _parse_llm_config(alias, _LLM_MODELS_RAW[alias])
+            # Try to find by model ID (for full model names like "claude-haiku-4-5-20251001")
+            for key, entry in _LLM_MODELS_RAW.items():
+                model_id = _extract_model_id(entry)
+                if model_id == alias:
+                    return _parse_llm_config(key, entry)
+            raise KeyError(f"LLM model not found: {alias}")
+
+        elif model_type == "embedding":
+            if alias in _EMBEDDING_MODELS_RAW:
+                return _parse_embedding_config(alias, _EMBEDDING_MODELS_RAW[alias])
+            for key, entry in _EMBEDDING_MODELS_RAW.items():
+                model_id = _extract_model_id(entry)
+                if model_id == alias:
+                    return _parse_embedding_config(key, entry)
+            raise KeyError(f"Embedding model not found: {alias}")
+
+        elif model_type == "reranker":
+            if alias in _RERANKER_MODELS_RAW:
+                return _parse_reranker_config(alias, _RERANKER_MODELS_RAW[alias])
+            for key, entry in _RERANKER_MODELS_RAW.items():
+                model_id = _extract_model_id(entry)
+                if model_id == alias:
+                    return _parse_reranker_config(key, entry)
+            raise KeyError(f"Reranker model not found: {alias}")
+
+        else:
+            raise ValueError(f"Unknown model_type: {model_type}")
 
     @classmethod
-    def _get_embedding_models(cls) -> Dict[str, str]:
-        """Get embedding models dict (internal)."""
-        _ensure_config_loaded()
-        return _EMBEDDING_MODELS
+    def get_pricing(cls, model: str, model_type: str = "llm") -> Dict[str, float]:
+        """
+        Get pricing for a model from config.
+
+        Args:
+            model: Model alias or full ID
+            model_type: "llm" or "embedding"
+
+        Returns:
+            Dict with "input" and "output" prices per 1M tokens
+
+        Example:
+            >>> pricing = ModelRegistry.get_pricing("haiku", "llm")
+            >>> print(pricing)  # {"input": 1.00, "output": 5.00}
+        """
+        try:
+            config = cls.get_model_config(model, model_type)
+            return {"input": config.pricing.input, "output": config.pricing.output}
+        except KeyError:
+            logger.warning(f"No pricing found for {model_type}/{model}, returning $0")
+            return {"input": 0.0, "output": 0.0}
 
     @classmethod
-    def _get_reranker_models(cls) -> Dict[str, str]:
-        """Get reranker models dict (internal)."""
-        _ensure_config_loaded()
-        return _RERANKER_MODELS
+    def get_provider(cls, model: str, model_type: str = "llm") -> str:
+        """
+        Get provider name for a model.
 
-    @classmethod
-    def _get_embedding_dimensions(cls) -> Dict[str, int]:
-        """Get embedding dimensions dict (internal)."""
-        _ensure_config_loaded()
-        return _EMBEDDING_DIMENSIONS
+        For new format entries, reads provider directly from config.
+        For old format entries, infers provider from model ID patterns.
+
+        Args:
+            model: Model name or alias
+            model_type: Type of model ("llm", "embedding", "reranker")
+
+        Returns:
+            Provider name ("anthropic", "openai", "google", "voyage", "huggingface", "deepinfra")
+
+        Raises:
+            ValueError: If provider cannot be determined
+
+        Example:
+            >>> ModelRegistry.get_provider("haiku", "llm")
+            'anthropic'
+
+            >>> ModelRegistry.get_provider("bge-m3", "embedding")
+            'huggingface'
+        """
+        try:
+            config = cls.get_model_config(model, model_type)
+            if config.provider != "unknown":
+                return config.provider
+        except KeyError:
+            pass
+
+        # Fallback: infer from model ID patterns
+        resolved = cls.resolve_llm(model) if model_type == "llm" else model
+        provider = _infer_provider_from_model_id(resolved, model_type)
+
+        if provider == "unknown":
+            raise ValueError(
+                f"Unable to auto-detect provider for model '{model}' (type: {model_type}).\n"
+                f"Add model to config.json model_registry with explicit provider field."
+            )
+
+        return provider
 
     # ========================================================================
-    # BACKWARD COMPATIBILITY: Class-level dict access
-    # ========================================================================
-    # These are kept for code that accesses ModelRegistry.LLM_MODELS directly
-
-    LLM_MODELS = property(lambda self: ModelRegistry._get_llm_models())
-    EMBEDDING_MODELS = property(lambda self: ModelRegistry._get_embedding_models())
-    RERANKER_MODELS = property(lambda self: ModelRegistry._get_reranker_models())
-
-    # ========================================================================
-    # RESOLUTION METHODS
+    # RESOLUTION METHODS (existing API)
     # ========================================================================
 
     @classmethod
@@ -273,19 +571,14 @@ class ModelRegistry:
         Returns:
             Full model name (e.g., "claude-haiku-4-5-20251001")
             Returns alias as-is if not found in registry.
-
-        Example:
-            >>> ModelRegistry.resolve_llm("haiku")
-            'claude-haiku-4-5-20251001'
-
-            >>> ModelRegistry.resolve_llm("gpt-4o-mini")
-            'gpt-4o-mini'
-
-            >>> ModelRegistry.resolve_llm("unknown-model")
-            'unknown-model'  # Returns as-is if not found
         """
-        models = cls._get_llm_models()
-        resolved = models.get(alias, alias)
+        _ensure_config_loaded()
+        entry = _LLM_MODELS_RAW.get(alias)
+
+        if entry is None:
+            return alias  # Not found, return as-is
+
+        resolved = _extract_model_id(entry)
 
         if resolved != alias:
             logger.debug(f"Resolved LLM alias: {alias} → {resolved}")
@@ -294,24 +587,14 @@ class ModelRegistry:
 
     @classmethod
     def resolve_embedding(cls, alias: str) -> str:
-        """
-        Resolve embedding model alias to full model name.
+        """Resolve embedding model alias to full model name."""
+        _ensure_config_loaded()
+        entry = _EMBEDDING_MODELS_RAW.get(alias)
 
-        Args:
-            alias: Model alias (e.g., "bge-m3", "voyage-3-large")
+        if entry is None:
+            return alias
 
-        Returns:
-            Full model name (e.g., "BAAI/bge-m3")
-
-        Example:
-            >>> ModelRegistry.resolve_embedding("bge-m3")
-            'BAAI/bge-m3'
-
-            >>> ModelRegistry.resolve_embedding("text-embedding-3-large")
-            'text-embedding-3-large'
-        """
-        models = cls._get_embedding_models()
-        resolved = models.get(alias, alias)
+        resolved = _extract_model_id(entry)
 
         if resolved != alias:
             logger.debug(f"Resolved embedding alias: {alias} → {resolved}")
@@ -320,24 +603,14 @@ class ModelRegistry:
 
     @classmethod
     def resolve_reranker(cls, alias: str) -> str:
-        """
-        Resolve reranker model alias to full model name.
+        """Resolve reranker model alias to full model name."""
+        _ensure_config_loaded()
+        entry = _RERANKER_MODELS_RAW.get(alias)
 
-        Args:
-            alias: Model alias (e.g., "default", "fast", "sota")
+        if entry is None:
+            return alias
 
-        Returns:
-            Full model name (e.g., "cross-encoder/ms-marco-MiniLM-L-6-v2")
-
-        Example:
-            >>> ModelRegistry.resolve_reranker("fast")
-            'cross-encoder/ms-marco-MiniLM-L-6-v2'
-
-            >>> ModelRegistry.resolve_reranker("sota")
-            'BAAI/bge-reranker-large'
-        """
-        models = cls._get_reranker_models()
-        resolved = models.get(alias, alias)
+        resolved = _extract_model_id(entry)
 
         if resolved != alias:
             logger.debug(f"Resolved reranker alias: {alias} → {resolved}")
@@ -353,115 +626,56 @@ class ModelRegistry:
             model: Model name or alias
 
         Returns:
-            Embedding dimensions (default: 4096 for Qwen3-Embedding-8B)
-
-        Example:
-            >>> ModelRegistry.get_embedding_dimensions("Qwen/Qwen3-Embedding-8B")
-            4096
-
-            >>> ModelRegistry.get_embedding_dimensions("bge-m3")
-            1024
+            Embedding dimensions (default: 4096)
         """
-        dims = cls._get_embedding_dimensions()
+        try:
+            config = cls.get_model_config(model, "embedding")
+            if isinstance(config, EmbeddingModelData):
+                return config.dimensions
+        except KeyError:
+            pass
 
-        # First try direct lookup
-        if model in dims:
-            return dims[model]
-
-        # Try resolving alias first
+        # Fallback to legacy dimensions dict
+        _ensure_config_loaded()
         resolved = cls.resolve_embedding(model)
-        if resolved in dims:
-            return dims[resolved]
+        if resolved in _EMBEDDING_DIMENSIONS:
+            return _EMBEDDING_DIMENSIONS[resolved]
+        if model in _EMBEDDING_DIMENSIONS:
+            return _EMBEDDING_DIMENSIONS[model]
 
-        # Default to 4096 (Qwen3-Embedding-8B - current system default)
-        logger.warning(
-            f"Embedding dimensions not found for '{model}', defaulting to 4096 (Qwen3)"
-        )
+        # Default
+        logger.warning(f"Embedding dimensions not found for '{model}', defaulting to 4096")
         return 4096
-
-    # ========================================================================
-    # VALIDATION METHODS
-    # ========================================================================
 
     @classmethod
     def is_local_embedding(cls, model: str) -> bool:
         """
-        Check if embedding model is local (HuggingFace).
+        Check if embedding model is local (no API key required).
 
         Args:
             model: Model name or alias
 
         Returns:
-            True if model is local (no API key required)
-
-        Example:
-            >>> ModelRegistry.is_local_embedding("bge-m3")
-            True
-
-            >>> ModelRegistry.is_local_embedding("text-embedding-3-large")
-            False
+            True if model is local
         """
-        # Resolve alias first
-        resolved = cls.resolve_embedding(model)
+        try:
+            config = cls.get_model_config(model, "embedding")
+            if isinstance(config, EmbeddingModelData):
+                return config.is_local
+        except KeyError:
+            pass
 
-        # Check if model starts with HuggingFace patterns
+        # Fallback: infer from patterns
+        resolved = cls.resolve_embedding(model)
         local_patterns = ["BAAI/", "sentence-transformers/", "intfloat/"]
         return any(resolved.startswith(pattern) for pattern in local_patterns)
 
-    @classmethod
-    def get_provider(cls, model: str, model_type: str = "llm") -> str:
-        """
-        Get provider name for a model.
-
-        Args:
-            model: Model name or alias
-            model_type: Type of model ("llm", "embedding", "reranker")
-
-        Returns:
-            Provider name ("anthropic", "openai", "google", "voyage", "huggingface", "deepinfra")
-
-        Example:
-            >>> ModelRegistry.get_provider("haiku", "llm")
-            'anthropic'
-
-            >>> ModelRegistry.get_provider("bge-m3", "embedding")
-            'huggingface'
-        """
-        # Resolve alias
-        if model_type == "llm":
-            resolved = cls.resolve_llm(model)
-        elif model_type == "embedding":
-            resolved = cls.resolve_embedding(model)
-        elif model_type == "reranker":
-            resolved = cls.resolve_reranker(model)
-        else:
-            resolved = model
-
-        # Detect provider by model name pattern
-        resolved_lower = resolved.lower()
-
-        if any(kw in resolved_lower for kw in ["claude", "haiku", "sonnet", "opus"]):
-            return "anthropic"
-        elif any(kw in resolved_lower for kw in ["gpt-", "o1", "o3", "text-embedding"]):
-            return "openai"
-        elif "gemini" in resolved_lower:
-            return "google"
-        elif "voyage" in resolved_lower:
-            return "voyage"
-        elif any(pattern in resolved for pattern in ["BAAI/", "intfloat/", "sentence-transformers/", "cross-encoder/"]):
-            return "huggingface"
-        elif any(kw in resolved for kw in ["Qwen/", "meta-llama/", "qwen"]):
-            return "deepinfra"
-        else:
-            # Cannot auto-detect provider - user must specify explicitly
-            raise ValueError(
-                f"Unable to auto-detect provider for model '{resolved}' (type: {model_type}).\n"
-                f"Supported providers: anthropic, openai, google, voyage, huggingface, deepinfra\n"
-                f"Please set '{model_type}_provider' explicitly in config.json"
-            )
+    # ========================================================================
+    # UTILITY METHODS
+    # ========================================================================
 
     @classmethod
-    def list_models(cls, model_type: str = "all") -> Dict[str, str]:
+    def list_models(cls, model_type: str = "all") -> Dict[str, Any]:
         """
         List all models of given type.
 
@@ -469,27 +683,39 @@ class ModelRegistry:
             model_type: Type of models to list ("llm", "embedding", "reranker", "all")
 
         Returns:
-            Dictionary of alias -> full_name
-
-        Example:
-            >>> models = ModelRegistry.list_models("llm")
-            >>> for alias, name in models.items():
-            >>>     print(f"{alias} → {name}")
+            Dictionary of alias -> model_id
         """
+        _ensure_config_loaded()
+
         if model_type == "llm":
-            return cls._get_llm_models().copy()
+            return {k: _extract_model_id(v) for k, v in _LLM_MODELS_RAW.items()}
         elif model_type == "embedding":
-            return cls._get_embedding_models().copy()
+            return {k: _extract_model_id(v) for k, v in _EMBEDDING_MODELS_RAW.items()}
         elif model_type == "reranker":
-            return cls._get_reranker_models().copy()
+            return {k: _extract_model_id(v) for k, v in _RERANKER_MODELS_RAW.items()}
         elif model_type == "all":
             return {
-                "llm": cls._get_llm_models().copy(),
-                "embedding": cls._get_embedding_models().copy(),
-                "reranker": cls._get_reranker_models().copy(),
+                "llm": cls.list_models("llm"),
+                "embedding": cls.list_models("embedding"),
+                "reranker": cls.list_models("reranker"),
             }
         else:
             raise ValueError(f"Unknown model_type: {model_type}")
+
+    @classmethod
+    def has_pricing(cls, model: str, model_type: str = "llm") -> bool:
+        """
+        Check if model has pricing data in config.
+
+        Args:
+            model: Model alias or ID
+            model_type: "llm" or "embedding"
+
+        Returns:
+            True if pricing is available and non-zero
+        """
+        pricing = cls.get_pricing(model, model_type)
+        return pricing["input"] > 0 or pricing["output"] > 0
 
 
 # Example usage
@@ -498,43 +724,33 @@ if __name__ == "__main__":
 
     # Example 1: Resolve LLM aliases
     print("1. LLM model resolution...")
-    llm_aliases = ["haiku", "sonnet", "gpt-4o-mini"]
+    llm_aliases = ["haiku", "sonnet", "gpt-4o-mini", "minimax-m2"]
     for alias in llm_aliases:
         resolved = ModelRegistry.resolve_llm(alias)
         print(f"   {alias:20s} → {resolved}")
 
-    # Example 2: Resolve embedding aliases
-    print("\n2. Embedding model resolution...")
-    embed_aliases = ["bge-m3", "text-embedding-3-large", "voyage-3-large"]
+    # Example 2: Get provider (from config)
+    print("\n2. Provider detection (from config)...")
+    for alias in llm_aliases:
+        try:
+            provider = ModelRegistry.get_provider(alias, "llm")
+            print(f"   {alias:20s} → {provider}")
+        except ValueError as e:
+            print(f"   {alias:20s} → ERROR: {e}")
+
+    # Example 3: Get pricing (from config)
+    print("\n3. Pricing lookup (from config)...")
+    for alias in llm_aliases:
+        pricing = ModelRegistry.get_pricing(alias, "llm")
+        print(f"   {alias:20s} → ${pricing['input']:.2f} in / ${pricing['output']:.2f} out")
+
+    # Example 4: Embedding dimensions
+    print("\n4. Embedding dimensions...")
+    embed_aliases = ["bge-m3", "text-embedding-3-large", "qwen3-embedding"]
     for alias in embed_aliases:
-        resolved = ModelRegistry.resolve_embedding(alias)
         dims = ModelRegistry.get_embedding_dimensions(alias)
         is_local = ModelRegistry.is_local_embedding(alias)
         local_str = " (local)" if is_local else " (cloud)"
-        print(f"   {alias:25s} → {resolved:40s} dims={dims}{local_str}")
-
-    # Example 3: Resolve reranker aliases
-    print("\n3. Reranker model resolution...")
-    reranker_aliases = ["fast", "accurate", "sota"]
-    for alias in reranker_aliases:
-        resolved = ModelRegistry.resolve_reranker(alias)
-        print(f"   {alias:15s} → {resolved}")
-
-    # Example 4: Get provider
-    print("\n4. Provider detection...")
-    models = [
-        ("haiku", "llm"),
-        ("gpt-4o-mini", "llm"),
-        ("bge-m3", "embedding"),
-        ("text-embedding-3-large", "embedding"),
-    ]
-    for model, model_type in models:
-        provider = ModelRegistry.get_provider(model, model_type)
-        print(f"   {model:25s} ({model_type:10s}) → {provider}")
-
-    # Example 5: List all models
-    print("\n5. List all embedding models...")
-    embeddings = ModelRegistry.list_models("embedding")
-    print(f"   Total: {len(embeddings)} models")
+        print(f"   {alias:25s} → dims={dims}{local_str}")
 
     print("\n=== All examples completed ===")

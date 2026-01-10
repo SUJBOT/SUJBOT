@@ -3,6 +3,10 @@
 .env.local
 .env.*.local
 
+data
+output
+vector_db
+
 # Python
 __pycache__/
 *.py[cod]
@@ -106,3 +110,11 @@ papers/
 rag_confidence/
 results/
 extraction_dataset/TODO.md
+
+TODO.md
+
+.env*
+
+# Backup archives
+backups/
+sujbot_backup_*.tar.gz

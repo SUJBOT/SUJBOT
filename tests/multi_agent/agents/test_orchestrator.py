@@ -242,7 +242,7 @@ async def test_empty_agent_sequence_returns_final_answer(orchestrator, mock_prov
             "complexity_score": 0,
             "query_type": "meta",
             "agent_sequence": [],
-            "final_answer": "I am SUJBOT2, a legal document analysis assistant."
+            "final_answer": "I am SUJBOT, a legal document analysis assistant."
         })
     )
 

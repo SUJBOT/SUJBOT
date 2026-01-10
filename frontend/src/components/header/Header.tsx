@@ -108,7 +108,7 @@ export function Header({
                 )}
                 style={{ fontFamily: 'var(--font-display)' }}
               >
-                SUJBOT2
+                SUJBOT
               </h1>
               <p className={cn(
                 'text-xs font-light',

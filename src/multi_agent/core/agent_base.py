@@ -7,18 +7,17 @@ Ensures consistency across all 8 specialized agents.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set
-from datetime import datetime
 import logging
-import time  # For LLM response time measurement
+import time
 
-from pydantic import BaseModel
 from langgraph.graph import StateGraph
 
 from .event_bus import EventBus, EventType
 from .state import ToolExecution
-from ..observability.trajectory import AgentTrajectory, TrajectoryStep, StepType
+from ..observability.trajectory import AgentTrajectory
 
 logger = logging.getLogger(__name__)
 

@@ -32,10 +32,9 @@ from pyvis.network import Network
 
 from src.graph.config import Neo4jConfig
 from src.graph.entity_display import (
+    CATEGORY_NAMES,
     ENTITY_COLORS,
     RELATIONSHIP_COLORS,
-    CATEGORY_NAMES,
-    get_entities_by_category,
 )
 from src.graph.graphiti_types import get_entity_type_categories
 from src.graph.neo4j_manager import Neo4jManager

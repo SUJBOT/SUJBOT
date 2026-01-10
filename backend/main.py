@@ -1,5 +1,5 @@
 """
-FastAPI Backend for SUJBOT2 Web Interface
+FastAPI Backend for SUJBOT Web Interface
 
 Provides RESTful API and SSE streaming for the agent.
 Strictly imports from src/ without modifications.
@@ -64,6 +64,9 @@ from backend.routes.admin import router as admin_router, set_admin_dependencies
 
 # Import PostgreSQL adapter for user/conversation storage
 from src.storage.postgres_adapter import PostgreSQLStorageAdapter
+
+# Import cost tracking validation
+from src.cost_tracker import validate_pricing_coverage
 
 # Import title generator service
 from backend.services.title_generator import title_generator
@@ -180,8 +183,31 @@ async def lifespan(app: FastAPI):
 
         logger.info("✓ Agent adapter initialized successfully")
 
+        # =====================================================================
+        # 5. Validate Pricing Coverage for Configured Models
+        # =====================================================================
+
+        try:
+            from src.config import get_config
+            config = get_config()
+            missing_pricing = validate_pricing_coverage(config)
+            if missing_pricing:
+                logger.warning("=" * 60)
+                logger.warning("⚠️  MISSING PRICING DATA")
+                logger.warning("Cost tracking will return $0.00 for these models:")
+                for model in missing_pricing:
+                    logger.warning(f"  - {model}")
+                logger.warning("")
+                logger.warning("Fix: Add pricing to config.json model_registry.llm_models")
+                logger.warning("Or run: uv run python scripts/fetch_deepinfra_pricing.py --config-format --update")
+                logger.warning("=" * 60)
+            else:
+                logger.info("✓ All configured models have pricing data")
+        except Exception as e:
+            logger.warning(f"Could not validate pricing coverage: {e}")
+
         logger.info("=" * 60)
-        logger.info("🚀 SUJBOT2 Backend Ready")
+        logger.info("🚀 SUJBOT Backend Ready")
         logger.info("=" * 60)
 
     except Exception as e:
@@ -213,8 +239,8 @@ async def lifespan(app: FastAPI):
 
 # Initialize FastAPI app with lifespan
 app = FastAPI(
-    title="SUJBOT2 Web API",
-    description="Web interface for SUJBOT2 RAG system with authentication",
+    title="SUJBOT Web API",
+    description="Web interface for SUJBOT RAG system with authentication",
     version="2.0.0",  # Incremented for security update
     lifespan=lifespan
 )
@@ -845,7 +871,7 @@ async def delete_message(conversation_id: str, message_id: str):
 async def root():
     """Root endpoint with API info."""
     return {
-        "name": "SUJBOT2 Web API",
+        "name": "SUJBOT Web API",
         "version": "1.0.0",
         "status": "running",
         "docs": "/docs"

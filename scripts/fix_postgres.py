@@ -17,11 +17,11 @@ import os
 import sys
 from pathlib import Path
 
+import asyncpg
+from dotenv import load_dotenv
+
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from dotenv import load_dotenv
-import asyncpg
 
 load_dotenv()
 
@@ -240,7 +240,7 @@ async def identify_short_chunks(conn, cleanup: bool = False, dry_run: bool = Fal
 async def run_fixes(dry_run: bool = False, cleanup_short: bool = False):
     """Run all PostgreSQL fixes."""
     print("=" * 60)
-    print("SUJBOT2 PostgreSQL Database Fixes")
+    print("SUJBOT PostgreSQL Database Fixes")
     print("=" * 60)
     print(f"Mode: {'DRY RUN (no changes)' if dry_run else 'LIVE (applying changes)'}")
 

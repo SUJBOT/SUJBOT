@@ -1,5 +1,5 @@
 /**
- * React Admin Auth Provider for SUJBOT2 Admin API
+ * React Admin Auth Provider for SUJBOT Admin API
  *
  * Handles admin authentication:
  * - POST /admin/login → login

@@ -1,4 +1,4 @@
-# SUJBOT2 Multi-Agent System Architecture Overview
+# SUJBOT Multi-Agent System Architecture Overview
 
 **Last Updated:** 2025-12-15
 **Status:** Production Ready (Phase 7 + SSOT Refactoring)
@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-The SUJBOT2 multi-agent system is a LangGraph-based orchestration framework that coordinates 8 specialized agents to process complex legal/technical queries. The system implements research-backed patterns from Harvey AI, Definely, and academic papers (L-MARS, PAKTON, MASLegalBench).
+The SUJBOT multi-agent system is a LangGraph-based orchestration framework that coordinates 8 specialized agents to process complex legal/technical queries. The system implements research-backed patterns from Harvey AI, Definely, and academic papers (L-MARS, PAKTON, MASLegalBench).
 
 ### Key Characteristics:
 - **8 Specialized Agents** with distinct responsibilities and toolsets
@@ -1248,7 +1248,7 @@ State: MultiAgentState
 
 ## Summary
 
-The SUJBOT2 multi-agent system is a sophisticated, research-backed orchestration framework that:
+The SUJBOT multi-agent system is a sophisticated, research-backed orchestration framework that:
 
 1. **Routes queries intelligently** based on complexity analysis
 2. **Orchestrates 8 specialized agents** with distinct roles

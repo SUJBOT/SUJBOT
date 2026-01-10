@@ -1,66 +1,79 @@
-# docker-compose.override.yml
-# Automatically loaded in development mode (docker-compose up)
-# Provides hot reload and source code mounting
+# Docker Compose override for developer: michal
+# Auto-generated - customize as needed
+#
+# NOTE: This override requires production to be running first (for sujbot_sujbot_net network)
+# To start dev without prod: docker network create sujbot_sujbot_net
+#
+# WARNING: Dev and prod share the same Docker volumes by default.
+# Running both simultaneously may cause data corruption!
+# For isolated dev volumes, uncomment the volumes section at the bottom.
 
 services:
-  backend:
-    build:
-      target: development
-    volumes:
-      # Mount source code for hot reload (no root mount to avoid conflicts)
-      - ./src:/app/src
-      - ./backend:/app/backend
-      - ./prompts:/app/prompts
-      - ./scripts:/app/scripts
-      - ./vector_db:/app/vector_db:ro
-      - ./config.json:/app/config.json
-      # Exclude Python cache from host (anonymous volumes)
-      - /app/src/__pycache__
-      - /app/backend/__pycache__
-    command: >
-      uvicorn backend.main:app
-      --host 0.0.0.0
-      --port 8000
-      --reload
-      --reload-dir /app/backend
-      --reload-dir /app/src
-      --log-level info
-      --loop asyncio
-    environment:
-      # Development settings
-      STORAGE_BACKEND: postgresql  # Use PostgreSQL in dev
-      LOG_LEVEL: DEBUG
-      AUTH_SECRET_KEY: ${AUTH_SECRET_KEY}
-
-  frontend:
-    build:
-      target: development
-    volumes:
-      # Mount source for hot reload
-      - ./frontend/src:/app/src
-      - ./frontend/public:/app/public
-      - ./frontend/index.html:/app/index.html
-      - ./frontend/vite.config.ts:/app/vite.config.ts
-      - ./frontend/tsconfig.json:/app/tsconfig.json
-      - ./frontend/tsconfig.app.json:/app/tsconfig.app.json
-      - ./frontend/tailwind.config.js:/app/tailwind.config.js
-      # Prevent node_modules from being overridden by host
-      - /app/node_modules
-    command: npm run dev -- --host 0.0.0.0
-    environment:
-      # Empty = relative URLs, goes through Nginx proxy (same-origin)
-      VITE_API_BASE_URL: ""
+  neo4j:
+    container_name: sujbot_dev_neo4j
+    ports:
+      - "7475:7474"   # Browser (prod: 7474)
+      - "7688:7687"   # Bolt (prod: 7687)
 
   postgres:
-    # Enable verbose logging in development
-    command: >
-      postgres
-      -c config_file=/etc/postgresql/postgresql.conf
-      -c log_statement=all
-      -c log_duration=on
-      -c log_min_duration_statement=100
+    container_name: sujbot_dev_postgres
     ports:
-      # DEVELOPMENT ONLY: Expose PostgreSQL for direct connection (pgAdmin, DBeaver)
-      # WARNING: This port mapping is REMOVED in production (docker-compose.yml)
-      # Never expose database ports in production deployments
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "5433:5432"   # For pgAdmin/DBeaver access (prod: 5432)
+
+  redis:
+    container_name: sujbot_dev_redis
+    ports:
+      - "6380:6379"   # Redis CLI access (prod: 6379)
+
+  backend:
+    container_name: sujbot_dev_backend
+    ports:
+      - "8200:8000"   # API (prod: 8000)
+    environment:
+      LANGSMITH_PROJECT_NAME: sujbot-michal
+      LOG_LEVEL: DEBUG
+
+  frontend:
+    container_name: sujbot_dev_frontend
+    ports:
+      - "5175:5173"   # Vite dev server (prod: 80)
+
+  nginx:
+    container_name: sujbot_dev_nginx
+    ports:
+      - "8280:80"     # HTTP (prod: 80)
+      - "8443:443"    # HTTPS (prod: 443)
+
+  pgadmin:
+    container_name: sujbot_dev_pgadmin
+    ports:
+      - "5052:80"     # pgAdmin UI (prod: 5050)
+
+  certbot:
+    container_name: sujbot_dev_certbot
+
+# Isolated dev network (separate from production to avoid DNS conflicts)
+networks:
+  sujbot_net:
+    driver: bridge
+    name: sujbot_dev_net
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16
+
+# Uncomment below for isolated dev volumes (prevents data sharing with prod)
+# volumes:
+#   postgres_data:
+#     name: sujbot_dev_postgres_data
+#   neo4j_data:
+#     name: sujbot_dev_neo4j_data
+#   redis_data:
+#     name: sujbot_dev_redis_data
+#   model_cache:
+#     name: sujbot_dev_model_cache
+#   pgadmin_data:
+#     name: sujbot_dev_pgadmin_data
+#   certbot_certs:
+#     name: sujbot_dev_certbot_certs
+#   certbot_www:
+#     name: sujbot_dev_certbot_www

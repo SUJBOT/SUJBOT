@@ -1,5 +1,5 @@
 -- ============================================================================
--- SUJBOT2 Message Feedback Schema
+-- SUJBOT Message Feedback Schema
 -- ============================================================================
 -- This script creates the message_feedback table for user ratings:
 -- 1. Thumbs up/down ratings on assistant messages

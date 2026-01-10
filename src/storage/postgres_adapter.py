@@ -13,7 +13,7 @@ Supports metadata filtering for:
 import asyncio
 import asyncpg
 import numpy as np
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Dict, Optional, Any, TYPE_CHECKING
 import logging
 
@@ -144,10 +144,6 @@ class MetadataFilter:
             self.entity_types,
             self.min_confidence is not None,
         ])
-
-# NOTE: nest_asyncio.apply() removed - should only be called once in entry point
-# (e.g., langsmith_eval.py, FastAPI app.py) to avoid event loop conflicts
-
 
 def _sanitize_tsquery(text: str) -> str:
     """

@@ -1,6 +1,6 @@
 {
-  "name": "SUJBOT2 - Legal & Technical Document Intelligence",
-  "short_name": "SUJBOT2",
+  "name": "SUJBOT - Legal & Technical Document Intelligence",
+  "short_name": "SUJBOT",
   "description": "Multi-agent RAG system for legal and technical document analysis",
   "start_url": "/",
   "display": "standalone",

@@ -36,9 +36,10 @@ import asyncio
 import json
 import logging
 import os
-from pathlib import Path
-from typing import Optional, Dict, List
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Dict, List, Optional
+
 import numpy as np
 
 from src.config import (

@@ -42,7 +42,7 @@ class LangSmithIntegration:
         self.enabled = config.get("enabled", False)
         # Priority: env var > config (for security - don't store API key in config.json)
         self.api_key = os.getenv("LANGSMITH_API_KEY") or config.get("api_key")
-        self.project_name = os.getenv("LANGSMITH_PROJECT_NAME") or config.get("project_name", "sujbot2-multi-agent")
+        self.project_name = os.getenv("LANGSMITH_PROJECT_NAME") or config.get("project_name", "sujbot-multi-agent")
         # EU endpoint support - use eu.api.smith.langchain.com for EU workspaces
         self.endpoint = os.getenv("LANGSMITH_ENDPOINT") or config.get("endpoint", "https://api.smith.langchain.com")
         self.trace_logging_level = config.get("trace_logging_level", "INFO")

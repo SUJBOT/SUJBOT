@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
-**SUJBOT2**: Production RAG system for legal/technical documents with multi-agent orchestration.
+**SUJBOT**: Production RAG system for legal/technical documents with multi-agent orchestration.
 
 ## Debugging with LangSmith
 
@@ -26,9 +26,9 @@ Run QA evaluation on indexed documents using LLM-as-judge.
 ```bash
 uv run python scripts/langsmith_eval.py \
     --dataset-path dataset/dataset_exp_ver_2.json \
-    --dataset-name "sujbot2-eval-qa-40" \
+    --dataset-name "sujbot-eval-qa-40" \
     --replace-dataset \
-    --experiment-prefix "sujbot2-qa-40-optimized" \
+    --experiment-prefix "sujbot-qa-40-optimized" \
     --judge-model anthropic:claude-sonnet-4-5
 ```
 
@@ -50,7 +50,7 @@ uv run python scripts/langsmith_eval.py --judge-model openai:gpt-4o-mini
 - `completeness` - Are all key points covered?
 
 **Dataset:** `dataset/dataset_exp_ver_2.json` (40 Czech legal/nuclear QA pairs)
-**LangSmith Dataset:** `sujbot2-eval-qa-40`
+**LangSmith Dataset:** `sujbot-eval-qa-40`
 
 ## Common Commands
 
@@ -494,13 +494,37 @@ location ~ ^/(health|docs|openapi.json|chat|models|clarify|auth|conversations|se
 - **Development:** `gpt-4o-mini` (best cost/performance)
 - **Budget:** `claude-haiku-4-5` (fastest)
 
+### Adding New Models
+
+**IMPORTANT:** When adding a new model, ALWAYS fetch current pricing from the provider API first!
+
+**Pricing sources:**
+- **Anthropic:** https://docs.anthropic.com/en/docs/about-claude/models#model-comparison-table
+- **OpenAI:** https://platform.openai.com/docs/models
+- **DeepInfra:** https://deepinfra.com/models (or API: `curl https://api.deepinfra.com/models/list`)
+- **Google:** https://ai.google.dev/gemini-api/docs/models/gemini
+
+**Checklist for adding a new model:**
+1. Fetch current pricing (input/output per 1M tokens)
+2. Add model to `config.json` → `model_registry.llm_models` section with full metadata:
+   ```json
+   "my-model": {
+     "id": "vendor/model-name",
+     "provider": "deepinfra",
+     "pricing": { "input": 0.50, "output": 1.50 },
+     "context_window": 128000
+   }
+   ```
+3. If DeepInfra: also add to `agent_variants.deepinfra_supported_models` list
+4. Test the model works: `uv run python -c "from src.agent.providers.factory import create_provider; p = create_provider('model-name'); print(p)"`
+
 ### LangSmith Observability
 
 **Configuration:**
 ```bash
 # .env (EU endpoint for EU workspaces)
 LANGSMITH_API_KEY=lsv2_pt_xxx
-LANGSMITH_PROJECT_NAME=sujbot2-multi-agent
+LANGSMITH_PROJECT_NAME=sujbot-multi-agent
 LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com  # US: https://api.smith.langchain.com
 ```
 
@@ -552,5 +576,5 @@ curl -s "https://eu.api.smith.langchain.com/api/v1/runs/query" \
 
 ---
 
-**Last Updated:** 2025-12-15
+**Last Updated:** 2026-01-10
 **Version:** PHASE 1-7 + Multi-Agent + Graphiti KG + Gemini Extractor + Exception Hierarchy + SSOT Refactoring + LangSmith Evaluation + Prompts SSOT

@@ -1,5 +1,5 @@
 /**
- * React Admin Data Provider for SUJBOT2 Admin API
+ * React Admin Data Provider for SUJBOT Admin API
  *
  * Maps React Admin data operations to our backend API:
  * - GET /admin/users → getList, getMany

@@ -1,4 +1,4 @@
-# Multi-stage Dockerfile for SUJBOT2 Frontend (React + Vite)
+# Multi-stage Dockerfile for SUJBOT Frontend (React + Vite)
 
 ARG NODE_VERSION=22
 

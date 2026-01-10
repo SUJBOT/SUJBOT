@@ -3,7 +3,7 @@
 **Version:** 2025-11-26
 **Status:** GRAPHITI TEMPORAL KG ✅ (Replaced legacy Gemini KG Extractor)
 
-This document explains SUJBOT2's temporal knowledge graph system powered by **Graphiti** for entity extraction and relationship management with temporal awareness.
+This document explains SUJBOT's temporal knowledge graph system powered by **Graphiti** for entity extraction and relationship management with temporal awareness.
 
 ---
 

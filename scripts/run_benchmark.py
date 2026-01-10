@@ -20,14 +20,13 @@ Outputs:
     - benchmark_results/MULTI-AGENT_YYYYMMDD_HHMMSS.md
 """
 
-import asyncio
 import argparse
+import asyncio
 import logging
 import sys
 from datetime import datetime
 from pathlib import Path
 
-# Setup logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)-8s] %(message)s",

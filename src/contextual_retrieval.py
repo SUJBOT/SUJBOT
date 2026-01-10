@@ -19,11 +19,10 @@ Reference: https://www.anthropic.com/news/contextual-retrieval
 
 import logging
 import os
-import re
-from typing import Optional, List, Tuple
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-import time
+from typing import List, Optional, Tuple
 
 # Import config
 try:

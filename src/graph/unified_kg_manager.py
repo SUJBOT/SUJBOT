@@ -10,12 +10,11 @@ Manages unified knowledge graph construction with:
 Architecture: Pragmatic Balance (research-based, production-ready)
 """
 
-import json
 import logging
-from pathlib import Path
-from typing import List, Dict, Set, Optional, Tuple, Any
-from datetime import datetime
 from collections import defaultdict
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .models import Entity, Relationship, KnowledgeGraph, EntityType, RelationshipType
 from .deduplicator import EntityDeduplicator

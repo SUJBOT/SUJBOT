@@ -12,23 +12,23 @@ Orchestrates:
 Replaces the old single-agent CLI (src/agent/cli.py).
 """
 
-import logging
 import asyncio
 import json
+import logging
 import os
 import uuid
-from typing import Optional, Dict, Any, AsyncGenerator, List
 from pathlib import Path
+from typing import Any, AsyncGenerator, Dict, List, Optional
+
 from dotenv import load_dotenv
 
-from .core.state import MultiAgentState, ExecutionPhase
-from .core.agent_registry import AgentRegistry
-from .routing.complexity_analyzer import ComplexityAnalyzer
-from .routing.workflow_builder import WorkflowBuilder
-from .checkpointing import create_checkpointer, StateManager
 from .caching import create_cache_manager
+from .checkpointing import create_checkpointer, StateManager
+from .core.agent_registry import AgentRegistry
+from .core.event_bus import Event, EventBus, EventType
+from .core.state import ExecutionPhase, MultiAgentState
 from .observability import setup_langsmith
-from .core.event_bus import EventBus, Event, EventType
+from .routing.workflow_builder import WorkflowBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,6 @@ class MultiAgentRunner:
         self.cache_manager = None
         self.langsmith = None
         self.agent_registry = None
-        self.complexity_analyzer = None
         self.workflow_builder = None
         self.vector_store = None  # Store vector store for orchestrator
 
@@ -91,11 +90,7 @@ class MultiAgentRunner:
             # Register all 8 agents (orchestrator needs vector_store from tools)
             await self._register_agents()
 
-            # 5. Initialize routing components
-            routing_config = self.multi_agent_config.get("routing", {})
-            self.complexity_analyzer = ComplexityAnalyzer(routing_config)
-
-            # 6. Initialize workflow builder
+            # 5. Initialize workflow builder
             # IMPORTANT: Use async checkpointer for astream() compatibility
             async_checkpointer = None
             if self.checkpointer:
@@ -328,7 +323,7 @@ class MultiAgentRunner:
                                 node_labels = record.get("node_labels", [])
 
                                 # Validate required fields
-                                # Support both SUJBOT2 schema (id/type) and Graphiti schema (uuid/labels)
+                                # Support both SUJBOT schema (id/type) and Graphiti schema (uuid/labels)
                                 entity_id = node.get("id") or node.get("uuid", "")
                                 # Try multiple sources for type: direct property, entity_type, or node labels
                                 # Filter out generic "Entity" label to get the actual type
@@ -1104,7 +1099,7 @@ async def main():
     load_dotenv()
 
     # Set up argument parser
-    parser = argparse.ArgumentParser(description="SUJBOT2 Multi-Agent System")
+    parser = argparse.ArgumentParser(description="SUJBOT Multi-Agent System")
     parser.add_argument("--config", type=str, help="Path to config.json", default="config.json")
     parser.add_argument("--query", type=str, help="Query to execute")
     parser.add_argument("--interactive", action="store_true", help="Interactive mode")
@@ -1161,7 +1156,7 @@ async def main():
 
     elif args.interactive:
         # Interactive mode
-        print("SUJBOT2 Multi-Agent System (Interactive Mode)")
+        print("SUJBOT Multi-Agent System (Interactive Mode)")
         print("Type 'quit' or 'exit' to quit")
         print("=" * 80)
 

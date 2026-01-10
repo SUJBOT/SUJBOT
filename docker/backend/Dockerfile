@@ -1,4 +1,4 @@
-# Multi-stage Dockerfile for SUJBOT2 Backend
+# Multi-stage Dockerfile for SUJBOT Backend
 # Supports both development and production builds
 
 ARG PYTHON_VERSION=3.10

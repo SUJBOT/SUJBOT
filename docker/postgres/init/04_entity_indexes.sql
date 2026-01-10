@@ -1,5 +1,5 @@
 -- ============================================================================
--- Entity Labeling Indexes for SUJBOT2
+-- Entity Labeling Indexes for SUJBOT
 -- ============================================================================
 -- This migration adds GIN indexes for entity-based queries on chunk metadata.
 -- Entities are stored in vectors.layer3.metadata as:

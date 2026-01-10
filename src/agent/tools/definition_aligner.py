@@ -11,7 +11,6 @@ from pydantic import Field
 
 from ._base import BaseTool, ToolInput, ToolResult
 from ._registry import register_tool
-from ._utils import format_chunk_result, generate_citation, validate_k_parameter
 
 logger = logging.getLogger(__name__)
 

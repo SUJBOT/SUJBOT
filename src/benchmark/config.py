@@ -1,7 +1,7 @@
 """
 Benchmark configuration.
 
-Follows existing SUJBOT2 config pattern with Pydantic dataclasses.
+Follows existing SUJBOT config pattern with Pydantic dataclasses.
 """
 
 import os

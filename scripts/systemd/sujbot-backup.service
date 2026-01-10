@@ -1,0 +1,21 @@
+[Unit]
+Description=SUJBOT Database Backup
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=michal
+WorkingDirectory=/home/michal/SUJBOT
+ExecStart=/home/michal/SUJBOT/scripts/backup_cron.sh
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+# NOTE: Needs write access to entire project for temporary backup directory
+ReadWritePaths=/home/michal/SUJBOT
+
+[Install]
+WantedBy=multi-user.target

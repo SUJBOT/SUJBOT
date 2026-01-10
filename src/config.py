@@ -812,7 +812,7 @@ def validate_config_on_startup():
         print(f"\n❌ ERROR: Failed to load configuration!")
         print(f"\n{e}")
         print("\nUnexpected error - please report this issue:")
-        print("https://github.com/ADS-teamA/SUJBOT2/issues")
+        print("https://github.com/ADS-teamA/SUJBOT/issues")
         sys.exit(1)
 
 

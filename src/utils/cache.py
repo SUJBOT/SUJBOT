@@ -1,5 +1,5 @@
 """
-Unified cache abstractions for SUJBOT2.
+Unified cache abstractions for SUJBOT.
 
 Provides SSOT (Single Source of Truth) caching implementations:
 - LRUCache: Least Recently Used cache with size limit

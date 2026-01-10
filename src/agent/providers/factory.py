@@ -1,7 +1,12 @@
 """
 Provider factory for creating appropriate provider instance.
 
-Automatically detects provider from model name and creates correct implementation.
+SSOT: Provider detection now uses ModelRegistry.get_provider() which reads
+from config.json model_registry section. Pattern matching is only used as
+fallback for models not in config.
+
+This simplifies adding new models - just add to config.json with explicit
+provider field, no code changes needed.
 """
 
 import logging
@@ -146,15 +151,27 @@ def detect_provider_from_model(model: str) -> str:
     """
     Detect provider from model name.
 
+    SSOT: Delegates to ModelRegistry.get_provider() which reads from config.json.
+    Pattern matching is used as fallback for models not in config.
+
     Args:
-        model: Model name
+        model: Model name or alias
 
     Returns:
-        Provider name ("anthropic" or "openai")
+        Provider name ("anthropic", "openai", "google", "deepinfra")
 
     Raises:
         ValueError: If provider cannot be determined
     """
+    try:
+        from ...utils.model_registry import ModelRegistry
+        return ModelRegistry.get_provider(model, "llm")
+    except ImportError as e:
+        logger.debug(f"ModelRegistry unavailable, using pattern fallback: {e}")
+    except (ValueError, KeyError) as e:
+        logger.debug(f"ModelRegistry lookup failed for '{model}', using pattern fallback: {e}")
+
+    # Fallback: pattern matching for models not in config
     model_lower = model.lower()
 
     # Anthropic patterns
@@ -169,12 +186,17 @@ def detect_provider_from_model(model: str) -> str:
     if "gemini" in model_lower:
         return "google"
 
-    # DeepInfra patterns (Qwen and Llama models)
-    if any(pattern in model_lower for pattern in ["qwen", "llama"]):
+    # DeepInfra patterns (Qwen, Llama, MiniMax models)
+    if any(pattern in model_lower for pattern in ["qwen", "llama", "minimax"]):
+        return "deepinfra"
+
+    # Full model ID patterns (HuggingFace-style paths)
+    if any(p in model for p in ["Qwen/", "meta-llama/", "MiniMaxAI/"]):
         return "deepinfra"
 
     raise ValueError(
         f"Cannot determine provider for model: {model}\n"
-        f"Model name should contain: 'claude', 'haiku', 'sonnet', 'opus' (Anthropic), "
-        f"'gpt-', 'o1', 'o3', 'o4' (OpenAI), 'gemini' (Google), or 'qwen'/'llama' (DeepInfra)"
+        f"Add model to config.json model_registry with explicit 'provider' field,\n"
+        f"or use a model name containing: 'claude', 'haiku', 'sonnet', 'opus' (Anthropic), "
+        f"'gpt-', 'o1', 'o3', 'o4' (OpenAI), 'gemini' (Google), or 'qwen'/'llama'/'minimax' (DeepInfra)"
     )

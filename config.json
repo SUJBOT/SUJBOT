@@ -7,7 +7,11 @@
   },
   "storage": {
     "backend": "postgresql",
-    "storage_layers": [1, 2, 3],
+    "storage_layers": [
+      1,
+      2,
+      3
+    ],
     "postgresql": {
       "connection_string_env": "DATABASE_URL",
       "pool_size": 20,
@@ -213,7 +217,7 @@
     "track_provenance": true
   },
   "agent": {
-    "model": "claude-haiku-4-5",
+    "model": "MiniMaxAI/MiniMax-M2",
     "max_tokens": 8192,
     "temperature": 0.3,
     "enable_tool_validation": true,
@@ -295,7 +299,7 @@
   "multi_agent": {
     "enabled": true,
     "orchestrator": {
-      "model": "claude-haiku-4-5",
+      "model": "MiniMaxAI/MiniMax-M2",
       "max_tokens": 1024,
       "temperature": 0.1,
       "enable_prompt_caching": true,
@@ -303,75 +307,109 @@
     },
     "agents": {
       "extractor": {
-        "model": "claude-haiku-4-5",
+        "model": "MiniMaxAI/MiniMax-M2",
         "max_tokens": 2048,
         "temperature": 0.2,
         "timeout_seconds": 30,
         "enable_prompt_caching": true,
-        "tools": ["search", "graphiti_search", "expand_context", "get_document_info"],
+        "tools": [
+          "search",
+          "graphiti_search",
+          "expand_context",
+          "get_document_info"
+        ],
         "system_prompt_file": "prompts/agents/extractor.txt"
       },
       "classifier": {
-        "model": "claude-haiku-4-5",
+        "model": "MiniMaxAI/MiniMax-M2",
         "max_tokens": 1024,
         "temperature": 0.2,
         "timeout_seconds": 20,
         "enable_prompt_caching": true,
-        "tools": ["filtered_search", "explain_results", "get_document_list"],
+        "tools": [
+          "filtered_search",
+          "explain_results",
+          "get_document_list"
+        ],
         "system_prompt_file": "prompts/agents/classifier.txt"
       },
       "compliance": {
-        "model": "claude-haiku-4-5",
+        "model": "MiniMaxAI/MiniMax-M2",
         "max_tokens": 3072,
         "temperature": 0.1,
         "timeout_seconds": 45,
         "enable_prompt_caching": true,
-        "tools": ["graphiti_search", "assess_confidence", "exact_match_search", "hierarchical_search"],
+        "tools": [
+          "graphiti_search",
+          "assess_confidence",
+          "exact_match_search",
+          "hierarchical_search"
+        ],
         "system_prompt_file": "prompts/agents/compliance.txt"
       },
       "risk_verifier": {
-        "model": "claude-haiku-4-5",
+        "model": "MiniMaxAI/MiniMax-M2",
         "max_tokens": 2048,
         "temperature": 0.2,
         "timeout_seconds": 45,
         "enable_prompt_caching": true,
-        "tools": ["multi_doc_synthesizer", "similarity_search", "get_chunk_context"],
+        "tools": [
+          "multi_doc_synthesizer",
+          "similarity_search",
+          "get_chunk_context"
+        ],
         "system_prompt_file": "prompts/agents/risk_verifier.txt"
       },
       "citation_auditor": {
-        "model": "claude-haiku-4-5",
+        "model": "MiniMaxAI/MiniMax-M2",
         "max_tokens": 1024,
         "temperature": 0.1,
         "timeout_seconds": 25,
         "enable_prompt_caching": true,
-        "tools": ["get_document_info", "exact_match_search", "get_chunk_context"],
+        "tools": [
+          "get_document_info",
+          "exact_match_search",
+          "get_chunk_context"
+        ],
         "system_prompt_file": "prompts/agents/citation_auditor.txt"
       },
       "requirement_extractor": {
-        "model": "claude-haiku-4-5",
+        "model": "MiniMaxAI/MiniMax-M2",
         "max_tokens": 2048,
         "temperature": 0.1,
         "timeout_seconds": 45,
         "enable_prompt_caching": true,
-        "tools": ["hierarchical_search", "graphiti_search", "definition_aligner", "multi_doc_synthesizer"],
+        "tools": [
+          "hierarchical_search",
+          "graphiti_search",
+          "definition_aligner",
+          "multi_doc_synthesizer"
+        ],
         "system_prompt_file": "prompts/agents/requirement_extractor.txt"
       },
       "gap_synthesizer": {
-        "model": "claude-haiku-4-5",
+        "model": "MiniMaxAI/MiniMax-M2",
         "max_tokens": 3072,
         "temperature": 0.3,
         "timeout_seconds": 60,
         "enable_prompt_caching": true,
-        "tools": ["browse_entities", "graphiti_search", "multi_doc_synthesizer"],
+        "tools": [
+          "browse_entities",
+          "graphiti_search",
+          "multi_doc_synthesizer"
+        ],
         "system_prompt_file": "prompts/agents/gap_synthesizer.txt"
       },
       "report_generator": {
-        "model": "claude-haiku-4-5",
+        "model": "MiniMaxAI/MiniMax-M2",
         "max_tokens": 4096,
         "temperature": 0.3,
         "timeout_seconds": 30,
         "enable_prompt_caching": true,
-        "tools": ["list_available_tools", "get_stats"],
+        "tools": [
+          "list_available_tools",
+          "get_stats"
+        ],
         "system_prompt_file": "prompts/agents/report_generator.txt"
       }
     },
@@ -380,7 +418,7 @@
       "complexity_threshold_high": 70,
       "enable_parallel_execution": true,
       "max_parallel_agents": 5,
-      "complexity_model": "claude-haiku-4-5-20251001"
+      "complexity_model": "MiniMaxAI/MiniMax-M2"
     },
     "caching": {
       "enable_regulatory_cache": true,
@@ -403,7 +441,7 @@
     "langsmith": {
       "enabled": true,
       "api_key_env": "LANGSMITH_API_KEY",
-      "project_name": "sujbot2-multi-agent",
+      "project_name": "sujbot-multi-agent",
       "trace_logging_level": "INFO",
       "sample_rate": 1.0
     },
@@ -474,76 +512,225 @@
       "enable_trajectory_capture": true,
       "enable_llm_judge": true,
       "llm_judge_model": "claude-haiku-4-5",
-      "llm_judge_metrics": ["relevance", "faithfulness", "completeness"],
+      "llm_judge_metrics": [
+        "relevance",
+        "faithfulness",
+        "completeness"
+      ],
       "trajectory_max_steps": 100,
       "send_feedback_to_langsmith": true
     }
   },
   "model_registry": {
     "llm_models": {
-      "haiku": "claude-haiku-4-5-20251001",
-      "claude-haiku": "claude-haiku-4-5-20251001",
-      "claude-haiku-4-5": "claude-haiku-4-5-20251001",
-      "sonnet": "claude-sonnet-4-5-20250929",
-      "claude-sonnet": "claude-sonnet-4-5-20250929",
-      "claude-sonnet-4-5": "claude-sonnet-4-5-20250929",
-      "opus": "claude-opus-4-5-20251101",
-      "claude-opus": "claude-opus-4-5-20251101",
-      "claude-opus-4-5": "claude-opus-4-5-20251101",
-      "gpt-4o": "gpt-4o",
-      "gpt-4o-mini": "gpt-4o-mini",
-      "o1": "o1",
-      "o1-mini": "o1-mini",
-      "o3-mini": "o3-mini",
-      "gemini": "gemini-2.5-flash",
-      "gemini-flash": "gemini-2.5-flash",
-      "gemini-pro": "gemini-2.5-pro",
-      "gemini-2.5-flash": "gemini-2.5-flash",
-      "gemini-2.5-pro": "gemini-2.5-pro",
-      "gemini-2.5-flash-lite": "gemini-2.5-flash-lite",
-      "qwen-72b": "Qwen/Qwen2.5-72B-Instruct",
-      "qwen-7b": "Qwen/Qwen2.5-7B-Instruct",
-      "saul-7b": "Equall/Saul-7B-Instruct-v1"
+      "haiku": {
+        "id": "claude-haiku-4-5-20251001",
+        "provider": "anthropic",
+        "pricing": {"input": 1.00, "output": 5.00},
+        "context_window": 200000,
+        "supports_caching": true
+      },
+      "sonnet": {
+        "id": "claude-sonnet-4-5-20250929",
+        "provider": "anthropic",
+        "pricing": {"input": 3.00, "output": 15.00},
+        "context_window": 200000,
+        "supports_caching": true
+      },
+      "opus": {
+        "id": "claude-opus-4-5-20251101",
+        "provider": "anthropic",
+        "pricing": {"input": 5.00, "output": 25.00},
+        "context_window": 200000,
+        "supports_caching": true,
+        "supports_extended_thinking": true
+      },
+      "gpt-4o": {
+        "id": "gpt-4o",
+        "provider": "openai",
+        "pricing": {"input": 2.50, "output": 10.00},
+        "context_window": 128000
+      },
+      "gpt-4o-mini": {
+        "id": "gpt-4o-mini",
+        "provider": "openai",
+        "pricing": {"input": 0.15, "output": 0.60},
+        "context_window": 128000
+      },
+      "o1": {
+        "id": "o1",
+        "provider": "openai",
+        "pricing": {"input": 15.00, "output": 60.00},
+        "context_window": 200000
+      },
+      "o1-mini": {
+        "id": "o1-mini",
+        "provider": "openai",
+        "pricing": {"input": 3.00, "output": 12.00},
+        "context_window": 128000
+      },
+      "o3-mini": {
+        "id": "o3-mini",
+        "provider": "openai",
+        "pricing": {"input": 3.00, "output": 12.00},
+        "context_window": 200000
+      },
+      "gemini-flash": {
+        "id": "gemini-2.5-flash",
+        "provider": "google",
+        "pricing": {"input": 0.30, "output": 2.50},
+        "context_window": 1000000
+      },
+      "gemini-pro": {
+        "id": "gemini-2.5-pro",
+        "provider": "google",
+        "pricing": {"input": 1.25, "output": 10.00},
+        "context_window": 1000000
+      },
+      "gemini-flash-lite": {
+        "id": "gemini-2.5-flash-lite",
+        "provider": "google",
+        "pricing": {"input": 0.10, "output": 0.40},
+        "context_window": 1000000
+      },
+      "qwen-72b": {
+        "id": "Qwen/Qwen2.5-72B-Instruct",
+        "provider": "deepinfra",
+        "pricing": {"input": 0.12, "output": 0.39},
+        "context_window": 131072
+      },
+      "qwen-7b": {
+        "id": "Qwen/Qwen2.5-7B-Instruct",
+        "provider": "deepinfra",
+        "pricing": {"input": 0.04, "output": 0.10},
+        "context_window": 131072
+      },
+      "llama-4-scout": {
+        "id": "meta-llama/Llama-4-Scout-17B-16E-Instruct",
+        "provider": "deepinfra",
+        "pricing": {"input": 0.08, "output": 0.30},
+        "context_window": 512000
+      },
+      "minimax-m2": {
+        "id": "MiniMaxAI/MiniMax-M2",
+        "provider": "deepinfra",
+        "pricing": {"input": 0.25, "output": 1.02},
+        "context_window": 1000000
+      },
+      "llama-70b": {
+        "id": "meta-llama/Meta-Llama-3.1-70B-Instruct",
+        "provider": "deepinfra",
+        "pricing": {"input": 0.40, "output": 0.40},
+        "context_window": 128000
+      },
+      "llama-8b": {
+        "id": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+        "provider": "deepinfra",
+        "pricing": {"input": 0.03, "output": 0.05},
+        "context_window": 128000
+      }
     },
     "embedding_models": {
-      "text-embedding-3-large": "text-embedding-3-large",
-      "text-embedding-3-small": "text-embedding-3-small",
-      "text-embedding-ada-002": "text-embedding-ada-002",
-      "voyage-3-large": "voyage-3-large",
-      "voyage-3": "voyage-3",
-      "voyage-3-lite": "voyage-3-lite",
-      "voyage-law-2": "voyage-law-2",
-      "bge-m3": "BAAI/bge-m3",
-      "bge-large": "BAAI/bge-large-en-v1.5",
-      "bge-base": "BAAI/bge-base-en-v1.5",
-      "bge-small": "BAAI/bge-small-en-v1.5",
-      "qwen3-embedding": "Qwen/Qwen3-Embedding-8B",
-      "default": "BAAI/bge-m3"
+      "text-embedding-3-large": {
+        "id": "text-embedding-3-large",
+        "provider": "openai",
+        "pricing": {"input": 0.13, "output": 0.0},
+        "dimensions": 3072
+      },
+      "text-embedding-3-small": {
+        "id": "text-embedding-3-small",
+        "provider": "openai",
+        "pricing": {"input": 0.02, "output": 0.0},
+        "dimensions": 1536
+      },
+      "text-embedding-ada-002": {
+        "id": "text-embedding-ada-002",
+        "provider": "openai",
+        "pricing": {"input": 0.10, "output": 0.0},
+        "dimensions": 1536
+      },
+      "voyage-3-large": {
+        "id": "voyage-3-large",
+        "provider": "voyage",
+        "pricing": {"input": 0.12, "output": 0.0},
+        "dimensions": 1024
+      },
+      "voyage-3": {
+        "id": "voyage-3",
+        "provider": "voyage",
+        "pricing": {"input": 0.06, "output": 0.0},
+        "dimensions": 1024
+      },
+      "voyage-3-lite": {
+        "id": "voyage-3-lite",
+        "provider": "voyage",
+        "pricing": {"input": 0.02, "output": 0.0},
+        "dimensions": 512
+      },
+      "voyage-law-2": {
+        "id": "voyage-law-2",
+        "provider": "voyage",
+        "pricing": {"input": 0.12, "output": 0.0},
+        "dimensions": 1024
+      },
+      "bge-m3": {
+        "id": "BAAI/bge-m3",
+        "provider": "huggingface",
+        "pricing": {"input": 0.0, "output": 0.0},
+        "dimensions": 1024,
+        "is_local": true
+      },
+      "bge-large": {
+        "id": "BAAI/bge-large-en-v1.5",
+        "provider": "huggingface",
+        "pricing": {"input": 0.0, "output": 0.0},
+        "dimensions": 1024,
+        "is_local": true
+      },
+      "bge-base": {
+        "id": "BAAI/bge-base-en-v1.5",
+        "provider": "huggingface",
+        "pricing": {"input": 0.0, "output": 0.0},
+        "dimensions": 768,
+        "is_local": true
+      },
+      "bge-small": {
+        "id": "BAAI/bge-small-en-v1.5",
+        "provider": "huggingface",
+        "pricing": {"input": 0.0, "output": 0.0},
+        "dimensions": 384,
+        "is_local": true
+      },
+      "qwen3-embedding": {
+        "id": "Qwen/Qwen3-Embedding-8B",
+        "provider": "deepinfra",
+        "pricing": {"input": 0.03, "output": 0.0},
+        "dimensions": 4096
+      }
     },
     "reranker_models": {
-      "ms-marco-mini": "cross-encoder/ms-marco-MiniLM-L-6-v2",
-      "ms-marco-base": "cross-encoder/ms-marco-MiniLM-L-12-v2",
-      "bge-reranker-base": "BAAI/bge-reranker-base",
-      "bge-reranker-large": "BAAI/bge-reranker-large",
-      "bge-reranker-v2-m3": "BAAI/bge-reranker-v2-m3",
-      "default": "cross-encoder/ms-marco-MiniLM-L-6-v2",
-      "fast": "cross-encoder/ms-marco-MiniLM-L-6-v2",
-      "accurate": "cross-encoder/ms-marco-MiniLM-L-12-v2",
-      "sota": "BAAI/bge-reranker-large"
+      "ms-marco-mini": {
+        "id": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+        "is_local": true
+      },
+      "ms-marco-base": {
+        "id": "cross-encoder/ms-marco-MiniLM-L-12-v2",
+        "is_local": true
+      },
+      "bge-reranker-base": {
+        "id": "BAAI/bge-reranker-base",
+        "is_local": true
+      },
+      "bge-reranker-large": {
+        "id": "BAAI/bge-reranker-large",
+        "is_local": true
+      },
+      "bge-reranker-v2-m3": {
+        "id": "BAAI/bge-reranker-v2-m3",
+        "is_local": true
+      }
     },
-    "embedding_dimensions": {
-      "Qwen/Qwen3-Embedding-8B": 4096,
-      "text-embedding-3-large": 3072,
-      "text-embedding-3-small": 1536,
-      "text-embedding-ada-002": 1536,
-      "voyage-3-large": 1024,
-      "voyage-3": 1024,
-      "voyage-3-lite": 512,
-      "BAAI/bge-m3": 1024,
-      "BAAI/bge-large-en-v1.5": 1024,
-      "BAAI/bge-base-en-v1.5": 768,
-      "BAAI/bge-small-en-v1.5": 384
-    }
+    "embedding_dimensions": {}
   },
   "defaults": {
     "timeouts": {
@@ -609,13 +796,15 @@
         "default_model": "claude-haiku-4-5-20251001"
       },
       "local": {
-        "display_name": "Local (Llama 3.1 70B)",
-        "opus_model": "meta-llama/Meta-Llama-3.1-70B-Instruct",
-        "default_model": "meta-llama/Meta-Llama-3.1-70B-Instruct"
+        "display_name": "Local (MiniMax-M2)",
+        "opus_model": "MiniMaxAI/MiniMax-M2",
+        "default_model": "MiniMaxAI/MiniMax-M2"
       }
     },
     "default_variant": "cheap",
     "deepinfra_supported_models": [
+      "MiniMaxAI/MiniMax-M2",
+      "meta-llama/Llama-4-Scout-17B-16E-Instruct",
       "meta-llama/Meta-Llama-3.1-70B-Instruct",
       "meta-llama/Meta-Llama-3.1-8B-Instruct",
       "Qwen/Qwen2.5-72B-Instruct",

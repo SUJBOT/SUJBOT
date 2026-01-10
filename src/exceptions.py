@@ -1,5 +1,5 @@
 """
-Custom exception hierarchy for SUJBOT2.
+Custom exception hierarchy for SUJBOT.
 
 Provides typed exceptions for better error handling and debugging.
 Use these instead of generic Exception where possible.
@@ -40,7 +40,7 @@ from typing import Any, Dict, Optional
 
 
 class SujbotError(Exception):
-    """Base exception for all SUJBOT2 errors."""
+    """Base exception for all SUJBOT errors."""
 
     def __init__(
         self,

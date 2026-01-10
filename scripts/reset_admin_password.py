@@ -10,13 +10,11 @@ Or via Docker:
 """
 
 import asyncio
-import asyncpg
 import os
 import sys
-from argon2 import PasswordHasher
 
-# Add project root to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import asyncpg
+from argon2 import PasswordHasher
 
 
 async def reset_password():
@@ -66,9 +64,9 @@ async def reset_password():
         return True
 
     except Exception as e:
-        print(f"\n❌ Password reset failed: {e}")
+        print(f"\n❌ Password reset failed: {e}", file=sys.stderr)
         import traceback
-        traceback.print_exc()
+        traceback.print_exc(file=sys.stderr)
         return False
 
 

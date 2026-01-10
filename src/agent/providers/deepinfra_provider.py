@@ -1,13 +1,14 @@
 """
 DeepInfra LLM Provider using OpenAI-compatible API.
 
-Supports Llama and Qwen models via DeepInfra's OpenAI-compatible endpoint.
+Supports Llama, Qwen, MiniMax and other models via DeepInfra's OpenAI-compatible endpoint.
+Model configuration is in config.json (SSOT).
 """
 
 import logging
 import json
 import os
-from typing import List, Dict, Any, Optional, Iterator, FrozenSet
+from typing import List, Dict, Any, Optional, Iterator
 
 from openai import OpenAI
 from langsmith.wrappers import wrap_openai
@@ -16,37 +17,33 @@ from .base import BaseProvider, ProviderResponse
 
 logger = logging.getLogger(__name__)
 
-# Supported models for validation
-SUPPORTED_MODELS: FrozenSet[str] = frozenset({
-    "meta-llama/Meta-Llama-3.1-70B-Instruct",
-    "meta-llama/Meta-Llama-3.1-8B-Instruct",
-    "Qwen/Qwen2.5-72B-Instruct",
-    "Qwen/Qwen2.5-7B-Instruct",
-})
-
 
 class DeepInfraProvider(BaseProvider):
     """
     DeepInfra provider for open-source LLMs.
 
     Uses OpenAI-compatible API format (https://api.deepinfra.com/v1/openai).
-    Supports:
-    - meta-llama/Meta-Llama-3.1-70B-Instruct (recommended for agents)
+
+    Supported models are configured in config.json model_registry section.
+    Common models include:
+    - MiniMaxAI/MiniMax-M2 (high context, recommended for complex tasks)
+    - meta-llama/Llama-4-Scout-17B-16E-Instruct (recommended for agents)
+    - meta-llama/Meta-Llama-3.1-70B-Instruct
     - meta-llama/Meta-Llama-3.1-8B-Instruct (lighter model)
     - Qwen/Qwen2.5-72B-Instruct
     - Qwen/Qwen2.5-7B-Instruct
     """
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "meta-llama/Meta-Llama-3.1-70B-Instruct"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "meta-llama/Llama-4-Scout-17B-16E-Instruct"):
         """
         Initialize DeepInfra provider.
 
         Args:
             api_key: DeepInfra API key (defaults to DEEPINFRA_API_KEY env var)
-            model: Model identifier (default: meta-llama/Meta-Llama-3.1-70B-Instruct)
+            model: Model identifier (default: meta-llama/Llama-4-Scout-17B-16E-Instruct)
 
         Raises:
-            ValueError: If API key is missing or model is not supported
+            ValueError: If API key is missing
         """
         self.api_key = api_key or os.getenv("DEEPINFRA_API_KEY")
         if not self.api_key:
@@ -55,12 +52,15 @@ class DeepInfraProvider(BaseProvider):
                 "Set in .env file or pass to constructor."
             )
 
-        # Validate model
-        if model not in SUPPORTED_MODELS:
-            raise ValueError(
-                f"Unsupported model: {model}. "
-                f"Supported models: {', '.join(sorted(SUPPORTED_MODELS))}"
-            )
+        # Model validation is handled by config.json (SSOT)
+        # Log warning if model not in config, but don't reject (API will validate)
+        try:
+            from ...utils.model_registry import ModelRegistry
+            config = ModelRegistry.get_model_config(model, "llm")
+            if config.provider != "deepinfra":
+                logger.warning(f"Model {model} is configured with provider '{config.provider}', not 'deepinfra'")
+        except (ImportError, KeyError):
+            logger.debug(f"Model {model} not found in config.json model_registry, using as-is")
 
         self.model = model
 

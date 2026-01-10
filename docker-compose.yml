@@ -17,11 +17,7 @@ services:
       - neo4j_data:/data
       # Import directory (for importing unified_kg.json)
       - ./vector_db:/import:ro
-    ports:
-      # HTTP (Neo4j Browser)
-      - "${NEO4J_HTTP_PORT:-7474}:7474"
-      # Bolt protocol
-      - "${NEO4J_BOLT_PORT:-7687}:7687"
+    # Ports exposed in override for dev browser access
     networks:
       - sujbot_net
     restart: unless-stopped
@@ -94,8 +90,7 @@ services:
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
+    # Port exposed only in override for dev access
     networks:
       - sujbot_net
     restart: unless-stopped
@@ -123,8 +118,7 @@ services:
       PGADMIN_CONFIG_SERVER_MODE: "False"
     volumes:
       - pgadmin_data:/var/lib/pgadmin
-    ports:
-      - "5050:80"
+    # Ports exposed in override for dev access
     networks:
       - sujbot_net
     depends_on:
@@ -162,7 +156,7 @@ services:
       # LangSmith observability
       LANGSMITH_TRACING: "true"
       LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
-      LANGSMITH_PROJECT_NAME: ${LANGSMITH_PROJECT_NAME:-sujbot2-multi-agent}
+      LANGSMITH_PROJECT_NAME: ${LANGSMITH_PROJECT_NAME:-sujbot-multi-agent}
       LANGSMITH_ENDPOINT: ${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}
 
       # Neo4j (for knowledge graph)
@@ -172,6 +166,9 @@ services:
 
       # Storage backend
       STORAGE_BACKEND: ${STORAGE_BACKEND:-postgresql}
+
+      # Authentication
+      AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:?AUTH_SECRET_KEY must be set in .env file}
 
       # Python environment
       PYTHONUNBUFFERED: 1
@@ -192,6 +189,8 @@ services:
       - ./vector_db:/app/vector_db:ro
       # Scripts directory (read-only, for evaluation scripts)
       - ./scripts:/app/scripts:ro
+      # System prompts (read-only, for multi-agent system)
+      - ./prompts:/app/prompts:ro
       # Source code (read-only, for hot-reload of Python modules)
       - ./src:/app/src:ro
       # Backend code (read-only, for hot-reload)
@@ -271,9 +270,9 @@ services:
       # Logs
       - ./logs/nginx:/var/log/nginx
     ports:
-      # HTTP and HTTPS
-      - "80:80"
-      - "443:443"
+      # HTTP and HTTPS (configurable for dev override)
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
     networks:
       - sujbot_net
     restart: unless-stopped

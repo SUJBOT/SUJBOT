@@ -1,5 +1,5 @@
 """
-Graphiti-based Knowledge Graph Extractor for SUJBOT2.
+Graphiti-based Knowledge Graph Extractor for SUJBOT.
 
 Replaces GeminiKGExtractor with Graphiti framework for temporal KG extraction.
 Uses GPT-4o-mini for entity/relationship extraction with custom Pydantic types.
@@ -34,31 +34,7 @@ from pydantic import BaseModel
 from src.cost_tracker import get_global_tracker
 from src.graph.graphiti_types import (
     ENTITY_TYPE_TO_MODEL,
-    BezpecnostniDokumentaceEntity,
-    ComplianceGapEntity,
-    DocumentationRequirementEntity,
-    EmergencyProcedureEntity,
-    FrequencyEntity,
     GenericEntity,
-    GraphitiEntityType,
-    LimitniStavEntity,
-    MaintenanceActivityEntity,
-    MeasurementUnitEntity,
-    MetodickyPokynEntity,
-    MezniHodnotaEntity,
-    MitigationMeasureEntity,
-    NarizeniEntity,
-    NumericThresholdEntity,
-    PercentageEntity,
-    PressureEntity,
-    RadiationActivityEntity,
-    RiskFactorEntity,
-    SbirkaZakonuEntity,
-    SujbRozhodnutiEntity,
-    TemperatureEntity,
-    TimePeriodEntity,
-    TrainingRequirementEntity,
-    VyhlaskaEntity,
     get_all_entity_types,
 )
 

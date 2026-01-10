@@ -1,7 +1,7 @@
 /**
- * LoginPage Component - Authentication gateway for SUJBOT2
+ * LoginPage Component - Authentication gateway for SUJBOT
  *
- * Design: Sophisticated, centered layout matching the SUJBOT2 aesthetic
+ * Design: Sophisticated, centered layout matching the SUJBOT aesthetic
  * - Cormorant Garamond serif typography for branding
  * - Monochromatic palette with subtle gradients
  * - Smooth 750ms transitions matching theme system
@@ -160,7 +160,7 @@ export function LoginPage() {
             )}
             style={{ fontFamily: 'var(--font-display)' }}
           >
-            SUJBOT2
+            SUJBOT
           </h1>
 
           {/* Tagline */}

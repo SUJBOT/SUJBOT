@@ -5,12 +5,12 @@ Auto-extracted and cleaned from tier2_advanced.py
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Literal
+from typing import Dict, List, Optional
 from pydantic import Field
 
 from ._base import BaseTool, ToolInput, ToolResult
 from ._registry import register_tool
-from ._utils import format_chunk_result, generate_citation, validate_k_parameter
+from ._utils import format_chunk_result
 
 logger = logging.getLogger(__name__)
 
@@ -317,45 +317,4 @@ class ExpandContextTool(BaseTool):
         except Exception as e:
             logger.error(f"Similarity expansion failed: {e}", exc_info=True)
             raise
-
-
-# ----------------------------------------------------------------------------
-# Browse Entities Tool
-# ----------------------------------------------------------------------------
-
-
-class BrowseEntitiesInput(ToolInput):
-    """Input for browse_entities tool."""
-
-    entity_type: Optional[str] = Field(
-        None,
-        description=(
-            "Filter by entity type (e.g., 'regulation', 'standard', 'organization', "
-            "'clause', 'topic', 'date'). Leave empty to see all types."
-        ),
-    )
-
-    search_term: Optional[str] = Field(
-        None,
-        description=(
-            "Filter entities by value substring (case-insensitive). "
-            "Searches both entity.value and entity.normalized_value fields. "
-            "Example: 'waste' matches 'Waste Management', 'waste disposal', etc."
-        ),
-    )
-
-    min_confidence: float = Field(
-        0.0,
-        ge=0.0,
-        le=1.0,
-        description="Minimum confidence score (0.0-1.0). Default 0.0 shows all entities.",
-    )
-
-    limit: int = Field(
-        20,
-        ge=1,
-        le=50,
-        description="Maximum number of entities to return (max 50). Default 20.",
-    )
-
 
