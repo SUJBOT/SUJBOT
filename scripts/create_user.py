@@ -94,6 +94,8 @@ async def create_user(email: str, password: str, full_name: str = None, is_admin
 
     except Exception as e:
         print(f"\n❌ User creation failed: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
         return False
 
 

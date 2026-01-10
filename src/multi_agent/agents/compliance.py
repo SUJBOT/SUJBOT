@@ -82,7 +82,6 @@ class ComplianceAgent(BaseAgent):
             return state
 
         try:
-            import json
             checklist_data = json.loads(checklist_str)
 
             # Validate checklist structure

@@ -65,6 +65,8 @@ async def reset_password():
 
     except Exception as e:
         print(f"\n❌ Password reset failed: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
         return False
 
 
