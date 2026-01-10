@@ -123,8 +123,16 @@ class TextGradPromptOptimizer:
         self.agents = agents or AGENT_NAMES
         self.dry_run = dry_run
 
-        # Load config
-        self.config = json.loads(CONFIG_PATH.read_text())
+        # Load config with error handling
+        try:
+            self.config = json.loads(CONFIG_PATH.read_text())
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                f"Configuration file not found: {CONFIG_PATH}. "
+                f"Please ensure config.json exists in the project root."
+            )
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in configuration file {CONFIG_PATH}: {e.msg}")
 
         # Initialize components
         self.variable_manager = PromptVariableManager(PROMPTS_DIR, agents=self.agents)
@@ -132,8 +140,16 @@ class TextGradPromptOptimizer:
         self.credit_assigner = CreditAssigner(all_agents=self.agents)
         self.version_manager = PromptVersionManager(PROMPTS_DIR)
 
-        # Load dataset
-        self.dataset = json.loads(DATASET_PATH.read_text())
+        # Load dataset with error handling
+        try:
+            self.dataset = json.loads(DATASET_PATH.read_text())
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                f"Dataset file not found: {DATASET_PATH}. "
+                f"Please ensure the dataset file exists at dataset/dataset_exp_ver_2.json"
+            )
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in dataset file {DATASET_PATH}: {e.msg}")
         logger.info(f"Loaded dataset with {len(self.dataset)} examples")
 
         # Multi-agent runner (initialized async)

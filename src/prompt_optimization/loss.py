@@ -13,6 +13,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import anthropic
@@ -24,81 +25,19 @@ logger = logging.getLogger(__name__)
 MAX_RETRIES = 3
 RETRY_DELAY_SECONDS = 2.0
 
-# =============================================================================
-# Evaluation Prompts (Czech-aware, from langsmith_eval.py)
-# =============================================================================
+# Prompts directory (SSOT: prompts/evaluation/)
+PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts" / "evaluation"
 
-SEMANTIC_CORRECTNESS_PROMPT = '''
-Jsi evaluátor odpovědí AI systému. Porovnej odpověď systému s referenční odpovědí z hlediska SÉMANTICKÉ SPRÁVNOSTI.
 
-Hodnoť, zda odpověď systému vyjadřuje STEJNÝ VÝZNAM jako referenční odpověď, i když používá jiná slova nebo formulace.
-
-<question>
-{question}
-</question>
-
-<reference_answer>
-{reference}
-</reference_answer>
-
-<system_answer>
-{predicted}
-</system_answer>
-
-Kritéria hodnocení:
-- score 1: Odpověď vyjadřuje stejný nebo velmi podobný význam jako referenční odpověď (hlavní body jsou správné)
-- score 0: Odpověď je sémanticky odlišná, mimo téma, nebo zcela špatná
-
-Odpověz POUZE validním JSON objektem:
-{{"rationale": "<stručné zdůvodnění v 1-2 větách>", "score": <0 nebo 1>}}
-'''
-
-FACTUAL_ACCURACY_PROMPT = '''
-Jsi evaluátor odpovědí AI systému. Ověř FAKTICKOU PŘESNOST odpovědi systému oproti referenční odpovědi.
-
-Zaměř se na:
-- Číselné hodnoty (100 Wt, 500 Wt, 0.089 g, 15 g, atd.)
-- Procenta a jednotky (%, Bq/cm², kPa)
-- Technické názvy a označení (IRT-4M, UR-70, 08CH18N10T)
-- Časové údaje (2030, 72 hodin, 3 měsíce)
-- Množství a počty (5-7 tyčí, 15 mm, 20 mm)
-
-<reference_answer>
-{reference}
-</reference_answer>
-
-<system_answer>
-{predicted}
-</system_answer>
-
-Kritéria hodnocení:
-- score 1: Fakta v odpovědi jsou správná (čísla, jednotky, názvy odpovídají)
-- score 0: Odpověď obsahuje faktické chyby, špatná čísla, nebo vymyšlená fakta
-
-Odpověz POUZE validním JSON objektem:
-{{"rationale": "<stručné zdůvodnění v 1-2 větách>", "score": <0 nebo 1>}}
-'''
-
-COMPLETENESS_PROMPT = '''
-Jsi evaluátor odpovědí AI systému. Hodnoť ÚPLNOST odpovědi systému.
-
-<reference_answer>
-{reference}
-</reference_answer>
-
-<system_answer>
-{predicted}
-</system_answer>
-
-Identifikuj klíčové body v referenční odpovědi a ověř, zda jsou obsaženy v odpovědi systému.
-
-Kritéria hodnocení:
-- score 1: Odpověď pokrývá hlavní klíčové body z referenční odpovědi
-- score 0: Odpověď vynechává důležité klíčové body nebo je příliš neúplná
-
-Odpověz POUZE validním JSON objektem:
-{{"rationale": "<stručné zdůvodnění v 1-2 větách>", "score": <0 nebo 1>}}
-'''
+def _load_evaluation_prompt(metric_name: str) -> str:
+    """Load evaluation prompt from prompts/evaluation/ directory."""
+    prompt_file = PROMPTS_DIR / f"{metric_name}.txt"
+    if not prompt_file.exists():
+        raise FileNotFoundError(
+            f"Evaluation prompt not found: {prompt_file}. "
+            f"Please ensure prompts/evaluation/{metric_name}.txt exists."
+        )
+    return prompt_file.read_text(encoding="utf-8")
 
 
 @dataclass
@@ -106,9 +45,10 @@ class EvaluationResult:
     """Result from a single metric evaluation."""
 
     metric: str
-    score: int  # 0 or 1
+    score: int  # 0 or 1, -1 indicates error
     rationale: str
     raw_response: Optional[str] = None
+    is_error: bool = False  # True if evaluation failed (score is not meaningful)
 
 
 @dataclass
@@ -137,13 +77,6 @@ class MultiMetricLoss:
         "completeness": 0.25,
     }
 
-    # Prompt templates for each metric
-    METRIC_PROMPTS = {
-        "semantic_correctness": SEMANTIC_CORRECTNESS_PROMPT,
-        "factual_accuracy": FACTUAL_ACCURACY_PROMPT,
-        "completeness": COMPLETENESS_PROMPT,
-    }
-
     def __init__(
         self,
         judge_model: str = "claude-sonnet-4-5-20250929",
@@ -160,6 +93,11 @@ class MultiMetricLoss:
         self.temperature = temperature
         self.client = anthropic.Anthropic()
         self.last_result: Optional[LossResult] = None
+
+        # Load evaluation prompts from prompts/evaluation/ (SSOT)
+        self._prompt_cache: Dict[str, str] = {}
+        for metric in self.METRIC_WEIGHTS:
+            self._prompt_cache[metric] = _load_evaluation_prompt(metric)
 
     def _extract_json(self, text: str) -> Dict[str, Any]:
         """Extract JSON object from text that may have extra content."""
@@ -233,9 +171,9 @@ class MultiMetricLoss:
         Returns:
             EvaluationResult with score and rationale
         """
-        prompt_template = self.METRIC_PROMPTS.get(metric)
+        prompt_template = self._prompt_cache.get(metric)
         if not prompt_template:
-            raise ValueError(f"Unknown metric: {metric}")
+            raise ValueError(f"Unknown metric: {metric}. Available: {list(self._prompt_cache.keys())}")
 
         prompt = prompt_template.format(
             question=question,
@@ -299,8 +237,9 @@ class MultiMetricLoss:
                 logger.error(f"Authentication error evaluating {metric}: {e}")
                 return EvaluationResult(
                     metric=metric,
-                    score=0,
+                    score=-1,
                     rationale=f"Authentication error: API key invalid or missing",
+                    is_error=True,
                 )
 
             except anthropic.APIError as e:
@@ -308,8 +247,9 @@ class MultiMetricLoss:
                 logger.error(f"API error evaluating {metric}: {e}")
                 return EvaluationResult(
                     metric=metric,
-                    score=0,
+                    score=-1,
                     rationale=f"API error: {e}",
+                    is_error=True,
                 )
 
             except json.JSONDecodeError as e:
@@ -325,16 +265,18 @@ class MultiMetricLoss:
                 logger.warning(f"Failed to parse {metric} evaluation: {e}")
                 return EvaluationResult(
                     metric=metric,
-                    score=0,
+                    score=-1,
                     rationale=f"Evaluation parse error: {e}",
                     raw_response=response_text,
+                    is_error=True,
                 )
 
         # All retries exhausted
         return EvaluationResult(
             metric=metric,
-            score=0,
+            score=-1,
             rationale=f"Evaluation failed after {MAX_RETRIES} retries: {last_error}",
+            is_error=True,
         )
 
     def compute_loss(
@@ -359,18 +301,29 @@ class MultiMetricLoss:
         evaluations = []
         scores = {}
         rationales = {}
+        has_errors = False
 
         # Evaluate each metric
         for metric in self.METRIC_WEIGHTS:
             result = self._evaluate_metric(metric, question, predicted, reference)
             evaluations.append(result)
-            scores[metric] = result.score
+            if result.is_error:
+                has_errors = True
+                scores[metric] = 0  # Treat errors as 0 for scoring but flag it
+                logger.warning(f"Evaluation error for {metric}: {result.rationale}")
+            else:
+                scores[metric] = result.score
             rationales[metric] = result.rationale
 
         # Compute weighted score (0.0 to 1.0, higher is better)
+        # If any metric had errors, weighted_score may be unreliable
         weighted_score = sum(
             scores[m] * w for m, w in self.METRIC_WEIGHTS.items()
         )
+        if has_errors:
+            logger.warning(
+                f"Some metrics failed to evaluate - weighted_score {weighted_score:.2f} may be unreliable"
+            )
 
         # Generate feedback text for TextGrad
         feedback_parts = []
