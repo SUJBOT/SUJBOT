@@ -63,11 +63,10 @@ _BUILTIN_DEFAULT_VARIANT = "cheap"
 
 _BUILTIN_DEEPINFRA_SUPPORTED_MODELS = frozenset({
     "Qwen/Qwen2.5-72B-Instruct",
+    "Qwen/Qwen2.5-7B-Instruct",
     "meta-llama/Llama-4-Scout-17B-16E-Instruct",
     "meta-llama/Meta-Llama-3.1-70B-Instruct",
     "meta-llama/Meta-Llama-3.1-8B-Instruct",
-    "Qwen/Qwen2.5-72B-Instruct",
-    "Qwen/Qwen2.5-7B-Instruct",
 })
 
 

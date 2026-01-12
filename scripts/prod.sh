@@ -2,11 +2,13 @@
 # =============================================================================
 # SUJBOT Production Management Script
 # =============================================================================
-# This script requires sudo authentication to manage production containers.
+# This script requires password authentication to manage production containers.
+# Password is stored in sudo.txt (gitignored) - NOT system sudo.
+#
 # Usage:
-#   ./scripts/prod.sh up      - Start production
-#   ./scripts/prod.sh down    - Stop production
-#   ./scripts/prod.sh restart - Restart production
+#   ./scripts/prod.sh up      - Start production (requires password)
+#   ./scripts/prod.sh down    - Stop production (requires password)
+#   ./scripts/prod.sh restart - Restart production (requires password)
 #   ./scripts/prod.sh logs    - View production logs
 #   ./scripts/prod.sh status  - Show container status
 #   ./scripts/prod.sh ps      - List running containers
@@ -27,6 +29,8 @@ NC='\033[0m' # No Color
 # PRODUCTION SAFETY CHECK
 # =============================================================================
 # Password is read from sudo.txt file (gitignored)
+# SECURITY NOTE: This is basic protection against accidental production changes.
+# For production servers, consider using proper access controls (SSH keys, etc.)
 PROD_PASSWORD_FILE="$PROJECT_DIR/sudo.txt"
 
 check_auth() {
@@ -38,14 +42,32 @@ check_auth() {
     # Check if password file exists
     if [ ! -f "$PROD_PASSWORD_FILE" ]; then
         echo -e "${RED}ERROR: Password file not found: $PROD_PASSWORD_FILE${NC}"
+        echo "Create this file with a strong password (chmod 600 recommended)."
         exit 1
     fi
 
-    PROD_PASSWORD=$(cat "$PROD_PASSWORD_FILE")
+    # Check if password file is readable
+    if [ ! -r "$PROD_PASSWORD_FILE" ]; then
+        echo -e "${RED}ERROR: Cannot read password file: $PROD_PASSWORD_FILE${NC}"
+        exit 1
+    fi
+
+    # Read password and strip whitespace
+    PROD_PASSWORD=$(tr -d '[:space:]' < "$PROD_PASSWORD_FILE")
+
+    # Validate password is not empty
+    if [ -z "$PROD_PASSWORD" ]; then
+        echo -e "${RED}ERROR: Password file is empty: $PROD_PASSWORD_FILE${NC}"
+        echo "Add a strong password to this file."
+        exit 1
+    fi
 
     # Request password
     read -s -p "Enter production password: " entered_password
     echo ""
+
+    # Strip whitespace from entered password
+    entered_password=$(echo "$entered_password" | tr -d '[:space:]')
 
     if [ "$entered_password" != "$PROD_PASSWORD" ]; then
         echo -e "${RED}ERROR: Invalid password. Aborting.${NC}"
@@ -108,9 +130,9 @@ cmd_help() {
     echo "Usage: $0 <command>"
     echo ""
     echo "Commands:"
-    echo "  up       Start production containers (requires sudo)"
-    echo "  down     Stop production containers (requires sudo)"
-    echo "  restart  Restart production containers (requires sudo)"
+    echo "  up       Start production containers (requires password)"
+    echo "  down     Stop production containers (requires password)"
+    echo "  restart  Restart production containers (requires password)"
     echo "  logs     View logs (optional: service name)"
     echo "  status   Show container status"
     echo "  ps       List running production containers"

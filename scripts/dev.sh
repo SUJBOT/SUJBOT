@@ -17,6 +17,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Colors for output
+RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
@@ -24,12 +25,33 @@ NC='\033[0m' # No Color
 
 # Create combined env file (base + dev overrides)
 prepare_env() {
-    cat "$PROJECT_DIR/.env" "$PROJECT_DIR/.env.dev" > "$PROJECT_DIR/.env.combined"
+    # Validate .env exists
+    if [ ! -f "$PROJECT_DIR/.env" ]; then
+        echo -e "${RED}ERROR: Base .env file not found at: $PROJECT_DIR/.env${NC}"
+        echo "Please copy .env.example to .env and configure it."
+        exit 1
+    fi
+
+    # Validate .env.dev exists
+    if [ ! -f "$PROJECT_DIR/.env.dev" ]; then
+        echo -e "${RED}ERROR: Development override file not found at: $PROJECT_DIR/.env.dev${NC}"
+        echo "Please create .env.dev with development-specific overrides."
+        exit 1
+    fi
+
+    # Combine env files
+    if ! cat "$PROJECT_DIR/.env" "$PROJECT_DIR/.env.dev" > "$PROJECT_DIR/.env.combined" 2>&1; then
+        echo -e "${RED}ERROR: Failed to create combined env file${NC}"
+        exit 1
+    fi
 }
 
 cleanup_env() {
-    rm -f "$PROJECT_DIR/.env.combined"
+    rm -f "$PROJECT_DIR/.env.combined" 2>/dev/null || true
 }
+
+# Ensure cleanup on script exit (handles Ctrl+C and errors)
+trap cleanup_env EXIT
 
 # =============================================================================
 # Commands
@@ -73,7 +95,7 @@ cmd_logs() {
     cd "$PROJECT_DIR"
     prepare_env
     docker compose --env-file .env.combined -p sujbot_dev logs -f "${@:2}"
-    # Note: cleanup_env won't run if user Ctrl+C, but that's OK
+    # Cleanup handled by EXIT trap
 }
 
 cmd_status() {
