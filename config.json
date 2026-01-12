@@ -217,7 +217,7 @@
     "track_provenance": true
   },
   "agent": {
-    "model": "MiniMaxAI/MiniMax-M2",
+    "model": "Qwen/Qwen2.5-72B-Instruct",
     "max_tokens": 8192,
     "temperature": 0.3,
     "enable_tool_validation": true,
@@ -299,7 +299,7 @@
   "multi_agent": {
     "enabled": true,
     "orchestrator": {
-      "model": "MiniMaxAI/MiniMax-M2",
+      "model": "Qwen/Qwen2.5-72B-Instruct",
       "max_tokens": 1024,
       "temperature": 0.1,
       "enable_prompt_caching": true,
@@ -307,7 +307,7 @@
     },
     "agents": {
       "extractor": {
-        "model": "MiniMaxAI/MiniMax-M2",
+        "model": "Qwen/Qwen2.5-72B-Instruct",
         "max_tokens": 2048,
         "temperature": 0.2,
         "timeout_seconds": 30,
@@ -321,7 +321,7 @@
         "system_prompt_file": "prompts/agents/extractor.txt"
       },
       "classifier": {
-        "model": "MiniMaxAI/MiniMax-M2",
+        "model": "Qwen/Qwen2.5-72B-Instruct",
         "max_tokens": 1024,
         "temperature": 0.2,
         "timeout_seconds": 20,
@@ -334,7 +334,7 @@
         "system_prompt_file": "prompts/agents/classifier.txt"
       },
       "compliance": {
-        "model": "MiniMaxAI/MiniMax-M2",
+        "model": "Qwen/Qwen2.5-72B-Instruct",
         "max_tokens": 3072,
         "temperature": 0.1,
         "timeout_seconds": 45,
@@ -348,7 +348,7 @@
         "system_prompt_file": "prompts/agents/compliance.txt"
       },
       "risk_verifier": {
-        "model": "MiniMaxAI/MiniMax-M2",
+        "model": "Qwen/Qwen2.5-72B-Instruct",
         "max_tokens": 2048,
         "temperature": 0.2,
         "timeout_seconds": 45,
@@ -361,7 +361,7 @@
         "system_prompt_file": "prompts/agents/risk_verifier.txt"
       },
       "citation_auditor": {
-        "model": "MiniMaxAI/MiniMax-M2",
+        "model": "Qwen/Qwen2.5-72B-Instruct",
         "max_tokens": 1024,
         "temperature": 0.1,
         "timeout_seconds": 25,
@@ -374,7 +374,7 @@
         "system_prompt_file": "prompts/agents/citation_auditor.txt"
       },
       "requirement_extractor": {
-        "model": "MiniMaxAI/MiniMax-M2",
+        "model": "Qwen/Qwen2.5-72B-Instruct",
         "max_tokens": 2048,
         "temperature": 0.1,
         "timeout_seconds": 45,
@@ -388,7 +388,7 @@
         "system_prompt_file": "prompts/agents/requirement_extractor.txt"
       },
       "gap_synthesizer": {
-        "model": "MiniMaxAI/MiniMax-M2",
+        "model": "Qwen/Qwen2.5-72B-Instruct",
         "max_tokens": 3072,
         "temperature": 0.3,
         "timeout_seconds": 60,
@@ -401,7 +401,7 @@
         "system_prompt_file": "prompts/agents/gap_synthesizer.txt"
       },
       "report_generator": {
-        "model": "MiniMaxAI/MiniMax-M2",
+        "model": "Qwen/Qwen2.5-72B-Instruct",
         "max_tokens": 4096,
         "temperature": 0.3,
         "timeout_seconds": 30,
@@ -418,7 +418,7 @@
       "complexity_threshold_high": 70,
       "enable_parallel_execution": true,
       "max_parallel_agents": 5,
-      "complexity_model": "MiniMaxAI/MiniMax-M2"
+      "complexity_model": "Qwen/Qwen2.5-72B-Instruct"
     },
     "caching": {
       "enable_regulatory_cache": true,
@@ -612,7 +612,7 @@
         "context_window": 512000
       },
       "minimax-m2": {
-        "id": "MiniMaxAI/MiniMax-M2",
+        "id": "Qwen/Qwen2.5-72B-Instruct",
         "provider": "deepinfra",
         "pricing": {"input": 0.25, "output": 1.02},
         "context_window": 1000000
@@ -796,14 +796,14 @@
         "default_model": "claude-haiku-4-5-20251001"
       },
       "local": {
-        "display_name": "Local (MiniMax-M2)",
-        "opus_model": "MiniMaxAI/MiniMax-M2",
-        "default_model": "MiniMaxAI/MiniMax-M2"
+        "display_name": "Local (Qwen 2.5 72B)",
+        "opus_model": "Qwen/Qwen2.5-72B-Instruct",
+        "default_model": "Qwen/Qwen2.5-72B-Instruct"
       }
     },
     "default_variant": "cheap",
     "deepinfra_supported_models": [
-      "MiniMaxAI/MiniMax-M2",
+      "Qwen/Qwen2.5-72B-Instruct",
       "meta-llama/Llama-4-Scout-17B-16E-Instruct",
       "meta-llama/Meta-Llama-3.1-70B-Instruct",
       "meta-llama/Meta-Llama-3.1-8B-Instruct",

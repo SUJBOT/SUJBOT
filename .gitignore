@@ -118,3 +118,30 @@ TODO.md
 # Backup archives
 backups/
 sujbot_backup_*.tar.gz
+
+sudo.txt
+
+# Prompt optimization (TextGrad generated versions)
+prompts/agents/versions/
+!prompts/agents/versions/README.md
+
+# Extraction dataset outputs (generated)
+extraction_dataset/*.json
+!extraction_dataset/.gitkeep
+
+# Docker compose temporary files
+.env.combined
+
+# Node modules (frontend)
+node_modules/
+
+# Frontend build output
+frontend/dist/
+frontend/.vite/
+
+# Nginx logs (mounted volume)
+logs/nginx/
+
+# Coverage reports
+coverage/
+*.lcov

@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **SUJBOT**: Production RAG system for legal/technical documents with multi-agent orchestration.
 
+CRITICAL: See sudo password @sudo.txt
+
 ## Debugging with LangSmith
 
 **IMPORTANT:** When debugging conversations/traces, ALWAYS use **LangSmith MCP tools** (`mcp__langsmith__*`), NOT Python scripts.

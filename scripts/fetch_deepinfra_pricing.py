@@ -11,7 +11,7 @@ Usage:
     uv run python scripts/fetch_deepinfra_pricing.py --config-format
 
     # Specific model
-    uv run python scripts/fetch_deepinfra_pricing.py --model MiniMaxAI/MiniMax-M2 --config-format
+    uv run python scripts/fetch_deepinfra_pricing.py --model Qwen/Qwen2.5-72B-Instruct --config-format
 
     # All models
     uv run python scripts/fetch_deepinfra_pricing.py --all --json
@@ -120,7 +120,7 @@ def format_for_config_json(pricing: dict[str, dict]) -> dict:
     """
     result = {}
     for model, prices in pricing.items():
-        # Create alias from model name (e.g., "MiniMaxAI/MiniMax-M2" -> "minimax-m2")
+        # Create alias from model name (e.g., "Qwen/Qwen2.5-72B-Instruct" -> "minimax-m2")
         alias = model.split("/")[-1].lower().replace("_", "-")
 
         result[alias] = {
@@ -280,7 +280,7 @@ def main():
         # Default: show only LLM models we commonly use
         filter_models = [
             "meta-llama/Llama-4-Scout-17B-16E-Instruct",
-            "MiniMaxAI/MiniMax-M2",
+            "Qwen/Qwen2.5-72B-Instruct",
             "Qwen/Qwen2.5-72B-Instruct",
             "Qwen/Qwen2.5-7B-Instruct",
             "meta-llama/Meta-Llama-3.1-70B-Instruct",

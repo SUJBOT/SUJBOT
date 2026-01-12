@@ -101,7 +101,7 @@ class TextGradPromptOptimizer:
 
     def __init__(
         self,
-        forward_model: str = "MiniMaxAI/MiniMax-M2",
+        forward_model: str = "Qwen/Qwen2.5-72B-Instruct",
         backward_engine: str = "claude-sonnet-4-5-20250929",
         judge_model: str = "claude-sonnet-4-5-20250929",
         agents: Optional[List[str]] = None,

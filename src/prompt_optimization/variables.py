@@ -12,6 +12,32 @@ import textgrad as tg
 
 logger = logging.getLogger(__name__)
 
+# =============================================================================
+# CRITICAL: Structure Preservation Constraint
+# =============================================================================
+# This constraint is appended to every role_description to prevent TextGrad
+# from destroying structural elements during optimization.
+
+STRUCTURE_PRESERVATION_CONSTRAINT = """
+
+CRITICAL OPTIMIZATION CONSTRAINT:
+When modifying this prompt, you MUST PRESERVE these structural elements EXACTLY:
+- All section headers (##, ===, ---, AVAILABLE TOOLS:, OUTPUT FORMAT:, etc.)
+- All JSON/code formatting blocks and output schemas
+- All numbered lists and enumerated items (1., 2., 3., etc.)
+- All example blocks (EXAMPLE, Example, e.g., etc.)
+- All keyword markers (CRITICAL:, NOTE:, WARNING:, MANDATORY:)
+- All citation format specifications (\\cite{}, [chunk_id], etc.)
+- The Czech language context and ability to handle Czech queries
+
+You may ONLY modify the instructional text WITHIN sections to improve clarity,
+add guidance, or refine behavior. DO NOT delete sections, merge sections,
+remove formatting, or fundamentally restructure the prompt layout.
+
+If the original prompt has an OUTPUT FORMAT section with JSON schema, that
+schema MUST remain intact and functional after optimization.
+"""
+
 # Agent names matching files in prompts/agents/
 AGENT_NAMES = [
     "orchestrator",
@@ -103,10 +129,13 @@ class PromptVariableManager:
             self._original_prompts[agent_name] = prompt_text
 
             # Create TextGrad Variable with gradient tracking
-            role_desc = AGENT_ROLE_DESCRIPTIONS.get(
+            # CRITICAL: Append structure preservation constraint to role_description
+            # This ensures TextGrad's backward pass respects prompt structure
+            base_role_desc = AGENT_ROLE_DESCRIPTIONS.get(
                 agent_name,
                 f"System prompt for {agent_name} agent in multi-agent RAG system"
             )
+            role_desc = base_role_desc + STRUCTURE_PRESERVATION_CONSTRAINT
 
             self.variables[agent_name] = tg.Variable(
                 prompt_text,

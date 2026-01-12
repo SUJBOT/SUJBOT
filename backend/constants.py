@@ -53,16 +53,16 @@ _BUILTIN_VARIANT_CONFIG = {
         "default_model": "claude-haiku-4-5-20251001",
     },
     "local": {
-        "display_name": "Local (MiniMax-M2)",
-        "opus_model": "MiniMaxAI/MiniMax-M2",
-        "default_model": "MiniMaxAI/MiniMax-M2",
+        "display_name": "Local (Qwen 2.5 72B)",
+        "opus_model": "Qwen/Qwen2.5-72B-Instruct",
+        "default_model": "Qwen/Qwen2.5-72B-Instruct",
     },
 }
 
 _BUILTIN_DEFAULT_VARIANT = "cheap"
 
 _BUILTIN_DEEPINFRA_SUPPORTED_MODELS = frozenset({
-    "MiniMaxAI/MiniMax-M2",
+    "Qwen/Qwen2.5-72B-Instruct",
     "meta-llama/Llama-4-Scout-17B-16E-Instruct",
     "meta-llama/Meta-Llama-3.1-70B-Instruct",
     "meta-llama/Meta-Llama-3.1-8B-Instruct",
