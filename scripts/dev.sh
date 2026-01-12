@@ -11,7 +11,7 @@
 #   ./scripts/dev.sh ps      - List running containers
 # =============================================================================
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -23,8 +23,17 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
+# Validate docker-compose.yml exists
+validate_compose_file() {
+    if [ ! -f "$PROJECT_DIR/docker-compose.yml" ]; then
+        echo -e "${RED}ERROR: docker-compose.yml not found at: $PROJECT_DIR/docker-compose.yml${NC}"
+        exit 1
+    fi
+}
+
 # Create combined env file (base + dev overrides)
 prepare_env() {
+    validate_compose_file
     # Validate .env exists
     if [ ! -f "$PROJECT_DIR/.env" ]; then
         echo -e "${RED}ERROR: Base .env file not found at: $PROJECT_DIR/.env${NC}"
@@ -40,7 +49,7 @@ prepare_env() {
     fi
 
     # Combine env files
-    if ! cat "$PROJECT_DIR/.env" "$PROJECT_DIR/.env.dev" > "$PROJECT_DIR/.env.combined" 2>&1; then
+    if ! cat "$PROJECT_DIR/.env" "$PROJECT_DIR/.env.dev" > "$PROJECT_DIR/.env.combined"; then
         echo -e "${RED}ERROR: Failed to create combined env file${NC}"
         exit 1
     fi
@@ -62,7 +71,6 @@ cmd_up() {
     cd "$PROJECT_DIR"
     prepare_env
     docker compose --env-file .env.combined -p sujbot_dev up -d
-    cleanup_env
     echo -e "${GREEN}Development started successfully!${NC}"
     echo ""
     echo "Access points:"
@@ -77,7 +85,6 @@ cmd_down() {
     cd "$PROJECT_DIR"
     prepare_env
     docker compose --env-file .env.combined -p sujbot_dev down
-    cleanup_env
     echo -e "${GREEN}Development stopped.${NC}"
 }
 
@@ -86,14 +93,21 @@ cmd_restart() {
     cd "$PROJECT_DIR"
     prepare_env
     docker compose --env-file .env.combined -p sujbot_dev restart
-    cleanup_env
     echo -e "${GREEN}Development restarted.${NC}"
 }
 
 cmd_logs() {
-    echo -e "${GREEN}Viewing DEVELOPMENT logs (Ctrl+C to exit)...${NC}"
     cd "$PROJECT_DIR"
     prepare_env
+    # Check if any containers are running
+    local running
+    running=$(docker compose --env-file .env.combined -p sujbot_dev ps -q 2>/dev/null)
+    if [ -z "$running" ]; then
+        echo -e "${YELLOW}No development containers running.${NC}"
+        echo "Start with: ./scripts/dev.sh up"
+        exit 0
+    fi
+    echo -e "${GREEN}Viewing DEVELOPMENT logs (Ctrl+C to exit)...${NC}"
     docker compose --env-file .env.combined -p sujbot_dev logs -f "${@:2}"
     # Cleanup handled by EXIT trap
 }
@@ -103,12 +117,18 @@ cmd_status() {
     cd "$PROJECT_DIR"
     prepare_env
     docker compose --env-file .env.combined -p sujbot_dev ps
-    cleanup_env
 }
 
 cmd_ps() {
     echo -e "${CYAN}=== DEVELOPMENT CONTAINERS ===${NC}"
-    docker ps --filter "name=sujbot_dev" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+    local output
+    output=$(docker ps --filter "name=sujbot_dev" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}")
+    if [ -z "$output" ] || [ "$(echo "$output" | wc -l)" -le 1 ]; then
+        echo -e "${YELLOW}No development containers running.${NC}"
+        echo "Start with: ./scripts/dev.sh up"
+    else
+        echo "$output"
+    fi
 }
 
 cmd_build() {
@@ -116,7 +136,6 @@ cmd_build() {
     cd "$PROJECT_DIR"
     prepare_env
     docker compose --env-file .env.combined -p sujbot_dev build "$@"
-    cleanup_env
     echo -e "${GREEN}Build complete.${NC}"
 }
 

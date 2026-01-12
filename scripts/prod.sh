@@ -14,7 +14,7 @@
 #   ./scripts/prod.sh ps      - List running containers
 # =============================================================================
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -26,6 +26,16 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # =============================================================================
+# FILE VALIDATION
+# =============================================================================
+validate_compose_file() {
+    if [ ! -f "$PROJECT_DIR/docker-compose.yml" ]; then
+        echo -e "${RED}ERROR: docker-compose.yml not found at: $PROJECT_DIR/docker-compose.yml${NC}"
+        exit 1
+    fi
+}
+
+# =============================================================================
 # PRODUCTION SAFETY CHECK
 # =============================================================================
 # Password is read from sudo.txt file (gitignored)
@@ -34,6 +44,7 @@ NC='\033[0m' # No Color
 PROD_PASSWORD_FILE="$PROJECT_DIR/sudo.txt"
 
 check_auth() {
+    validate_compose_file
     echo -e "${YELLOW}=== PRODUCTION ENVIRONMENT ===${NC}"
     echo -e "${RED}WARNING: You are about to modify PRODUCTION containers!${NC}"
     echo -e "${RED}This affects https://sujbot.fjfi.cvut.cz${NC}"
@@ -108,12 +119,22 @@ cmd_restart() {
 }
 
 cmd_logs() {
-    echo -e "${GREEN}Viewing PRODUCTION logs (Ctrl+C to exit)...${NC}"
+    validate_compose_file
     cd "$PROJECT_DIR"
+    # Check if any containers are running
+    local running
+    running=$(docker compose -f docker-compose.yml -p sujbot ps -q 2>/dev/null)
+    if [ -z "$running" ]; then
+        echo -e "${YELLOW}No production containers running.${NC}"
+        echo "Start with: ./scripts/prod.sh up"
+        exit 0
+    fi
+    echo -e "${GREEN}Viewing PRODUCTION logs (Ctrl+C to exit)...${NC}"
     docker compose -f docker-compose.yml -p sujbot logs -f "${@:2}"
 }
 
 cmd_status() {
+    validate_compose_file
     echo -e "${GREEN}=== PRODUCTION STATUS ===${NC}"
     cd "$PROJECT_DIR"
     docker compose -f docker-compose.yml -p sujbot ps
@@ -121,7 +142,14 @@ cmd_status() {
 
 cmd_ps() {
     echo -e "${GREEN}=== PRODUCTION CONTAINERS ===${NC}"
-    docker ps --filter "name=sujbot_" --filter "name=!sujbot_dev" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+    local output
+    output=$(docker ps --filter "name=sujbot_" --filter "name=!sujbot_dev" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}")
+    if [ -z "$output" ] || [ "$(echo "$output" | wc -l)" -le 1 ]; then
+        echo -e "${YELLOW}No production containers running.${NC}"
+        echo "Start with: ./scripts/prod.sh up"
+    else
+        echo "$output"
+    fi
 }
 
 cmd_help() {
