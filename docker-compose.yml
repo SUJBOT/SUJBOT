@@ -185,6 +185,9 @@ services:
 
       # Logging
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+      # Authentication
+      AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:?AUTH_SECRET_KEY must be set in .env file}
     volumes:
       # Model cache (sentence-transformers, ~2-5GB)
       - model_cache:/root/.cache
@@ -202,6 +205,8 @@ services:
       - ./src:/app/src:ro
       # Backend code (read-only, for hot-reload)
       - ./backend:/app/backend:ro
+      # Prompts directory (read-only, for agent prompts)
+      - ./prompts:/app/prompts:ro
       # Results directory (read-write, for evaluation outputs)
       - ./results:/app/results
       # Logs (optional, for debugging)
@@ -277,9 +282,9 @@ services:
       # Logs
       - ./logs/nginx:/var/log/nginx
     ports:
-      # HTTP and HTTPS
-      - "80:80"
-      - "443:443"
+      # HTTP and HTTPS (configurable for multi-developer setup)
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
     networks:
       - sujbot_net
     restart: unless-stopped

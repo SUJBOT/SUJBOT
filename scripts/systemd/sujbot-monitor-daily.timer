@@ -1,0 +1,13 @@
+[Unit]
+Description=SUJBOT2 Daily Security Summary Timer (22:00 Prague time)
+
+[Timer]
+# Daily summary at 22:00 (Europe/Prague timezone)
+OnCalendar=*-*-* 22:00:00 Europe/Prague
+# Run missed events after system wake/boot
+Persistent=true
+# Randomize start by up to 5 minutes
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

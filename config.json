@@ -179,6 +179,10 @@
     "enabled_types": null
   },
   "neo4j": {
+    "uri": "bolt://localhost:7687",
+    "username": "neo4j",
+    "password": "OVERRIDE_VIA_ENV_VAR",
+    "database": "neo4j",
     "max_connection_lifetime": 3600,
     "max_connection_pool_size": 50,
     "connection_timeout": 30,
@@ -617,5 +621,100 @@
       "Qwen/Qwen2.5-72B-Instruct",
       "Qwen/Qwen2.5-7B-Instruct"
     ]
+  },
+  "security_monitoring": {
+    "enabled": true,
+    "schedule": {
+      "regular_checks": ["6:00", "10:00", "14:00", "18:00"],
+      "daily_summary": "22:00",
+      "timezone": "Europe/Prague"
+    },
+    "checks": {
+      "docker_health": {
+        "enabled": true,
+        "containers": [
+          "sujbot_postgres",
+          "sujbot_neo4j",
+          "sujbot_redis",
+          "sujbot_backend",
+          "sujbot_frontend",
+          "sujbot_nginx"
+        ],
+        "memory_warning_percent": 80,
+        "memory_critical_percent": 90
+      },
+      "log_analysis": {
+        "enabled": true,
+        "log_since_regular": "4h",
+        "log_since_daily": "24h",
+        "suspicious_patterns": [
+          "ERROR",
+          "CRITICAL",
+          "failed login",
+          "authentication failed",
+          "connection refused",
+          "permission denied",
+          "out of memory"
+        ],
+        "max_log_lines": 500
+      },
+      "system_resources": {
+        "enabled": true,
+        "disk_warning_percent": 80,
+        "disk_critical_percent": 90
+      },
+      "health_endpoints": {
+        "enabled": true,
+        "endpoints": [
+          {
+            "name": "Backend",
+            "url": "http://localhost:8000/health",
+            "timeout_seconds": 10
+          }
+        ]
+      },
+      "ssl_certificate": {
+        "enabled": true,
+        "warning_days_before_expiry": 30,
+        "critical_days_before_expiry": 7,
+        "cert_path": "/etc/letsencrypt/live/sujbot.fjfi.cvut.cz/fullchain.pem"
+      }
+    },
+    "notifications": {
+      "email": {
+        "enabled": false,
+        "recipients": ["sujbot.fjfi@gmail.com"],
+        "smtp_host": "smtp.gmail.com",
+        "smtp_port": 587,
+        "smtp_user_env": "GMAIL_USER",
+        "smtp_password_env": "GMAIL_APP_PASSWORD",
+        "from_address": "sujbot.fjfi@gmail.com",
+        "subject_prefix": "[SUJBOT Monitor]"
+      },
+      "teams": {
+        "enabled": true,
+        "channels": [
+          {
+            "name": "monitoring",
+            "webhook_url_env": "TEAMS_WEBHOOK_URL",
+            "severity": ["critical", "warning", "healthy"]
+          }
+        ]
+      },
+      "severity_filter": {
+        "email_on": ["critical", "warning"],
+        "teams_on": ["critical", "warning", "healthy"]
+      }
+    },
+    "claude_settings": {
+      "prompt_file": "prompts/security_monitor.txt",
+      "daily_prompt_file": "prompts/security_monitor_daily.txt",
+      "allowed_tools": ["Bash", "Read", "Grep"],
+      "timeout_seconds": 120
+    },
+    "logging": {
+      "log_dir": "/home/francji1/logs/sujbot-security",
+      "retention_days": 30
+    }
   }
 }
