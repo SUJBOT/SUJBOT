@@ -332,13 +332,16 @@ CLAUDE_OUTPUT=$(timeout "$TIMEOUT" claude --print --dangerously-skip-permissions
     }'
 }
 
-# Try to extract JSON from Claude output (it might have extra text)
+# Try to extract JSON from Claude output (it might have extra text or markdown blocks)
+# First, strip markdown code blocks if present (```json ... ```)
+STRIPPED_OUTPUT=$(echo "$CLAUDE_OUTPUT" | sed 's/^```json//g; s/^```//g' | tr -d '\r')
+
 # Look for JSON object in the output
-if echo "$CLAUDE_OUTPUT" | jq . > /dev/null 2>&1; then
-    CLAUDE_JSON="$CLAUDE_OUTPUT"
+if echo "$STRIPPED_OUTPUT" | jq . > /dev/null 2>&1; then
+    CLAUDE_JSON="$STRIPPED_OUTPUT"
 else
-    # Try to extract JSON from mixed output
-    CLAUDE_JSON=$(echo "$CLAUDE_OUTPUT" | grep -Pzo '\{[\s\S]*\}' | head -1 || echo "$CLAUDE_OUTPUT")
+    # Try to extract JSON from mixed output using sed (more portable than grep -P)
+    CLAUDE_JSON=$(echo "$STRIPPED_OUTPUT" | sed -n '/{/,/}/p' | head -1 || echo "$STRIPPED_OUTPUT")
     if ! echo "$CLAUDE_JSON" | jq . > /dev/null 2>&1; then
         log "WARNING: Could not parse JSON from Claude output"
         CLAUDE_JSON='{
