@@ -1,0 +1,99 @@
+{
+  "metadata": {
+    "created_at": "2026-01-08T10:57:16.231315Z",
+    "n_queries": 10,
+    "n_chunks_sampled": 5,
+    "embedding_model": "Qwen/Qwen3-Embedding-8B",
+    "generation_model": "gpt-4o",
+    "target_queries": 1000,
+    "api_cost": {
+      "total_requests": 5,
+      "total_input_tokens": 2037,
+      "total_output_tokens": 385,
+      "total_tokens": 2422,
+      "estimated_cost_usd": 0.0089
+    }
+  },
+  "queries": [
+    {
+      "query_id": "synthetic_0001",
+      "query_text": "Jaké jsou podmínky pro přepravu radioaktivních zásilek, které vyžadují povolení podle atomového zákona?",
+      "relevant_chunk_ids": [
+        "157/2025 Sb._L3_5"
+      ],
+      "source_document": "157/2025 Sb."
+    },
+    {
+      "query_id": "synthetic_0002",
+      "query_text": "Jaké aktivitní limity určují, kdy je přeprava radioaktivních látek regulována atomovým zákonem?",
+      "relevant_chunk_ids": [
+        "157/2025 Sb._L3_5"
+      ],
+      "source_document": "157/2025 Sb."
+    },
+    {
+      "query_id": "synthetic_0003",
+      "query_text": "Jaká změna byla provedena v příloze č. 1 části I bodě 72 písm. b) podbodě 3 této vyhlášky?",
+      "relevant_chunk_ids": [
+        "157/2025 Sb._L3_124"
+      ],
+      "source_document": "157/2025 Sb."
+    },
+    {
+      "query_id": "synthetic_0004",
+      "query_text": "Na jaké číslo bylo změněno číslo '37' v revizi požadavků na přepravu radioaktivních zásilek?",
+      "relevant_chunk_ids": [
+        "157/2025 Sb._L3_124"
+      ],
+      "source_document": "157/2025 Sb."
+    },
+    {
+      "query_id": "synthetic_0005",
+      "query_text": "Jaké číslo bylo změněno v příloze č. 1 bodě 29 písm. a)?",
+      "relevant_chunk_ids": [
+        "157/2025 Sb._L3_104"
+      ],
+      "source_document": "157/2025 Sb."
+    },
+    {
+      "query_id": "synthetic_0006",
+      "query_text": "Která vyhláška se zabývá změnami v požadavcích na přepravu radioaktivních zásilek?",
+      "relevant_chunk_ids": [
+        "157/2025 Sb._L3_104"
+      ],
+      "source_document": "157/2025 Sb."
+    },
+    {
+      "query_id": "synthetic_0007",
+      "query_text": "Jaké změny byly provedeny v číselném rozsahu v § 7 odst. 2 písm. e) vyhlášky týkající se přepravy radioaktivních zásilek?",
+      "relevant_chunk_ids": [
+        "157/2025 Sb._L3_76"
+      ],
+      "source_document": "157/2025 Sb."
+    },
+    {
+      "query_id": "synthetic_0008",
+      "query_text": "Která část vyhlášky byla upravena v souvislosti s požadavky na jadernou bezpečnost a radiační ochranu?",
+      "relevant_chunk_ids": [
+        "157/2025 Sb._L3_76"
+      ],
+      "source_document": "157/2025 Sb."
+    },
+    {
+      "query_id": "synthetic_0009",
+      "query_text": "Jaké jsou limity pro součet nefixované a fixované kontaminace na nepřístupném povrchu pro beta a gama zářiče?",
+      "relevant_chunk_ids": [
+        "157/2025 Sb._L3_164"
+      ],
+      "source_document": "157/2025 Sb."
+    },
+    {
+      "query_id": "synthetic_0010",
+      "query_text": "Jaké limity platí pro všechny ostatní alfa zářiče na nepřístupném povrchu podle této vyhlášky?",
+      "relevant_chunk_ids": [
+        "157/2025 Sb._L3_164"
+      ],
+      "source_document": "157/2025 Sb."
+    }
+  ]
+}

@@ -1,0 +1,76 @@
+{
+  "model_type": "xgboost",
+  "feature_names": [
+    "top1_minus_p99",
+    "top1_vs_top10_gap",
+    "sim_std_top10",
+    "sim_slope",
+    "bimodal_gap",
+    "exp_decay_rate",
+    "n_above_08",
+    "n_above_07",
+    "top5_concentration",
+    "percentile_99",
+    "skewness_top50",
+    "max_second_deriv",
+    "n_above_tau",
+    "top1_margin_over_tau"
+  ],
+  "n_features": 14,
+  "tau": 0.711,
+  "thresholds": {
+    "high": 0.9,
+    "medium": 0.75,
+    "low": 0.5
+  },
+  "metrics": {
+    "train": {
+      "rmse": 0.215970274220364,
+      "mae": 0.10197793986116137,
+      "r2": 0.3987526665824669,
+      "correlation": 0.6387705949854094
+    },
+    "val": {
+      "rmse": 0.2217474209126517,
+      "mae": 0.10303476227654351,
+      "r2": 0.33190327878515313,
+      "correlation": 0.580437767364225
+    },
+    "test": {
+      "rmse": 0.2539254266512518,
+      "mae": 0.12088944898711311,
+      "r2": 0.23804739929072716,
+      "correlation": 0.4890745488690029
+    },
+    "cv": {
+      "r2_mean": 0.2797351222084002,
+      "r2_std": 0.053337021765976954,
+      "r2_per_fold": [
+        0.28593122745220634,
+        0.2677366756316758,
+        0.3743354744378744,
+        0.2113562814568758,
+        0.25931595206336866
+      ],
+      "rmse_mean": 0.23563463447806568,
+      "rmse_std": 0.010250612606141431
+    },
+    "feature_importance": {
+      "top1_minus_p99": 0.07021767646074295,
+      "top1_vs_top10_gap": 0.05080382153391838,
+      "sim_std_top10": 0.1393292099237442,
+      "sim_slope": 0.12459228187799454,
+      "bimodal_gap": 0.07956725358963013,
+      "exp_decay_rate": 0.2212255299091339,
+      "n_above_08": 0.03244652599096298,
+      "n_above_07": 0.044707316905260086,
+      "top5_concentration": 0.035618532449007034,
+      "percentile_99": 0.053654372692108154,
+      "skewness_top50": 0.03549392521381378,
+      "max_second_deriv": 0.03434500843286514,
+      "n_above_tau": 0.03782317042350769,
+      "top1_margin_over_tau": 0.04017539694905281
+    }
+  },
+  "version": "v1"
+}
