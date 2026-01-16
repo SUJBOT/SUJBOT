@@ -260,10 +260,15 @@ app.add_middleware(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        # Development
+        # Development - Vite dev servers
         "http://localhost:5173",
         "http://localhost:5174",  # Vite alternative port
         "http://localhost:3000",
+        # Development - Nginx dev proxies (rootless Docker, port = 10000 + (UID % 1000) * 100)
+        "http://localhost:10000",  # UID 1000
+        "http://localhost:10100",  # UID 1001
+        "http://localhost:10400",  # UID 1004
+        "http://localhost:10500",  # UID 1005
         # Production
         "https://sujbot.fjfi.cvut.cz",
         "http://sujbot.fjfi.cvut.cz",

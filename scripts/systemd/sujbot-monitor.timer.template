@@ -1,0 +1,16 @@
+[Unit]
+Description=SUJBOT2 Security Monitor Timer (4x daily at 06:00, 10:00, 14:00, 18:00 Prague time)
+
+[Timer]
+# Regular checks 4x per day (Europe/Prague timezone)
+OnCalendar=*-*-* 06:00:00 Europe/Prague
+OnCalendar=*-*-* 10:00:00 Europe/Prague
+OnCalendar=*-*-* 14:00:00 Europe/Prague
+OnCalendar=*-*-* 18:00:00 Europe/Prague
+# Run missed events after system wake/boot
+Persistent=true
+# Randomize start by up to 5 minutes to avoid load spikes
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

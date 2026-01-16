@@ -50,23 +50,30 @@ async def reset_password():
             """
             UPDATE auth.users
             SET password_hash = $1, updated_at = NOW()
-            WHERE email = 'admin@example.com'
+            WHERE email = 'admin@sujbot.local'
             """,
             password_hash
         )
 
         await conn.close()
 
+        # asyncpg returns string like "UPDATE 1" on success
+        if result != "UPDATE 1":
+            print(f"\n❌ Password reset failed: No user found with email 'admin@sujbot.local'")
+            print(f"   Database returned: {result}")
+            print("   Tip: Run the database seed script to create the admin user")
+            return False
+
         print("\n✅ Password reset successfully!")
-        print("   📧 Email: admin@example.com")
+        print("   📧 Email: admin@sujbot.local")
         print("   🔑 Password: ChangeThisPassword123!")
 
         return True
 
     except Exception as e:
-        print(f"\n❌ Password reset failed: {e}", file=sys.stderr)
+        print(f"\n❌ Password reset failed: {e}")
         import traceback
-        traceback.print_exc(file=sys.stderr)
+        traceback.print_exc()
         return False
 
 

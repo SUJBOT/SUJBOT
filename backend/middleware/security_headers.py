@@ -65,7 +65,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Restrictive policy: only allow same-origin resources
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "  # Allow inline scripts for React
+            "script-src 'self' 'unsafe-inline'; "  # Allow inline scripts for React (no eval)
             "style-src 'self' 'unsafe-inline'; "  # Allow inline styles for React
             "img-src 'self' data: https:; "  # Allow images from HTTPS and data URIs
             "font-src 'self' data:; "
