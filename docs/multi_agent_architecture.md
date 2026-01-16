@@ -1,6 +1,6 @@
 # SUJBOT Multi-Agent System Architecture Overview
 
-**Last Updated:** 2025-12-15
+**Last Updated:** 2026-01-13
 **Status:** Production Ready (Phase 7 + SSOT Refactoring)
 **Entry Point:** `src/multi_agent/runner.py`
 
@@ -288,11 +288,11 @@ Agents automatically register on import via `@register_agent()` decorator.
 |---|-------|------|------|-----------------|-----------|-------|
 | 1 | **Orchestrator** | ORCHESTRATE | ORCHESTRATOR | Route queries, analyze complexity | LLM reasoning | claude-sonnet-4-5 |
 | 2 | **Extractor** | EXTRACT | SPECIALIST | Retrieve docs, hybrid search | search_documents, get_context | claude-sonnet-4-5 |
-| 3 | **Classifier** | CLASSIFY | SPECIALIST | Categorize content, detect domains | classify_document, detect_language | claude-3.5-sonnet |
+| 3 | **Classifier** | CLASSIFY | SPECIALIST | Categorize content, detect domains | classify_document, detect_language | claude-sonnet-4-5 |
 | 4 | **Compliance** | VERIFY | SPECIALIST | GDPR/CCPA/HIPAA/SOX checking | search_regulations, verify_compliance | claude-sonnet-4-5 |
-| 5 | **Risk Verifier** | VERIFY | SPECIALIST | Risk assessment & verification | assess_risk, identify_hazards | claude-3.5-sonnet |
-| 6 | **Citation Auditor** | AUDIT | SPECIALIST | Validate citations & sources | validate_citations, check_provenance | claude-3.5-sonnet |
-| 7 | **Gap Synthesizer** | SYNTHESIZE | SPECIALIST | Find knowledge gaps, coverage analysis | analyze_gaps, find_missing | claude-3.5-sonnet |
+| 5 | **Risk Verifier** | VERIFY | SPECIALIST | Risk assessment & verification | assess_risk, identify_hazards | claude-sonnet-4-5 |
+| 6 | **Citation Auditor** | AUDIT | SPECIALIST | Validate citations & sources | validate_citations, check_provenance | claude-sonnet-4-5 |
+| 7 | **Gap Synthesizer** | SYNTHESIZE | SPECIALIST | Find knowledge gaps, coverage analysis | analyze_gaps, find_missing | claude-sonnet-4-5 |
 | 8 | **Report Generator** | REPORT | SPECIALIST | Compile final report | format_report, consolidate_findings | claude-sonnet-4-5 |
 
 ### 4.1 Orchestrator Agent
@@ -1274,5 +1274,7 @@ The architecture is production-ready and designed for scalability, reliability, 
 **Related Documentation:**
 - `README.md` - User guide
 - `PIPELINE.md` - Full pipeline specification
+- `docs/AGENT_ORCHESTRATION.md` - Detailed orchestration documentation
+- `docs/INDEXING_KG_PIPELINE.md` - Indexing and KG pipeline documentation
 - `CLAUDE.md` - Project instructions
 - `config.json.example` - Configuration reference

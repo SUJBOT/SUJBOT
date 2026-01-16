@@ -1,0 +1,184 @@
+# =============================================================================
+# SUJBOT Production Application Stack
+# =============================================================================
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml -p sujbot up -d
+# Management: ./scripts/prod.sh up|down|status|logs (password protected)
+# Requires: docker group membership + production password
+# =============================================================================
+
+services:
+  # Backend - FastAPI with multi-agent RAG system
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend/Dockerfile
+      target: production
+      args:
+        PYTHON_VERSION: ${PYTHON_VERSION:-3.10}
+    container_name: sujbot_backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Database connection (internal Docker network)
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-sujbot}
+
+      # API Keys
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      DEEPINFRA_API_KEY: ${DEEPINFRA_API_KEY}
+
+      # LangSmith observability
+      LANGSMITH_TRACING: "true"
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+      LANGSMITH_PROJECT_NAME: ${LANGSMITH_PROJECT_NAME:-sujbot-production}
+      LANGSMITH_ENDPOINT: ${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}
+
+      # Neo4j (internal Docker network)
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USERNAME: ${NEO4J_USERNAME:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+
+      # Redis (internal Docker network)
+      REDIS_URL: redis://redis:6379
+
+      # Storage backend
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-postgresql}
+
+      # Authentication
+      AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:?AUTH_SECRET_KEY must be set in .env file}
+
+      # Python environment
+      PYTHONUNBUFFERED: 1
+      PYTHONPATH: /app:/app/backend
+
+      # Logging (production = less verbose)
+      LOG_LEVEL: ${LOG_LEVEL:-WARNING}
+    volumes:
+      - model_cache:/root/.cache
+      - ./config.json:/app/config.json:ro
+      - ./data:/app/data:ro
+      - ./benchmark_dataset:/app/benchmark_dataset:ro
+      - ./vector_db:/app/vector_db:ro
+      - ./scripts:/app/scripts:ro
+      - ./prompts:/app/prompts:ro
+      - ./src:/app/src:ro
+      - ./backend:/app/backend:ro
+      - ./results:/app/results
+      - ./logs:/app/logs
+    expose:
+      - "8000"
+    networks:
+      - sujbot_db_net
+      - sujbot_prod_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 3G
+        reservations:
+          cpus: '1'
+          memory: 1.5G
+
+  # Frontend - React + Vite (production build served by nginx)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../docker/frontend/Dockerfile
+      target: production
+      args:
+        NODE_VERSION: ${NODE_VERSION:-22}
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+    container_name: sujbot_frontend
+    depends_on:
+      - backend
+    expose:
+      - "80"
+    networks:
+      - sujbot_prod_net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  # Nginx - Reverse proxy with SSL termination
+  nginx:
+    image: nginx:alpine
+    container_name: sujbot_nginx
+    depends_on:
+      - frontend
+      - backend
+    volumes:
+      - ./docker/nginx/reverse-proxy.conf:/etc/nginx/nginx.conf:ro
+      - certbot_certs:/etc/letsencrypt:ro
+      - certbot_www:/var/www/certbot:ro
+      - ./logs/nginx:/var/log/nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - sujbot_prod_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://backend:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  # Certbot - SSL certificate management
+  certbot:
+    image: certbot/certbot:latest
+    container_name: sujbot_certbot
+    volumes:
+      - certbot_certs:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+      - ./logs/certbot:/var/log/letsencrypt
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+    networks:
+      - sujbot_prod_net
+    restart: unless-stopped
+
+volumes:
+  # Model cache (sentence-transformers, ~2-5GB)
+  model_cache:
+    driver: local
+
+  # SSL certificates (Let's Encrypt via Certbot)
+  certbot_certs:
+    driver: local
+
+  # Certbot ACME challenge files
+  certbot_www:
+    driver: local
+
+networks:
+  # Connect to shared database network
+  sujbot_db_net:
+    external: true
+    name: sujbot_sujbot_db_net
+
+  # Production-only network
+  sujbot_prod_net:
+    driver: bridge
