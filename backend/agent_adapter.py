@@ -19,6 +19,7 @@ from typing import AsyncGenerator, Dict, Any, List, Optional
 from src.multi_agent.runner import MultiAgentRunner
 from src.agent.config import AgentConfig
 from src.cost_tracker import get_global_tracker, reset_global_tracker
+from src.utils.security import sanitize_error
 from backend.constants import (
     VARIANT_CONFIG,
     DEFAULT_VARIANT,
@@ -212,12 +213,13 @@ class AgentAdapter:
             return True
 
         except Exception as e:
-            logger.error(f"Failed to initialize multi-agent system: {e}", exc_info=True)
+            safe_error = sanitize_error(e)
+            logger.error(f"Failed to initialize multi-agent system: {safe_error}")
             self.degraded_components.append({
                 "component": "multi_agent_system",
-                "error": str(e),
+                "error": safe_error,
                 "severity": "critical",
-                "user_message": f"System initialization error: {str(e)}",
+                "user_message": f"System initialization error: {safe_error}",
             })
             return False
 
@@ -370,7 +372,7 @@ class AgentAdapter:
                 # Will emit warning below
             except Exception as e:
                 # Unexpected error - log as error for investigation
-                logger.error(f"Unexpected error loading variant for user {user_id}: {e}", exc_info=True)
+                logger.error(f"Unexpected error loading variant for user {user_id}: {sanitize_error(e)}")
                 runner_to_use = self.runner
                 # Will emit warning below
 
@@ -983,10 +985,11 @@ class AgentAdapter:
             }
 
         except Exception as e:
-            logger.error(f"Health check failed: {e}", exc_info=True)
+            safe_error = sanitize_error(e)
+            logger.error(f"Health check failed: {safe_error}")
             return {
                 "status": "error",
-                "message": str(e),
+                "message": safe_error,
                 "details": {},
                 "degraded_components": []
             }

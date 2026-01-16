@@ -6,7 +6,7 @@ Usage:
     python scripts/create_user.py <email> <password> [full_name] [--admin]
 
 Examples:
-    python scripts/create_user.py prusemic@cvut.cz myPassword123!
+    python scripts/create_user.py user@example.com myPassword123!
     python scripts/create_user.py admin@example.com SecurePass123! "Admin User" --admin
 
 Or via Docker:

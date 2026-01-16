@@ -1,0 +1,20 @@
+[Unit]
+Description=SUJBOT2 Security Monitor Daily Summary
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+User=__USER__
+Group=__USER__
+WorkingDirectory=__PROJECT_DIR__
+ExecStart=__PROJECT_DIR__/scripts/security_monitor.sh --daily
+StandardOutput=journal
+StandardError=journal
+# Ensure PATH includes claude CLI and uv
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:__HOME__/.local/bin:__HOME__/.cargo/bin
+# Longer timeout for daily summary (analyzes 24h of logs)
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target
