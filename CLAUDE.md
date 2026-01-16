@@ -54,6 +54,115 @@ uv run python scripts/langsmith_eval.py --judge-model openai:gpt-4o-mini
 **Dataset:** `dataset/dataset_exp_ver_2.json` (40 Czech legal/nuclear QA pairs)
 **LangSmith Dataset:** `sujbot-eval-qa-40`
 
+## Docker Management
+
+**SUJBOT uses a two-tier Docker architecture:**
+
+1. **System Docker** (shared databases) - requires `docker` group membership
+2. **Rootless Docker** (per-user development) - NO sudo required
+
+### Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    HOST (147.32.8.174)                          │
+├─────────────────────────────────────────────────────────────────┤
+│  SYSTEM DOCKER (docker group: michal, prusemic)                 │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐                       │
+│  │ postgres │  │  neo4j   │  │  redis   │  ← Shared databases   │
+│  │ :5432    │  │ :7687    │  │ :6379    │                       │
+│  └──────────┘  └──────────┘  └──────────┘                       │
+│                                                                  │
+│  PRODUCTION (password protected)                                │
+│  nginx:80,443 → frontend → backend                              │
+├─────────────────────────────────────────────────────────────────┤
+│  ROOTLESS DOCKER (per-user, ports based on UID)                 │
+│  User michal (UID 1003): backend:10302, frontend:10303          │
+│  User prusemic (UID 1001): backend:10102, frontend:10103        │
+│  └── DATABASE_URL=postgresql://...@147.32.8.174:5432            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Management Scripts
+
+| Script | Purpose | Requires |
+|--------|---------|----------|
+| `./scripts/db.sh` | Shared database services | docker group |
+| `./scripts/prod.sh` | Production stack | docker group + password |
+| `./scripts/dev.sh` | Your development stack | Rootless Docker (NO sudo) |
+| `./scripts/setup-rootless-docker.sh` | One-time rootless setup | sudo (once) |
+
+### Quick Start
+
+```bash
+# 1. Database services (someone with docker group access)
+./scripts/db.sh up
+
+# 2. Production (requires password from sudo.txt)
+./scripts/prod.sh up
+
+# 3. Your development (NO sudo needed after rootless setup)
+./scripts/dev.sh up
+```
+
+### Database Commands (docker group required)
+
+```bash
+./scripts/db.sh up       # Start shared databases
+./scripts/db.sh down     # Stop databases (WARNING: affects all!)
+./scripts/db.sh status   # Show database container status
+./scripts/db.sh logs     # View database logs
+```
+
+### Production Commands (password protected)
+
+```bash
+./scripts/prod.sh up       # Start production (requires password)
+./scripts/prod.sh down     # Stop production
+./scripts/prod.sh restart  # Restart production
+./scripts/prod.sh logs     # View logs (no password)
+./scripts/prod.sh status   # Container status (no password)
+```
+
+**Production password:** See `sudo.txt` file
+
+### Development Commands (Rootless Docker)
+
+```bash
+./scripts/dev.sh up       # Start YOUR development environment
+./scripts/dev.sh down     # Stop YOUR development environment
+./scripts/dev.sh logs     # View YOUR logs
+./scripts/dev.sh status   # YOUR container status
+./scripts/dev.sh ports    # Show YOUR allocated ports
+./scripts/dev.sh build    # Rebuild YOUR containers
+```
+
+**Port allocation formula:** `PORT_BASE = 10000 + (UID % 1000) * 100`
+
+| User | UID | Port Range | Backend | Frontend | Nginx |
+|------|-----|------------|---------|----------|-------|
+| michal | 1003 | 10300-10399 | 10302 | 10303 | 10300 |
+| prusemic | 1001 | 10100-10199 | 10102 | 10103 | 10100 |
+
+### First-Time Rootless Docker Setup
+
+```bash
+# Run once per user (requires sudo for initial setup)
+./scripts/setup-rootless-docker.sh
+
+# Log out and back in, then verify
+docker info | grep "Docker Root Dir"
+docker run --rm hello-world
+```
+
+### Docker Compose Files
+
+| File | Purpose |
+|------|---------|
+| `docker-compose.yml` | Shared databases (postgres, neo4j, redis, pgadmin) |
+| `docker-compose.prod.yml` | Production application (backend, frontend, nginx) |
+| `docker-compose.dev.yml` | Development stack for rootless Docker |
+
 ## Common Commands
 
 ```bash
@@ -78,11 +187,6 @@ uv run pytest tests/production/ -v
 uv run black src/ tests/ --line-length 100                 # Format code
 uv run isort src/ tests/ --profile black                   # Sort imports
 uv run mypy src/                                           # Type check
-
-# Docker (full stack)
-docker compose up -d                       # Start all services
-docker compose logs -f backend             # Watch backend logs
-docker compose exec backend uv run pytest  # Run tests in container
 
 # Frontend development (HOT RELOAD)
 # Frontend runs with Vite hot reload - NO rebuild needed for .tsx/.css changes!
@@ -595,5 +699,5 @@ curl -s "https://eu.api.smith.langchain.com/api/v1/runs/query" \
 
 ---
 
-**Last Updated:** 2026-01-10
-**Version:** PHASE 1-7 + Multi-Agent + Graphiti KG + Gemini Extractor + Exception Hierarchy + SSOT Refactoring + LangSmith Evaluation + Prompts SSOT
+**Last Updated:** 2026-01-16
+**Version:** PHASE 1-7 + Multi-Agent + Graphiti KG + Gemini Extractor + Exception Hierarchy + SSOT Refactoring + LangSmith Evaluation + Prompts SSOT + Rootless Docker
