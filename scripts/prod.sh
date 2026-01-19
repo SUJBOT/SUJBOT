@@ -5,6 +5,8 @@
 # This script requires password authentication to manage production containers.
 # Password is stored in sudo.txt (gitignored) - NOT system sudo.
 #
+# Requires: docker group membership + production password
+#
 # Usage:
 #   ./scripts/prod.sh up      - Start production (requires password)
 #   ./scripts/prod.sh down    - Stop production (requires password)
@@ -26,11 +28,38 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # =============================================================================
-# FILE VALIDATION
+# VALIDATION
 # =============================================================================
-validate_compose_file() {
+validate_docker_access() {
+    if ! docker info >/dev/null 2>&1; then
+        echo -e "${RED}ERROR: Cannot connect to Docker daemon.${NC}"
+        echo ""
+        echo "Make sure you are in the 'docker' group:"
+        echo "  groups | grep docker"
+        echo ""
+        echo "If not, ask an admin to add you:"
+        echo "  sudo usermod -aG docker $USER"
+        echo "  newgrp docker"
+        exit 1
+    fi
+}
+
+validate_compose_files() {
     if [ ! -f "$PROJECT_DIR/docker-compose.yml" ]; then
         echo -e "${RED}ERROR: docker-compose.yml not found at: $PROJECT_DIR/docker-compose.yml${NC}"
+        exit 1
+    fi
+    if [ ! -f "$PROJECT_DIR/docker-compose.prod.yml" ]; then
+        echo -e "${RED}ERROR: docker-compose.prod.yml not found at: $PROJECT_DIR/docker-compose.prod.yml${NC}"
+        exit 1
+    fi
+}
+
+validate_env_file() {
+    if [ ! -f "$PROJECT_DIR/.env" ]; then
+        echo -e "${RED}ERROR: .env file not found at: $PROJECT_DIR/.env${NC}"
+        echo "Copy from .env.example and configure:"
+        echo "  cp .env.example .env"
         exit 1
     fi
 }
@@ -44,7 +73,10 @@ validate_compose_file() {
 PROD_PASSWORD_FILE="$PROJECT_DIR/sudo.txt"
 
 check_auth() {
-    validate_compose_file
+    validate_docker_access
+    validate_compose_files
+    validate_env_file
+
     echo -e "${YELLOW}=== PRODUCTION ENVIRONMENT ===${NC}"
     echo -e "${RED}WARNING: You are about to modify PRODUCTION containers!${NC}"
     echo -e "${RED}This affects https://sujbot.fjfi.cvut.cz${NC}"
@@ -81,6 +113,8 @@ check_auth() {
     entered_password=$(echo "$entered_password" | tr -d '[:space:]')
 
     if [ "$entered_password" != "$PROD_PASSWORD" ]; then
+        # Delay to mitigate brute-force timing attacks
+        sleep 2
         echo -e "${RED}ERROR: Invalid password. Aborting.${NC}"
         exit 1
     fi
@@ -90,13 +124,32 @@ check_auth() {
 }
 
 # =============================================================================
+# DATABASE CHECK
+# =============================================================================
+ensure_databases() {
+    # Check if database containers are running
+    if ! docker ps --filter "name=sujbot_postgres" --format "{{.Names}}" | grep -q sujbot_postgres; then
+        echo -e "${YELLOW}Database services not running. Starting them first...${NC}"
+        cd "$PROJECT_DIR"
+        docker compose -f docker-compose.yml -p sujbot up -d
+        echo "Waiting for databases to be healthy..."
+        sleep 10
+    fi
+}
+
+# =============================================================================
 # Commands
 # =============================================================================
 cmd_up() {
     check_auth
-    echo -e "${GREEN}Starting PRODUCTION containers...${NC}"
+    ensure_databases
+
+    echo -e "${GREEN}Starting PRODUCTION application stack...${NC}"
     cd "$PROJECT_DIR"
-    docker compose -f docker-compose.yml -p sujbot up -d
+
+    # Start production stack (uses external database network)
+    docker compose -f docker-compose.yml -f docker-compose.prod.yml -p sujbot up -d
+
     echo -e "${GREEN}Production started successfully!${NC}"
     echo ""
     echo "Access: https://sujbot.fjfi.cvut.cz"
@@ -104,43 +157,60 @@ cmd_up() {
 
 cmd_down() {
     check_auth
-    echo -e "${YELLOW}Stopping PRODUCTION containers...${NC}"
+
+    echo -e "${YELLOW}Stopping PRODUCTION application stack...${NC}"
     cd "$PROJECT_DIR"
-    docker compose -f docker-compose.yml -p sujbot down
-    echo -e "${GREEN}Production stopped.${NC}"
+
+    # Stop only production services (keep databases running)
+    docker compose -f docker-compose.prod.yml -p sujbot down
+
+    echo -e "${GREEN}Production application stopped.${NC}"
+    echo -e "${YELLOW}Note: Database services are still running.${NC}"
+    echo "To stop databases too: ./scripts/db.sh down"
 }
 
 cmd_restart() {
     check_auth
+    ensure_databases
+
     echo -e "${YELLOW}Restarting PRODUCTION containers...${NC}"
     cd "$PROJECT_DIR"
-    docker compose -f docker-compose.yml -p sujbot restart
+
+    docker compose -f docker-compose.yml -f docker-compose.prod.yml -p sujbot restart
+
     echo -e "${GREEN}Production restarted.${NC}"
 }
 
 cmd_logs() {
-    validate_compose_file
+    validate_docker_access
+    validate_compose_files
+
     cd "$PROJECT_DIR"
     # Check if any containers are running
     local running
-    running=$(docker compose -f docker-compose.yml -p sujbot ps -q 2>/dev/null)
+    running=$(docker compose -f docker-compose.yml -f docker-compose.prod.yml -p sujbot ps -q 2>/dev/null)
     if [ -z "$running" ]; then
         echo -e "${YELLOW}No production containers running.${NC}"
         echo "Start with: ./scripts/prod.sh up"
         exit 0
     fi
+
     echo -e "${GREEN}Viewing PRODUCTION logs (Ctrl+C to exit)...${NC}"
-    docker compose -f docker-compose.yml -p sujbot logs -f "${@:2}"
+    docker compose -f docker-compose.yml -f docker-compose.prod.yml -p sujbot logs -f "${@:2}"
 }
 
 cmd_status() {
-    validate_compose_file
+    validate_docker_access
+    validate_compose_files
+
     echo -e "${GREEN}=== PRODUCTION STATUS ===${NC}"
     cd "$PROJECT_DIR"
-    docker compose -f docker-compose.yml -p sujbot ps
+    docker compose -f docker-compose.yml -f docker-compose.prod.yml -p sujbot ps
 }
 
 cmd_ps() {
+    validate_docker_access
+
     echo -e "${GREEN}=== PRODUCTION CONTAINERS ===${NC}"
     local output
     output=$(docker ps --filter "name=sujbot_" --filter "name=!sujbot_dev" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}")
@@ -155,16 +225,24 @@ cmd_ps() {
 cmd_help() {
     echo "SUJBOT Production Management"
     echo ""
+    echo "Requires: docker group membership + production password"
+    echo ""
     echo "Usage: $0 <command>"
     echo ""
-    echo "Commands:"
-    echo "  up       Start production containers (requires password)"
-    echo "  down     Stop production containers (requires password)"
-    echo "  restart  Restart production containers (requires password)"
+    echo "Commands (require password):"
+    echo "  up       Start production (databases + application)"
+    echo "  down     Stop production application (keeps databases)"
+    echo "  restart  Restart production containers"
+    echo ""
+    echo "Commands (no password):"
     echo "  logs     View logs (optional: service name)"
     echo "  status   Show container status"
     echo "  ps       List running production containers"
     echo "  help     Show this help message"
+    echo ""
+    echo "Related scripts:"
+    echo "  ./scripts/db.sh     - Manage database services only"
+    echo "  ./scripts/dev.sh    - Manage development environment"
 }
 
 # =============================================================================

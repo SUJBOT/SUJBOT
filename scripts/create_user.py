@@ -6,7 +6,7 @@ Usage:
     python scripts/create_user.py <email> <password> [full_name] [--admin]
 
 Examples:
-    python scripts/create_user.py prusemic@cvut.cz myPassword123!
+    python scripts/create_user.py user@example.com myPassword123!
     python scripts/create_user.py admin@example.com SecurePass123! "Admin User" --admin
 
 Or via Docker:
@@ -34,6 +34,7 @@ async def create_user(email: str, password: str, full_name: str = None, is_admin
 
     print(f"🔄 Creating user: {email}...")
 
+    conn = None
     try:
         # Connect to database
         conn = await asyncpg.connect(db_url)
@@ -48,7 +49,6 @@ async def create_user(email: str, password: str, full_name: str = None, is_admin
             print(f"\n⚠️  User already exists!")
             print(f"   📧 Email: {existing['email']}")
             print(f"   🆔 ID: {existing['id']}")
-            await conn.close()
             return False
 
         # Hash password with Argon2
@@ -74,8 +74,6 @@ async def create_user(email: str, password: str, full_name: str = None, is_admin
             is_admin
         )
 
-        await conn.close()
-
         print("\n✅ User created successfully!")
         print(f"   🆔 ID: {user_id}")
         print(f"   📧 Email: {email}")
@@ -97,6 +95,10 @@ async def create_user(email: str, password: str, full_name: str = None, is_admin
         import traceback
         traceback.print_exc(file=sys.stderr)
         return False
+    finally:
+        # Ensure connection is always closed
+        if conn is not None:
+            await conn.close()
 
 
 def print_usage():

@@ -4,7 +4,7 @@
 set -e
 
 DOMAIN="sujbot.fjfi.cvut.cz"
-EMAIL="admin@fjfi.cvut.cz"  # Change if needed
+EMAIL="sujbot.fjfi@gmail.com"  # Change if needed
 
 echo "==> Obtaining SSL certificate for $DOMAIN"
 

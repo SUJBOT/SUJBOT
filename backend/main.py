@@ -257,17 +257,38 @@ app.add_middleware(
 )
 
 # 2. CORS (cross-origin resource sharing)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        # Development
+# Build CORS origins list dynamically to support any rootless Docker user
+def _build_cors_origins() -> list:
+    """Build CORS origins from environment or defaults."""
+    # Check for custom CORS origins from environment
+    custom_origins = os.getenv("CORS_ORIGINS", "")
+    if custom_origins:
+        return [o.strip() for o in custom_origins.split(",") if o.strip()]
+
+    # Default origins
+    origins = [
+        # Development - Vite dev servers
         "http://localhost:5173",
         "http://localhost:5174",  # Vite alternative port
         "http://localhost:3000",
         # Production
         "https://sujbot.fjfi.cvut.cz",
         "http://sujbot.fjfi.cvut.cz",
-    ],
+    ]
+
+    # Development - Nginx dev proxies (rootless Docker)
+    # Port formula: 10000 + (UID % 1000) * 100
+    # Generate for UIDs 1000-1099 to cover all potential users
+    for uid_offset in range(100):
+        port = 10000 + uid_offset * 100
+        origins.append(f"http://localhost:{port}")
+
+    return origins
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_build_cors_origins(),
     allow_credentials=True,  # Required for cookies
     # Restrict methods (NOT wildcard for security)
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],

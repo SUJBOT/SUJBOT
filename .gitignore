@@ -1,13 +1,20 @@
-# Environment variables (contains API keys!)
+# =============================================================================
+# SUJBOT .gitignore - Organized by category
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Environment Variables & Secrets (NEVER commit these!)
+# -----------------------------------------------------------------------------
 .env
+.env.*
 .env.local
 .env.*.local
+.env.combined
+sudo.txt
 
-data
-output
-vector_db
-
-# Python
+# -----------------------------------------------------------------------------
+# Python Build Artifacts
+# -----------------------------------------------------------------------------
 __pycache__/
 *.py[cod]
 *$py.class
@@ -30,14 +37,18 @@ wheels/
 *.egg
 MANIFEST
 
-# Virtual environments
+# -----------------------------------------------------------------------------
+# Virtual Environments
+# -----------------------------------------------------------------------------
 venv/
 ENV/
 env/
-.venv
-.vite/
+.venv/
+.uv/
 
-# IDE
+# -----------------------------------------------------------------------------
+# IDE & Editor Files
+# -----------------------------------------------------------------------------
 .vscode/
 .idea/
 *.swp
@@ -45,103 +56,126 @@ env/
 *~
 .DS_Store
 
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# Output directories (large files)
-# Allow GRI 306 example output
-phase1_output/
-phase3_output/
-
-
-CLAUDE.md
-.claude/
-
-
-# Logs
+# -----------------------------------------------------------------------------
+# Logs & Runtime Caches
+# -----------------------------------------------------------------------------
 *.log
 logs/
-
-# Model caches
 .cache/
 .sentence_transformers/
 models/
+.vite/
 
-# Testing
+# -----------------------------------------------------------------------------
+# Test Artifacts
+# -----------------------------------------------------------------------------
 .pytest_cache/
 .mypy_cache/
 .coverage
 htmlcov/
 .tox/
+coverage/
+*.lcov
 
-# UV (Python package manager)
-.uv/
+# -----------------------------------------------------------------------------
+# Jupyter Notebook
+# -----------------------------------------------------------------------------
+.ipynb_checkpoints/
 
-# Test data files (large PDFs)
+# -----------------------------------------------------------------------------
+# Node.js / Frontend
+# -----------------------------------------------------------------------------
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# -----------------------------------------------------------------------------
+# Docker Compose Configuration
+# -----------------------------------------------------------------------------
+# Production stack - contains sensitive server configuration (local only)
+docker-compose.prod.yml
+# Local override files
+docker-compose.override*
+
+# -----------------------------------------------------------------------------
+# Project-Specific Data Directories
+# -----------------------------------------------------------------------------
+# Pipeline output (large generated files)
+# Note: these may be symlinks, so no trailing slash
+data
+!data/.gitkeep
+output
+!output/.gitkeep
+vector_db
+
+# Phase outputs
+phase1_output/
+phase3_output/
+
+# Test data (large PDFs)
 data_test/*.pdf
 !data_test/.gitkeep
 data_legacy/
 chunking_data/
 
-# Backup files
-*.bak
-*.backup
-*.tar.gz
-results_all/
-
-# Generated data folders
+# Benchmark and evaluation data
 benchmarks/
-clean_text/
-vector_db/
-data/
-!data/.gitkeep
 benchmark_dataset/
 dataset/
 !dataset/.gitkeep
-output/
-!output/.gitkeep
 evaluations/
-
-# Research papers (moved to docs/papers/)
-papers/
-!docs/papers/
-
-# Generated analysis outputs
+clean_text/
 rag_confidence/
 results/
-extraction_dataset/TODO.md
+results_all/
 
-TODO.md
+# Extraction dataset (generated - except ground truth files)
+extraction_dataset/*.json
+!extraction_dataset/*_gt.json
+!extraction_dataset/.gitkeep
 
-.env*
-
-# Backup archives
+# -----------------------------------------------------------------------------
+# Backups & Archives
+# -----------------------------------------------------------------------------
+*.bak
+*.backup
+*.tar.gz
 backups/
 sujbot_backup_*.tar.gz
 
-sudo.txt
+# -----------------------------------------------------------------------------
+# Research & Documentation (local only)
+# -----------------------------------------------------------------------------
+papers/
+docs/papers/
 
 # Prompt optimization (TextGrad generated versions)
 prompts/agents/versions/
 !prompts/agents/versions/README.md
 
-# Extraction dataset outputs (generated)
-extraction_dataset/*.json
-!extraction_dataset/.gitkeep
+# -----------------------------------------------------------------------------
+# Temporary Planning Files (local only)
+# -----------------------------------------------------------------------------
+PLAN.md
+INSTRUCTIONS.md
+TODO.md
+extraction_dataset/TODO.md
 
-# Docker compose temporary files
-.env.combined
+# -----------------------------------------------------------------------------
+# Claude Code & AI Tools
+# -----------------------------------------------------------------------------
+# NOTE: CLAUDE.md is INTENTIONALLY tracked - it contains project-specific instructions
+.claude/
+CODEX*
+.codex/
 
-# Node modules (frontend)
-node_modules/
-
-# Frontend build output
-frontend/dist/
-frontend/.vite/
-
-# Nginx logs (mounted volume)
+# -----------------------------------------------------------------------------
+# Nginx Logs (mounted volume in Docker)
+# -----------------------------------------------------------------------------
 logs/nginx/
 
-# Coverage reports
-coverage/
-*.lcov
+# -----------------------------------------------------------------------------
+# Systemd Service Files (deployment-specific paths and users)
+# -----------------------------------------------------------------------------
+scripts/systemd/*.service
+scripts/systemd/*.timer
