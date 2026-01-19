@@ -462,11 +462,20 @@ def main():
     )
     args = parser.parse_args()
 
-    # Load configuration
+    # Load configuration with specific exception handling
     try:
         config = load_config(args.config)
+    except FileNotFoundError:
+        logger.error(f"Config file not found: {args.config}")
+        sys.exit(1)
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON in config file {args.config}: {e}")
+        sys.exit(1)
+    except PermissionError:
+        logger.error(f"Permission denied reading config: {args.config}")
+        sys.exit(1)
     except Exception as e:
-        logger.error(f"Failed to load config: {e}")
+        logger.error(f"Failed to load config: {e}", exc_info=True)
         sys.exit(1)
 
     # Handle test mode

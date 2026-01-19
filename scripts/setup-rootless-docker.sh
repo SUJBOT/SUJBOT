@@ -41,6 +41,14 @@ if [[ $EUID -eq 0 ]]; then
     exit 1
 fi
 
+# Validate USER variable (used in grep patterns and system commands)
+# Must contain only alphanumeric characters, underscores, and dashes
+if [[ ! "$USER" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+    echo -e "${RED}ERROR: Invalid USER value: '$USER'${NC}"
+    echo "USER must contain only alphanumeric characters, underscores, and dashes."
+    exit 1
+fi
+
 USER_UID=$(id -u)
 USER_GID=$(id -g)
 

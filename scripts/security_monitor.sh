@@ -390,8 +390,11 @@ fi
 PROMPT_TEMPLATE=$(cat "$FULL_PROMPT_FILE")
 
 # Replace placeholder with actual data
-# Using awk for safe substitution (handles special characters in data)
-FULL_PROMPT=$(echo "$PROMPT_TEMPLATE" | awk -v data="$SYSTEM_DATA" '{gsub(/\{\{SYSTEM_DATA\}\}/, data); print}')
+# Escape special characters in SYSTEM_DATA for awk replacement:
+# - & has special meaning (inserts matched pattern)
+# - \ is escape character
+ESCAPED_DATA=$(printf '%s' "$SYSTEM_DATA" | sed 's/[&\\]/\\&/g')
+FULL_PROMPT=$(printf '%s' "$PROMPT_TEMPLATE" | awk -v data="$ESCAPED_DATA" '{gsub(/\{\{SYSTEM_DATA\}\}/, data); print}')
 
 # ============================================================================
 # Invoke Claude Code CLI
@@ -485,6 +488,11 @@ fi
 # ============================================================================
 
 RETENTION_DAYS=$(jq -r '.security_monitoring.logging.retention_days // 30' "$CONFIG_FILE")
+# Validate RETENTION_DAYS is a positive integer to prevent injection
+if ! [[ "$RETENTION_DAYS" =~ ^[0-9]+$ ]] || [ "$RETENTION_DAYS" -lt 1 ]; then
+    log "WARNING: Invalid retention_days value '$RETENTION_DAYS', using default 30"
+    RETENTION_DAYS=30
+fi
 log "Cleaning up logs older than $RETENTION_DAYS days..."
 find "$LOG_DIR" -name "*.log" -mtime +"$RETENTION_DAYS" -delete 2>/dev/null || true
 find "$LOG_DIR" -name "*.json" -mtime +"$RETENTION_DAYS" -delete 2>/dev/null || true

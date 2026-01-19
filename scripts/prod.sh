@@ -113,6 +113,8 @@ check_auth() {
     entered_password=$(echo "$entered_password" | tr -d '[:space:]')
 
     if [ "$entered_password" != "$PROD_PASSWORD" ]; then
+        # Delay to mitigate brute-force timing attacks
+        sleep 2
         echo -e "${RED}ERROR: Invalid password. Aborting.${NC}"
         exit 1
     fi
