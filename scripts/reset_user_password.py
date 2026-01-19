@@ -33,6 +33,7 @@ async def reset_password(email: str, new_password: str):
 
     print(f"🔄 Resetting password for: {email}")
 
+    conn = None
     try:
         # Connect to database
         conn = await asyncpg.connect(db_url)
@@ -60,8 +61,6 @@ async def reset_password(email: str, new_password: str):
             email
         )
 
-        await conn.close()
-
         # Verify that exactly one row was updated
         if result != "UPDATE 1":
             print(f"\n❌ Password reset failed: No user found with email '{email}'")
@@ -79,6 +78,10 @@ async def reset_password(email: str, new_password: str):
         import traceback
         traceback.print_exc()
         return False
+    finally:
+        # Ensure connection is always closed
+        if conn is not None:
+            await conn.close()
 
 
 def main():

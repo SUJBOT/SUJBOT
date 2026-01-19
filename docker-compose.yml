@@ -31,7 +31,9 @@ services:
       - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
       - ./docker/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
     ports:
-      # Exposed for rootless Docker access via host IP
+      # NOTE: Exposed to all interfaces for rootless Docker access via host IP.
+      # SECURITY: Ensure firewall blocks external access to ports 5432, 6379, 7474, 7687.
+      # On Ubuntu/Debian: sudo ufw deny 5432 && sudo ufw deny 6379 && sudo ufw deny 7474 && sudo ufw deny 7687
       - "5432:5432"
     networks:
       - sujbot_db_net
@@ -66,7 +68,7 @@ services:
       - neo4j_data:/data
       - ./vector_db:/import:ro
     ports:
-      # Exposed for rootless Docker access via host IP
+      # See security note on postgres ports above
       - "7474:7474"  # Browser
       - "7687:7687"  # Bolt
     networks:
@@ -95,7 +97,7 @@ services:
     volumes:
       - redis_data:/data
     ports:
-      # Exposed for rootless Docker access via host IP
+      # See security note on postgres ports above
       - "6379:6379"
     networks:
       - sujbot_db_net
@@ -125,7 +127,8 @@ services:
     volumes:
       - pgadmin_data:/var/lib/pgadmin
     ports:
-      - "5050:80"
+      # Admin interface - bind to localhost, access via SSH tunnel if needed remotely
+      - "127.0.0.1:5050:80"
     networks:
       - sujbot_db_net
     depends_on:

@@ -506,17 +506,18 @@ def main():
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse report JSON: {e}")
         logger.error(f"Input was: {report_json[:500]}...")
+        # JSON parse failure is CRITICAL - we can't process security analysis
         report = {
             "timestamp": datetime.utcnow().isoformat(),
-            "overall_status": "warning",
-            "summary": "Nepodarilo se parsovat vystup z analyzy",
+            "overall_status": "critical",
+            "summary": "CRITICAL: Nepodarilo se parsovat vystup z analyzy",
             "findings": [
                 {
                     "category": "internal",
-                    "severity": "warning",
+                    "severity": "critical",
                     "title": "Parse Error",
                     "description": f"JSON parse error: {e}",
-                    "recommendation": "Zkontrolujte format vystupu z Claude Code",
+                    "recommendation": "Zkontrolujte format vystupu z Claude Code a logy",
                 }
             ],
             "metrics": {},

@@ -127,7 +127,12 @@ prepare_env() {
     validate_env
     validate_compose_file
 
-    # Create user-specific env file
+    # Create user-specific env file with secure permissions
+    # Set umask to 077 to ensure files are readable only by owner
+    local old_umask
+    old_umask=$(umask)
+    umask 077
+
     cat > "$PROJECT_DIR/.env.dev.user" <<EOF
 # Auto-generated for user: $USER (UID: $USER_UID)
 # Port allocation: $PORT_BASE-$((PORT_BASE + 99))
@@ -148,6 +153,9 @@ EOF
 
     # Combine base .env with user-specific settings
     cat "$PROJECT_DIR/.env" "$PROJECT_DIR/.env.dev.user" > "$PROJECT_DIR/.env.combined"
+
+    # Restore original umask
+    umask "$old_umask"
 }
 
 cleanup_env() {

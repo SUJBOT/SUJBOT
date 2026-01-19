@@ -32,13 +32,18 @@ else
     exit 1
 fi
 
-# Validate user exists
+# Validate user exists and get home directory safely
+# Using getent instead of eval to prevent command injection
 if ! id "$TARGET_USER" &>/dev/null; then
     echo "ERROR: User '$TARGET_USER' does not exist"
     exit 1
 fi
 
-TARGET_HOME=$(eval echo "~$TARGET_USER")
+TARGET_HOME=$(getent passwd "$TARGET_USER" | cut -d: -f6)
+if [ -z "$TARGET_HOME" ] || [ ! -d "$TARGET_HOME" ]; then
+    echo "ERROR: Cannot determine home directory for user '$TARGET_USER'"
+    exit 1
+fi
 
 echo "Configuration:"
 echo "  User:        $TARGET_USER"

@@ -34,6 +34,21 @@ fi
 if [[ "$LOG_DIR" == ./* ]]; then
     LOG_DIR="$PROJECT_DIR/${LOG_DIR#./}"
 fi
+
+# Security: Validate LOG_DIR is within PROJECT_DIR to prevent path traversal
+# Resolve to canonical path and check prefix
+LOG_DIR_REAL=$(cd "$PROJECT_DIR" && mkdir -p "$LOG_DIR" 2>/dev/null && cd "$LOG_DIR" && pwd) || {
+    echo "ERROR: Cannot create or access log directory: $LOG_DIR"
+    exit 1
+}
+if [[ "$LOG_DIR_REAL" != "$PROJECT_DIR"* ]]; then
+    echo "ERROR: Log directory must be within project directory (path traversal detected)"
+    echo "  LOG_DIR: $LOG_DIR"
+    echo "  Resolved: $LOG_DIR_REAL"
+    echo "  PROJECT_DIR: $PROJECT_DIR"
+    exit 1
+fi
+LOG_DIR="$LOG_DIR_REAL"
 LOG_FILE="$LOG_DIR/monitor_$TIMESTAMP.log"
 
 # ============================================================================
@@ -47,7 +62,8 @@ error_handler() {
 
     # Try to send error notification
     if [ -f "$SCRIPT_DIR/security_notify.py" ] && [ "$DRY_RUN" = false ]; then
-        echo '{
+        local notify_result
+        notify_result=$(echo '{
             "timestamp": "'"$(date -u +"%Y-%m-%dT%H:%M:%SZ")"'",
             "overall_status": "critical",
             "summary": "Security monitor script selhal na radku '"$line_number"'",
@@ -59,7 +75,9 @@ error_handler() {
                 "recommendation": "Zkontrolujte logy v '"$LOG_FILE"'"
             }],
             "metrics": {}
-        }' | uv run python "$SCRIPT_DIR/security_notify.py" --config "$CONFIG_FILE" 2>&1 || true
+        }' | uv run python "$SCRIPT_DIR/security_notify.py" --config "$CONFIG_FILE" 2>&1) || {
+            echo "[ERROR] Failed to send error notification: $notify_result" >> "$LOG_FILE"
+        }
     fi
     exit "$exit_code"
 }
@@ -228,9 +246,17 @@ fi
 
 # 3. Container logs (errors/warnings only)
 CONTAINER_LOGS=""
-for container in $CONTAINERS; do
+# Use read with IFS to safely handle container names
+while IFS= read -r container; do
+    # Skip empty lines
+    [ -z "$container" ] && continue
+    # Validate container name (alphanumeric, underscore, dash only)
+    if [[ ! "$container" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        log "WARNING: Skipping invalid container name: $container"
+        continue
+    fi
     if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${container}$"; then
-        LOGS=$(docker logs --since "$LOG_SINCE" "$container" 2>&1 | grep -iE "(error|critical|fail|warning|exception)" | tail -n "$MAX_LOG_LINES" || true)
+        LOGS=$(docker logs --since "$LOG_SINCE" "$container" 2>&1 | grep -iE "(error|critical|fail|warning|exception)" | tail -n "$MAX_LOG_LINES") || true
         if [ -n "$LOGS" ]; then
             CONTAINER_LOGS+="=== $container ===
 $LOGS
@@ -243,7 +269,7 @@ CONTAINER NOT RUNNING
 
 "
     fi
-done
+done <<< "$(echo "$CONTAINERS" | tr ' ' '\n')"
 
 # 4. System resources
 DISK_USAGE=$(df -h "$PROJECT_DIR" 2>&1 | tail -1) || DISK_USAGE="UNAVAILABLE"
@@ -441,9 +467,11 @@ if [ "$DRY_RUN" = true ]; then
 else
     log "Sending notifications..."
     if [ -f "$SCRIPT_DIR/security_notify.py" ]; then
-        echo "$CLAUDE_JSON" | uv run python "$SCRIPT_DIR/security_notify.py" --config "$CONFIG_FILE" 2>&1 | tee -a "$LOG_FILE" || {
-            log "WARNING: Notification script failed"
+        NOTIFY_OUTPUT=$(echo "$CLAUDE_JSON" | uv run python "$SCRIPT_DIR/security_notify.py" --config "$CONFIG_FILE" 2>&1) || {
+            log "WARNING: Notification script failed with exit code $?"
+            log "Notification output: $NOTIFY_OUTPUT"
         }
+        echo "$NOTIFY_OUTPUT" | tee -a "$LOG_FILE"
     else
         log "WARNING: Notification script not found: $SCRIPT_DIR/security_notify.py"
     fi

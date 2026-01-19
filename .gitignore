@@ -129,8 +129,9 @@ rag_confidence/
 results/
 results_all/
 
-# Extraction dataset (generated)
+# Extraction dataset (generated - except ground truth files)
 extraction_dataset/*.json
+!extraction_dataset/*_gt.json
 !extraction_dataset/.gitkeep
 
 # -----------------------------------------------------------------------------
@@ -163,7 +164,7 @@ extraction_dataset/TODO.md
 # -----------------------------------------------------------------------------
 # Claude Code & AI Tools
 # -----------------------------------------------------------------------------
-CLAUDE.md
+# NOTE: CLAUDE.md is INTENTIONALLY tracked - it contains project-specific instructions
 .claude/
 CODEX*
 .codex/

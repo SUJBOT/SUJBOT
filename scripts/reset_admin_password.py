@@ -28,6 +28,7 @@ async def reset_password():
 
     print("🔄 Resetting admin password...")
 
+    conn = None
     try:
         # Connect to database
         conn = await asyncpg.connect(db_url)
@@ -55,8 +56,6 @@ async def reset_password():
             password_hash
         )
 
-        await conn.close()
-
         # asyncpg returns string like "UPDATE 1" on success
         if result != "UPDATE 1":
             print(f"\n❌ Password reset failed: No user found with email 'admin@sujbot.local'")
@@ -75,6 +74,10 @@ async def reset_password():
         import traceback
         traceback.print_exc()
         return False
+    finally:
+        # Ensure connection is always closed
+        if conn is not None:
+            await conn.close()
 
 
 if __name__ == "__main__":
