@@ -194,7 +194,8 @@ fi
 
 # Get containers to monitor (environment-aware)
 # Try environment-specific config first, fall back to default containers with prefix
-ENV_CONTAINERS=$(jq -r ".security_monitoring.environments.${ENVIRONMENT}.containers // empty | join(\" \")" "$CONFIG_FILE" 2>/dev/null)
+# Using --arg for safe variable interpolation (prevents injection)
+ENV_CONTAINERS=$(jq -r --arg env "$ENVIRONMENT" '.security_monitoring.environments[$env].containers // empty | join(" ")' "$CONFIG_FILE" 2>/dev/null)
 
 if [ -n "$ENV_CONTAINERS" ]; then
     CONTAINERS="$ENV_CONTAINERS"
@@ -277,7 +278,8 @@ MEMORY_USAGE=$(free -h 2>&1 | grep -E "^Mem:" || echo "UNAVAILABLE")
 
 # 5. Health endpoint check (environment-aware)
 # Try environment-specific config first, fall back to default ports
-HEALTH_ENDPOINT=$(jq -r ".security_monitoring.environments.${ENVIRONMENT}.health_endpoint // empty" "$CONFIG_FILE" 2>/dev/null)
+# Using --arg for safe variable interpolation (prevents injection)
+HEALTH_ENDPOINT=$(jq -r --arg env "$ENVIRONMENT" '.security_monitoring.environments[$env].health_endpoint // empty' "$CONFIG_FILE" 2>/dev/null)
 if [ -z "$HEALTH_ENDPOINT" ]; then
     # Default: prod=8000 (internal), dev=8100 (exposed)
     if [ "$ENVIRONMENT" = "dev" ]; then
@@ -299,7 +301,8 @@ fi
 
 # 6. SSL certificate check (environment-aware)
 # Check if SSL is enabled for this environment
-SSL_ENABLED=$(jq -r ".security_monitoring.environments.${ENVIRONMENT}.ssl_enabled // true" "$CONFIG_FILE" 2>/dev/null)
+# Using --arg for safe variable interpolation (prevents injection)
+SSL_ENABLED=$(jq -r --arg env "$ENVIRONMENT" '.security_monitoring.environments[$env].ssl_enabled // true' "$CONFIG_FILE" 2>/dev/null)
 
 if [ "$SSL_ENABLED" = "false" ] || [ "$ENVIRONMENT" = "dev" ]; then
     SSL_INFO="SSL check skipped (${ENVIRONMENT} environment)"

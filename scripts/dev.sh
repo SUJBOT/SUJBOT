@@ -41,6 +41,14 @@ NC='\033[0m' # No Color
 USER_UID=$(id -u)
 PORT_BASE=$((10000 + (USER_UID % 1000) * 100))
 
+# Validate USER variable (used in docker compose project names)
+# Must contain only alphanumeric characters, underscores, and dashes
+if [[ ! "$USER" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+    echo -e "${RED}ERROR: Invalid USER value: '$USER'${NC}"
+    echo "USER must contain only alphanumeric characters, underscores, and dashes."
+    exit 1
+fi
+
 export DEV_HTTP_PORT=$((PORT_BASE + 0))
 export DEV_HTTPS_PORT=$((PORT_BASE + 1))
 export DEV_BACKEND_PORT=$((PORT_BASE + 2))
