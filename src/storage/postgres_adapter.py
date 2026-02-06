@@ -233,6 +233,7 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
         connection_string: str,
         pool_size: int = 20,
         dimensions: int = 4096,  # Qwen3-Embedding-8B (was 3072 for OpenAI)
+        architecture: str = "vl",
     ):
         """
         Initialize PostgreSQL adapter.
@@ -241,10 +242,12 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
             connection_string: PostgreSQL DSN (postgresql://user:pass@host:port/db)
             pool_size: Connection pool size (default: 20)
             dimensions: Embedding dimensionality (default: 4096 for Qwen3-Embedding-8B)
+            architecture: "vl" (default) or "ocr" (legacy)
         """
         self.connection_string = connection_string
         self.pool_size = pool_size
         self.dimensions = dimensions
+        self.architecture = architecture
         self.pool: Optional[asyncpg.Pool] = None
         self._initialized = False
         # asyncio.Lock for async context only - protects against concurrent coroutines
@@ -968,11 +971,13 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
         return _run_async_safe(self._async_get_document_list())
 
     async def _async_get_document_list(self) -> List[str]:
-        """Async get document list."""
+        """Async get document list — VL reads vl_pages, OCR reads layer1."""
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch(
-                "SELECT DISTINCT document_id FROM vectors.layer1 ORDER BY document_id"
-            )
+            if self.architecture == "vl":
+                query = "SELECT DISTINCT document_id FROM vectors.vl_pages ORDER BY document_id"
+            else:
+                query = "SELECT DISTINCT document_id FROM vectors.layer1 ORDER BY document_id"
+            rows = await conn.fetch(query)
             return [row["document_id"] for row in rows]
 
     def get_stats(self) -> Dict[str, Any]:
@@ -986,34 +991,49 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
                 "SELECT * FROM metadata.vector_store_stats WHERE id = 1"
             )
 
-            if not stats_row:
-                # Fallback: compute stats manually
-                layer1_count = await conn.fetchval("SELECT COUNT(*) FROM vectors.layer1")
-                layer2_count = await conn.fetchval("SELECT COUNT(*) FROM vectors.layer2")
-                layer3_count = await conn.fetchval("SELECT COUNT(*) FROM vectors.layer3")
+            if self.architecture == "vl":
+                vl_count = await conn.fetchval("SELECT COUNT(*) FROM vectors.vl_pages")
                 doc_count = await conn.fetchval(
-                    "SELECT COUNT(DISTINCT document_id) FROM vectors.layer1"
+                    "SELECT COUNT(DISTINCT document_id) FROM vectors.vl_pages"
                 )
-
                 return {
                     "documents": doc_count,
-                    "total_vectors": layer1_count + layer2_count + layer3_count,
-                    "layer1_count": layer1_count,
-                    "layer2_count": layer2_count,
-                    "layer3_count": layer3_count,
+                    "total_vectors": vl_count,
+                    "vl_pages_count": vl_count,
                     "dimensions": self.dimensions,
                     "backend": "postgresql",
+                    "architecture": "vl",
                 }
             else:
-                return {
-                    "documents": stats_row["document_count"],
-                    "total_vectors": stats_row["total_vectors"],
-                    "layer1_count": stats_row["layer1_count"],
-                    "layer2_count": stats_row["layer2_count"],
-                    "layer3_count": stats_row["layer3_count"],
-                    "dimensions": stats_row["dimensions"],
-                    "backend": "postgresql",
-                }
+                # Legacy OCR mode
+                if not stats_row:
+                    layer1_count = await conn.fetchval("SELECT COUNT(*) FROM vectors.layer1")
+                    layer2_count = await conn.fetchval("SELECT COUNT(*) FROM vectors.layer2")
+                    layer3_count = await conn.fetchval("SELECT COUNT(*) FROM vectors.layer3")
+                    doc_count = await conn.fetchval(
+                        "SELECT COUNT(DISTINCT document_id) FROM vectors.layer1"
+                    )
+                    return {
+                        "documents": doc_count,
+                        "total_vectors": layer1_count + layer2_count + layer3_count,
+                        "layer1_count": layer1_count,
+                        "layer2_count": layer2_count,
+                        "layer3_count": layer3_count,
+                        "dimensions": self.dimensions,
+                        "backend": "postgresql",
+                        "architecture": "ocr",
+                    }
+                else:
+                    return {
+                        "documents": stats_row["document_count"],
+                        "total_vectors": stats_row["total_vectors"],
+                        "layer1_count": stats_row["layer1_count"],
+                        "layer2_count": stats_row["layer2_count"],
+                        "layer3_count": stats_row["layer3_count"],
+                        "dimensions": stats_row["dimensions"],
+                        "backend": "postgresql",
+                        "architecture": "ocr",
+                    }
 
     # ============================================================================
     # Properties - Metadata Access

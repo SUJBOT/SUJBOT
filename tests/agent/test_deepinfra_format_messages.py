@@ -185,7 +185,11 @@ class TestFormatMessagesMultimodal:
         assert content[1]["text"] == "What is on this page?"
 
     def test_tool_result_with_multimodal_content(self, provider):
-        """Tool result containing image blocks (VL mode)."""
+        """Tool result containing image blocks (VL mode).
+
+        OpenAI API requires tool message content to be a string.
+        Images are split into a user message with interleaved labels.
+        """
         messages = [
             {
                 "role": "user",
@@ -209,14 +213,28 @@ class TestFormatMessagesMultimodal:
             }
         ]
         result = provider._format_messages(messages, system=None)
-        assert len(result) == 1
-        msg = result[0]
-        assert msg["role"] == "tool"
-        assert msg["tool_call_id"] == "call_789"
-        # Content should be the converted multimodal blocks
-        assert isinstance(msg["content"], list)
-        assert msg["content"][0]["type"] == "image_url"
-        assert msg["content"][1]["type"] == "text"
+        # Tool message (text only) + user message (images with labels)
+        assert len(result) == 2
+
+        # Tool message gets text as string
+        tool_msg = result[0]
+        assert tool_msg["role"] == "tool"
+        assert tool_msg["tool_call_id"] == "call_789"
+        assert isinstance(tool_msg["content"], str)
+        assert "Page 1 from BZ_VR1" in tool_msg["content"]
+
+        # Images in user message with interleaved labels
+        user_msg = result[1]
+        assert user_msg["role"] == "user"
+        assert isinstance(user_msg["content"], list)
+        image_blocks = [b for b in user_msg["content"] if b["type"] == "image_url"]
+        assert len(image_blocks) == 1
+        assert "data:image/png;base64,AAAA" in image_blocks[0]["image_url"]["url"]
+        # Label should appear before the image
+        text_blocks = [b for b in user_msg["content"] if b["type"] == "text"]
+        assert any("Page 1 from BZ_VR1" in b["text"] for b in text_blocks)
+        # Instruction text should be present
+        assert any("READ" in b["text"] for b in text_blocks)
 
 
 class TestFormatMessagesFullToolLoop:

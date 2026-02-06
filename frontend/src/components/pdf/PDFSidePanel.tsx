@@ -24,6 +24,9 @@ import {
   Loader2,
   AlertCircle,
   FileText,
+  Search,
+  ChevronUp,
+  ChevronDown,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../design-system/utils/cn';
@@ -88,6 +91,15 @@ export function PDFSidePanel({
   const [currentVisiblePage, setCurrentVisiblePage] = useState(initialPage);
   const [loadedPages, setLoadedPages] = useState<Set<number>>(new Set());
 
+  // Search state
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<Array<{ pageNumber: number }>>([]);
+  const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const pdfDocRef = useRef<any>(null);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const observerRef = useRef<IntersectionObserver | null>(null);
@@ -99,6 +111,89 @@ export function PDFSidePanel({
     if (!chunkContent) return [];
     return extractSearchPhrases(chunkContent);
   }, [chunkContent]);
+
+  // Debounce search query
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(searchQuery), 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Execute search when debounced query changes
+  useEffect(() => {
+    if (!debouncedQuery.trim() || !pdfDocRef.current || !numPages) {
+      setSearchResults([]);
+      setCurrentMatchIndex(0);
+      return;
+    }
+
+    const query = debouncedQuery.toLowerCase();
+    let cancelled = false;
+
+    (async () => {
+      const results: Array<{ pageNumber: number }> = [];
+      for (let i = 1; i <= numPages; i++) {
+        if (cancelled) return;
+        try {
+          const page = await pdfDocRef.current.getPage(i);
+          const textContent = await page.getTextContent();
+          const pageText = textContent.items
+            .map((item: any) => item.str)
+            .join(' ')
+            .toLowerCase();
+          if (pageText.includes(query)) {
+            results.push({ pageNumber: i });
+          }
+        } catch {
+          // Skip pages that fail to load
+        }
+      }
+      if (!cancelled) {
+        setSearchResults(results);
+        setCurrentMatchIndex(results.length > 0 ? 0 : 0);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [debouncedQuery, numPages]);
+
+  // Navigate to current match page
+  useEffect(() => {
+    if (searchResults.length === 0 || currentMatchIndex >= searchResults.length) return;
+    const targetPage = searchResults[currentMatchIndex].pageNumber;
+    const el = pageRefs.current.get(targetPage);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    // Ensure the page is loaded
+    setLoadedPages(prev => {
+      const next = new Set(prev);
+      next.add(targetPage);
+      if (targetPage > 1) next.add(targetPage - 1);
+      if (numPages && targetPage < numPages) next.add(targetPage + 1);
+      return next;
+    });
+  }, [currentMatchIndex, searchResults, numPages]);
+
+  const handleSearchNext = useCallback(() => {
+    if (searchResults.length === 0) return;
+    setCurrentMatchIndex(prev => (prev + 1) % searchResults.length);
+  }, [searchResults.length]);
+
+  const handleSearchPrev = useCallback(() => {
+    if (searchResults.length === 0) return;
+    setCurrentMatchIndex(prev => (prev - 1 + searchResults.length) % searchResults.length);
+  }, [searchResults.length]);
+
+  const handleSearchKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (e.shiftKey) handleSearchPrev();
+      else handleSearchNext();
+    } else if (e.key === 'Escape') {
+      setSearchOpen(false);
+      setSearchQuery('');
+    }
+  }, [handleSearchNext, handleSearchPrev]);
 
   // PDF URL
   const pdfUrl = documentId
@@ -157,13 +252,15 @@ export function PDFSidePanel({
 
   // Handle document load success
   const onDocumentLoadSuccess = useCallback(
-    ({ numPages }: { numPages: number }) => {
-      setNumPages(numPages);
+    (pdf: any) => {
+      const pages = pdf.numPages;
+      pdfDocRef.current = pdf;
+      setNumPages(pages);
       setIsLoading(false);
       setError(null);
       // Pre-load initial page and neighbors
       const pagesToLoad = new Set<number>();
-      for (let i = Math.max(1, initialPage - 1); i <= Math.min(numPages, initialPage + 2); i++) {
+      for (let i = Math.max(1, initialPage - 1); i <= Math.min(pages, initialPage + 2); i++) {
         pagesToLoad.add(i);
       }
       setLoadedPages(pagesToLoad);
@@ -303,9 +400,21 @@ export function PDFSidePanel({
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+F / Cmd+F to open search
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault();
+        setSearchOpen(true);
+        setTimeout(() => searchInputRef.current?.focus(), 50);
+        return;
+      }
       switch (e.key) {
         case 'Escape':
-          onClose();
+          if (searchOpen) {
+            setSearchOpen(false);
+            setSearchQuery('');
+          } else {
+            onClose();
+          }
           break;
         case '+':
         case '=':
@@ -319,19 +428,32 @@ export function PDFSidePanel({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, searchOpen]);
 
-  // Custom text renderer for highlighting
+  // Custom text renderer for highlighting (chunks + search)
   const customTextRenderer = useCallback(
     (textItem: TextItem) => {
-      const str = textItem.str;
-      if (!highlightPhrases.length || !str.trim()) return str;
-      if (textContainsPhrase(str, highlightPhrases)) {
+      let str = textItem.str;
+      if (!str.trim()) return str;
+
+      // Chunk highlight (existing behavior)
+      if (highlightPhrases.length > 0 && textContainsPhrase(str, highlightPhrases)) {
         return `<mark class="chunk-highlight">${str}</mark>`;
       }
+
+      // Search highlight
+      if (debouncedQuery.trim()) {
+        const query = debouncedQuery.trim();
+        const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(`(${escaped})`, 'gi');
+        if (regex.test(str)) {
+          return str.replace(regex, '<mark class="search-highlight">$1</mark>');
+        }
+      }
+
       return str;
     },
-    [highlightPhrases]
+    [highlightPhrases, debouncedQuery]
   );
 
   if (!isOpen) return null;
@@ -409,11 +531,29 @@ export function PDFSidePanel({
           </button>
         </div>
 
+        {/* Search button */}
+        <button
+          onClick={() => {
+            setSearchOpen(prev => !prev);
+            if (!searchOpen) setTimeout(() => searchInputRef.current?.focus(), 50);
+          }}
+          className={cn(
+            'p-1.5 rounded transition-colors ml-2',
+            'hover:bg-accent-200 dark:hover:bg-accent-700',
+            searchOpen
+              ? 'text-blue-500 dark:text-blue-400'
+              : 'text-accent-500 dark:text-accent-400'
+          )}
+          title={t('pdfPanel.search', 'Search in document')}
+        >
+          <Search size={16} />
+        </button>
+
         {/* Close button */}
         <button
           onClick={onClose}
           className={cn(
-            'p-1.5 rounded transition-colors ml-2',
+            'p-1.5 rounded transition-colors ml-1',
             'hover:bg-accent-200 dark:hover:bg-accent-700',
             'text-accent-500 dark:text-accent-400'
           )}
@@ -422,6 +562,73 @@ export function PDFSidePanel({
           <X size={18} />
         </button>
       </div>
+
+      {/* Search bar (collapsible) */}
+      {searchOpen && (
+        <div className={cn(
+          'flex items-center gap-2 px-3 py-2',
+          'bg-white dark:bg-accent-800',
+          'border-b border-accent-200 dark:border-accent-700',
+          'flex-shrink-0'
+        )}>
+          <input
+            ref={searchInputRef}
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
+            placeholder={t('pdfPanel.searchPlaceholder', 'Search...')}
+            className={cn(
+              'flex-1 px-2 py-1 text-sm rounded',
+              'bg-accent-50 dark:bg-accent-900',
+              'border border-accent-200 dark:border-accent-700',
+              'text-accent-900 dark:text-accent-100',
+              'placeholder:text-accent-400',
+              'focus:outline-none focus:ring-1 focus:ring-blue-400'
+            )}
+          />
+          <span className="text-xs text-accent-500 dark:text-accent-400 whitespace-nowrap min-w-[3rem] text-center">
+            {searchResults.length > 0
+              ? `${currentMatchIndex + 1} / ${searchResults.length}`
+              : debouncedQuery.trim()
+                ? t('pdfPanel.noResults', 'No results')
+                : ''
+            }
+          </span>
+          <button
+            onClick={handleSearchPrev}
+            disabled={searchResults.length === 0}
+            className={cn(
+              'p-1 rounded transition-colors',
+              'hover:bg-accent-200 dark:hover:bg-accent-700',
+              'disabled:opacity-30'
+            )}
+          >
+            <ChevronUp size={14} />
+          </button>
+          <button
+            onClick={handleSearchNext}
+            disabled={searchResults.length === 0}
+            className={cn(
+              'p-1 rounded transition-colors',
+              'hover:bg-accent-200 dark:hover:bg-accent-700',
+              'disabled:opacity-30'
+            )}
+          >
+            <ChevronDown size={14} />
+          </button>
+          <button
+            onClick={() => { setSearchOpen(false); setSearchQuery(''); }}
+            className={cn(
+              'p-1 rounded transition-colors',
+              'hover:bg-accent-200 dark:hover:bg-accent-700',
+              'text-accent-500 dark:text-accent-400'
+            )}
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {/* PDF content - scrollable */}
       <div
@@ -475,7 +682,7 @@ export function PDFSidePanel({
                     renderAnnotationLayer={true}
                     onRenderSuccess={() => handlePageRenderSuccess(pageNum)}
                     customTextRenderer={
-                      pageNum === initialPage && highlightPhrases.length > 0
+                      (pageNum === initialPage && highlightPhrases.length > 0) || debouncedQuery.trim()
                         ? customTextRenderer
                         : undefined
                     }

@@ -5,12 +5,13 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { FileText, FolderOpen, X, Loader2, RefreshCw } from 'lucide-react';
+import { FileText, FolderOpen, X, Loader2, RefreshCw, Upload, CheckCircle, AlertCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../design-system/utils/cn';
 import { apiService } from '../../services/api';
 import type { DocumentInfo } from '../../types';
 import { useCitationContext } from '../../contexts/CitationContext';
+import { useDocumentUpload } from '../../hooks/useDocumentUpload';
 
 interface DocumentBrowserProps {
   isOpen: boolean;
@@ -24,6 +25,8 @@ export function DocumentBrowser({ isOpen, onClose }: DocumentBrowserProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { isUploading, progress, error: uploadError, result: uploadResult, startUpload, reset: resetUpload } = useDocumentUpload();
 
   // Load documents when opening
   useEffect(() => {
@@ -67,10 +70,45 @@ export function DocumentBrowser({ isOpen, onClose }: DocumentBrowserProps) {
     }
   };
 
+  // Refresh document list when upload completes, auto-dismiss after 5s
+  useEffect(() => {
+    if (uploadResult) {
+      loadDocuments();
+      const timer = setTimeout(() => resetUpload(), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [uploadResult]);
+
+  // Auto-dismiss upload error after 5s
+  useEffect(() => {
+    if (uploadError) {
+      const timer = setTimeout(() => resetUpload(), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [uploadError]);
+
   const handleSelectDocument = useCallback((doc: DocumentInfo) => {
     openPdf(doc.document_id, doc.display_name, 1);
     onClose();
   }, [openPdf, onClose]);
+
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Reset file input so same file can be re-selected
+    e.target.value = '';
+
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      return;
+    }
+    if (file.size > 100 * 1024 * 1024) {
+      return;
+    }
+
+    resetUpload();
+    startUpload(file);
+  }, [startUpload, resetUpload]);
 
   const formatSize = (bytes: number): string => {
     if (bytes < 1024 * 1024) {
@@ -108,6 +146,29 @@ export function DocumentBrowser({ isOpen, onClose }: DocumentBrowserProps) {
           </h3>
         </div>
         <div className="flex items-center gap-1">
+          {/* Upload button */}
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isUploading}
+            className={cn(
+              'p-1.5 rounded-lg',
+              'text-accent-500 hover:text-accent-700',
+              'dark:text-accent-400 dark:hover:text-accent-200',
+              'hover:bg-accent-100 dark:hover:bg-accent-700',
+              'transition-colors',
+              'disabled:opacity-50'
+            )}
+            title={t('documentBrowser.upload')}
+          >
+            <Upload size={14} />
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf"
+            onChange={handleFileSelect}
+            className="hidden"
+          />
           <button
             onClick={loadDocuments}
             disabled={isLoading}
@@ -137,6 +198,41 @@ export function DocumentBrowser({ isOpen, onClose }: DocumentBrowserProps) {
           </button>
         </div>
       </div>
+
+      {/* Upload progress */}
+      {(isUploading || uploadResult || uploadError) && (
+        <div className={cn(
+          'px-4 py-3',
+          'border-b border-accent-200 dark:border-accent-700'
+        )}>
+          {isUploading && progress && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs text-accent-600 dark:text-accent-400">
+                <span>{t(`documentBrowser.${progress.stage}` as any, progress.message)}</span>
+                <span>{progress.percent}%</span>
+              </div>
+              <div className="w-full h-1.5 bg-accent-200 dark:bg-accent-700 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-blue-500 rounded-full transition-all duration-300"
+                  style={{ width: `${progress.percent}%` }}
+                />
+              </div>
+            </div>
+          )}
+          {uploadResult && (
+            <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+              <CheckCircle size={16} />
+              <span>{t('documentBrowser.uploadComplete')} — {uploadResult.display_name} ({uploadResult.pages} {t('pdfPanel.pages')})</span>
+            </div>
+          )}
+          {uploadError && (
+            <div className="flex items-center gap-2 text-sm text-red-500 dark:text-red-400">
+              <AlertCircle size={16} />
+              <span>{uploadError}</span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Content */}
       <div className="overflow-y-auto max-h-72">

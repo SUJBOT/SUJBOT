@@ -131,11 +131,13 @@ async def load_vector_store_adapter(backend: str = "postgresql", path: str = Non
     if path and "connection_string" not in kwargs:
         kwargs["connection_string"] = path
 
+    architecture = kwargs.pop("architecture", "vl")
     connection_string, pool_size, dimensions = _validate_postgresql_backend(**kwargs)
     adapter = PostgresVectorStoreAdapter(
         connection_string=connection_string,
         pool_size=pool_size,
         dimensions=dimensions,
+        architecture=architecture,
     )
     await adapter.initialize()
     return adapter

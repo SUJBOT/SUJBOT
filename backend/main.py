@@ -58,7 +58,7 @@ from backend.routes.auth import router as auth_router, set_dependencies
 from backend.routes.conversations import router as conversations_router, set_postgres_adapter, get_postgres_adapter
 from backend.routes.feedback import router as feedback_router, set_postgres_adapter as set_feedback_postgres_adapter
 from backend.routes.citations import router as citations_router
-from backend.routes.documents import router as documents_router
+from backend.routes.documents import router as documents_router, set_vl_components
 from backend.routes.settings import router as settings_router
 from backend.routes.admin import router as admin_router, set_admin_dependencies
 
@@ -184,7 +184,42 @@ async def lifespan(app: FastAPI):
         logger.info("✓ Agent adapter initialized successfully")
 
         # =====================================================================
-        # 5. Validate Pricing Coverage for Configured Models
+        # 5. Initialize VL Components for Document Upload
+        # =====================================================================
+
+        try:
+            from src.config import get_config
+            config = get_config()
+            vl_cfg = config.vl
+            from src.vl.jina_client import JinaClient
+            from src.vl.page_store import PageStore
+            from src.storage.postgres_adapter import PostgresVectorStoreAdapter
+            if vl_cfg:
+                jina_client = JinaClient(
+                    model=vl_cfg.jina_model,
+                    dimensions=vl_cfg.dimensions,
+                )
+                page_store = PageStore(
+                    store_dir=vl_cfg.page_store_dir,
+                    source_pdf_dir=vl_cfg.source_pdf_dir,
+                    dpi=vl_cfg.page_image_dpi,
+                    image_format=vl_cfg.page_image_format,
+                )
+                # Create vector store adapter (separate from auth PostgreSQLStorageAdapter)
+                vl_vector_store = PostgresVectorStoreAdapter(
+                    connection_string=os.getenv("DATABASE_URL"),
+                    pool_size=5,
+                    dimensions=vl_cfg.dimensions,
+                )
+                set_vl_components(jina_client, page_store, vl_vector_store)
+                logger.info("✓ VL components initialized for document upload")
+            else:
+                logger.info("VL config not set, upload indexing disabled")
+        except Exception as e:
+            logger.warning(f"VL components not available (upload disabled): {e}")
+
+        # =====================================================================
+        # 6. Validate Pricing Coverage for Configured Models
         # =====================================================================
 
         try:

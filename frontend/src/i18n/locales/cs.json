@@ -7,7 +7,17 @@
   "documentBrowser": {
     "title": "Dostupné dokumenty",
     "loadError": "Nepodařilo se načíst dokumenty",
-    "noDocuments": "Žádné dokumenty nejsou k dispozici"
+    "noDocuments": "Žádné dokumenty nejsou k dispozici",
+    "upload": "Nahrát PDF",
+    "uploading": "Nahrávám...",
+    "rendering": "Renderuji stránky...",
+    "embedding": "Vytvářím embeddingy...",
+    "storing": "Ukládám do databáze...",
+    "uploadComplete": "Dokument úspěšně indexován",
+    "uploadError": "Nahrávání selhalo",
+    "pdfOnly": "Jsou podporovány pouze PDF soubory",
+    "fileTooLarge": "Soubor je příliš velký (max 100 MB)",
+    "alreadyExists": "Dokument již existuje"
   },
   "login": {
     "email": "E-mail",
@@ -51,7 +61,9 @@
     "tokensOut": "výstup",
     "blocked": "Zablokován",
     "spendingLimitTitle": "Dosažen limit výdajů",
-    "spendingUsed": "Utraceno"
+    "spendingUsed": "Utraceno",
+    "copyResponse": "Kopírovat odpověď",
+    "copied": "Zkopírováno!"
   },
   "progress": {
     "planning": "Plánování",
@@ -145,7 +157,11 @@
     "error403": "Nemáte oprávnění zobrazit tento dokument.",
     "error404": "Dokument nebyl nalezen.",
     "error500": "Server je dočasně nedostupný.",
-    "errorGeneric": "Chyba při načítání PDF"
+    "errorGeneric": "Chyba při načítání PDF",
+    "search": "Hledat v dokumentu",
+    "searchPlaceholder": "Hledat...",
+    "noResults": "Žádné výsledky",
+    "matchCount": "{{current}} / {{total}}"
   },
   "selection": {
     "lines_one": "{{count}} řádek",

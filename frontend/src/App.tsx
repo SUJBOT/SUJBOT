@@ -7,14 +7,13 @@
  * - /admin/* - Admin portal (requires admin auth)
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, Suspense, lazy } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Header } from './components/header/Header';
 import { Sidebar } from './components/sidebar/Sidebar';
 import { ResponsiveSidebar } from './components/layout/ResponsiveSidebar';
 import { ChatContainer } from './components/chat/ChatContainer';
-import { PDFSidePanel } from './components/pdf/PDFSidePanel';
 import { LoginPage } from './pages/LoginPage';
 import { useChat } from './hooks/useChat';
 import { useTheme } from './hooks/useTheme';
@@ -22,12 +21,22 @@ import { useAuth } from './contexts/AuthContext';
 import { useCitationContext } from './contexts/CitationContext';
 import { cn } from './design-system/utils/cn';
 import { apiService } from './services/api';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 
-// Admin imports
-import { AdminLoginPage } from './admin/pages/AdminLoginPage';
-import { AdminApp } from './admin/AdminApp';
+// Lazy-loaded components
+const AdminLoginPage = lazy(() => import('./admin/pages/AdminLoginPage').then(m => ({ default: m.AdminLoginPage })));
+const AdminApp = lazy(() => import('./admin/AdminApp').then(m => ({ default: m.AdminApp })));
+const PDFSidePanel = lazy(() => import('./components/pdf/PDFSidePanel').then(m => ({ default: m.PDFSidePanel })));
 
 import './index.css';
+
+function LoadingFallback() {
+  return (
+    <div className="h-screen flex items-center justify-center bg-white dark:bg-accent-950">
+      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-accent-900 dark:border-accent-100"></div>
+    </div>
+  );
+}
 
 // Default PDF panel width (40%)
 const DEFAULT_PDF_PANEL_WIDTH = 40;
@@ -88,6 +97,14 @@ function MainApp() {
   }, [closePdf]);
 
   const toggleSidebar = () => setSidebarOpen(!sidebarOpen);
+
+  // Close sidebar on mobile when selecting a conversation
+  const handleSelectConversation = useCallback((id: string) => {
+    selectConversation(id);
+    if (window.innerWidth <= 768) {
+      setSidebarOpen(false);
+    }
+  }, [selectConversation]);
 
   // Save panel width to localStorage
   useEffect(() => {
@@ -190,7 +207,7 @@ function MainApp() {
           <Sidebar
             conversations={conversations}
             currentConversationId={currentConversation?.id || null}
-            onSelectConversation={selectConversation}
+            onSelectConversation={handleSelectConversation}
             onNewConversation={createConversation}
             onDeleteConversation={deleteConversation}
             onRenameConversation={renameConversation}
@@ -242,15 +259,19 @@ function MainApp() {
                 isPdfClosing && 'opacity-0 translate-x-8'
               )}
             >
-              <PDFSidePanel
-                isOpen={!isPdfClosing}
-                documentId={activePdf?.documentId ?? ''}
-                documentName={activePdf?.documentName ?? ''}
-                initialPage={activePdf?.page ?? 1}
-                chunkContent={activePdf?.chunkId ? citationCache.get(activePdf.chunkId)?.content ?? undefined : undefined}
-                onClose={handleClosePdf}
-                onTextSelected={setSelectedText}
-              />
+              <ErrorBoundary>
+                <Suspense fallback={null}>
+                  <PDFSidePanel
+                    isOpen={!isPdfClosing}
+                    documentId={activePdf?.documentId ?? ''}
+                    documentName={activePdf?.documentName ?? ''}
+                    initialPage={activePdf?.page ?? 1}
+                    chunkContent={activePdf?.chunkId ? citationCache.get(activePdf.chunkId)?.content ?? undefined : undefined}
+                    onClose={handleClosePdf}
+                    onTextSelected={setSelectedText}
+                  />
+                </Suspense>
+              </ErrorBoundary>
             </div>
 
             {/* Mobile fullscreen overlay with fade animation */}
@@ -259,15 +280,19 @@ function MainApp() {
               'transition-opacity duration-300 ease-out',
               isPdfClosing && 'opacity-0'
             )}>
-              <PDFSidePanel
-                isOpen={!isPdfClosing}
-                documentId={activePdf?.documentId ?? ''}
-                documentName={activePdf?.documentName ?? ''}
-                initialPage={activePdf?.page ?? 1}
-                chunkContent={activePdf?.chunkId ? citationCache.get(activePdf.chunkId)?.content ?? undefined : undefined}
-                onClose={handleClosePdf}
-                onTextSelected={setSelectedText}
-              />
+              <ErrorBoundary>
+                <Suspense fallback={null}>
+                  <PDFSidePanel
+                    isOpen={!isPdfClosing}
+                    documentId={activePdf?.documentId ?? ''}
+                    documentName={activePdf?.documentName ?? ''}
+                    initialPage={activePdf?.page ?? 1}
+                    chunkContent={activePdf?.chunkId ? citationCache.get(activePdf.chunkId)?.content ?? undefined : undefined}
+                    onClose={handleClosePdf}
+                    onTextSelected={setSelectedText}
+                  />
+                </Suspense>
+              </ErrorBoundary>
             </div>
           </>
         )}
@@ -306,20 +331,34 @@ function App() {
 
   // Admin login page
   if (pathname === '/admin/login') {
-    return <AdminLoginPage />;
+    return (
+      <Suspense fallback={<LoadingFallback />}>
+        <ErrorBoundary>
+          <AdminLoginPage />
+        </ErrorBoundary>
+      </Suspense>
+    );
   }
 
   // Admin portal (protected)
   if (pathname.startsWith('/admin')) {
     return (
-      <AdminGuard>
-        <AdminApp />
-      </AdminGuard>
+      <ErrorBoundary>
+        <AdminGuard>
+          <Suspense fallback={<LoadingFallback />}>
+            <AdminApp />
+          </Suspense>
+        </AdminGuard>
+      </ErrorBoundary>
     );
   }
 
   // Main application (default)
-  return <MainApp />;
+  return (
+    <ErrorBoundary>
+      <MainApp />
+    </ErrorBoundary>
+  );
 }
 
 export default App;

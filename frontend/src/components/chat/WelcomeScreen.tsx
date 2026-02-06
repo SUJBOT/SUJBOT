@@ -11,6 +11,8 @@
 import { FileText, Scale, Shield, FileCheck } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../design-system/utils/cn';
+import { SujbotLogo } from '../common/SujbotLogo';
+import { GradientBackground } from '../common/GradientBackground';
 
 interface WelcomeScreenProps {
   onPromptClick: (prompt: string) => void;
@@ -49,42 +51,7 @@ export function WelcomeScreen({ onPromptClick, children }: WelcomeScreenProps) {
       'flex-1 flex flex-col items-center justify-center',
       'px-6 py-8 overflow-hidden'
     )}>
-      {/* Gradient background */}
-      <div
-        className={cn(
-          'absolute inset-0 -z-10',
-          'bg-white dark:bg-accent-950'
-        )}
-        style={{
-          background: 'var(--gradient-mesh-light)',
-        }}
-      />
-      <div
-        className={cn(
-          'absolute inset-0 -z-10',
-          'dark:block hidden'
-        )}
-        style={{
-          background: 'var(--gradient-mesh-dark)',
-        }}
-      />
-      <div
-        className={cn(
-          'absolute inset-0 -z-10'
-        )}
-        style={{
-          background: 'var(--gradient-light)',
-        }}
-      />
-      <div
-        className={cn(
-          'absolute inset-0 -z-10',
-          'dark:block hidden'
-        )}
-        style={{
-          background: 'var(--gradient-dark)',
-        }}
-      />
+      <GradientBackground />
 
       {/* Main content */}
       <div
@@ -97,40 +64,7 @@ export function WelcomeScreen({ onPromptClick, children }: WelcomeScreenProps) {
         <div className="text-center space-y-2">
           {/* Icon */}
           <div className="flex justify-center mb-1">
-            <svg
-              width="64"
-              height="64"
-              viewBox="0 0 512 512"
-              xmlns="http://www.w3.org/2000/svg"
-              className={cn(
-                'text-accent-900 dark:text-accent-100',
-                'opacity-90'
-              )}
-            >
-              {/* Atom + Book */}
-              <g transform="translate(256 256)" stroke="currentColor" fill="none" strokeLinecap="round">
-                {/* Orbitals (thicker) */}
-                <ellipse rx="185" ry="110" strokeWidth="16" />
-                <ellipse rx="185" ry="110" strokeWidth="16" transform="rotate(60)" />
-                <ellipse rx="185" ry="110" strokeWidth="16" transform="rotate(-60)" />
-
-                {/* Electrons (3 atoms evenly distributed at 0°, 120°, 240°) */}
-                <circle r="20" cx="185" cy="0" fill="currentColor" stroke="none" />
-                <circle r="20" cx="-92.5" cy="160" fill="currentColor" stroke="none" />
-                <circle r="20" cx="-92.5" cy="-160" fill="currentColor" stroke="none" />
-
-                {/* Paragraph symbol § */}
-                <text
-                  x="0"
-                  y="35"
-                  fontSize="140"
-                  fontWeight="bold"
-                  fill="currentColor"
-                  textAnchor="middle"
-                  fontFamily="serif"
-                >§</text>
-              </g>
-            </svg>
+            <SujbotLogo size={64} className="opacity-90" />
           </div>
 
           <h1

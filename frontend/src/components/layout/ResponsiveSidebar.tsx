@@ -61,10 +61,12 @@ export function ResponsiveSidebar({
           'bg-accent-50 dark:bg-accent-900',
           'border-r border-accent-200 dark:border-accent-800',
 
-          // Mobile: Fixed overlay (animation handled by useSlideIn inline style)
+          // Mobile: Fixed overlay with slide transition
           isMobile && [
             'fixed left-0 top-0 bottom-0 z-50',
             'w-64',
+            'transition-transform duration-300',
+            isOpen ? 'translate-x-0' : '-translate-x-full',
           ],
 
           // Desktop: Collapsible in-layout

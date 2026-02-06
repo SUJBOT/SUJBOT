@@ -13,7 +13,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import rehypeRaw from 'rehype-raw';
-import { Clock, DollarSign, Edit2, RotateCw, Check, X, FileText } from 'lucide-react';
+import { Clock, DollarSign, Edit2, RotateCw, Check, X, FileText, Copy } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../design-system/utils/cn';
 import type { Message } from '../../types';
@@ -28,7 +28,7 @@ import { preprocessCitations } from '../../utils/citations';
  * The cite component renders CitationLink for <cite data-chunk-id="..."> elements.
  */
 const createMarkdownComponents = () => ({
-  code({ node, inline, className, children, ...props }: any) {
+  code({ className, children, inline, ...props }: React.HTMLAttributes<HTMLElement> & { node?: unknown; inline?: boolean }) {
     return inline ? (
       <code
         className={cn(
@@ -46,7 +46,7 @@ const createMarkdownComponents = () => ({
     );
   },
   // Citation handler: renders CitationLink for <cite> elements
-  cite({ node, ...props }: any) {
+  cite({ ...props }: React.HTMLAttributes<HTMLElement> & { node?: unknown; 'data-chunk-id'?: string }) {
     const chunkId = props['data-chunk-id'];
     if (chunkId) {
       return <CitationLink chunkId={chunkId} />;
@@ -65,7 +65,7 @@ interface ChatMessageProps {
   responseDurationMs?: number; // Duration in milliseconds for assistant responses
 }
 
-export function ChatMessage({
+function ChatMessageInner({
   message,
   animationDelay: _animationDelay = 0,
   onEdit,
@@ -77,6 +77,7 @@ export function ChatMessage({
   const isUser = message.role === 'user';
   const [isEditing, setIsEditing] = useState(false);
   const [editedContent, setEditedContent] = useState(message.content);
+  const [isCopied, setIsCopied] = useState(false);
 
   const handleEdit = () => {
     setIsEditing(true);
@@ -97,6 +98,14 @@ export function ChatMessage({
 
   const handleRegenerate = () => {
     onRegenerate(message.id);
+  };
+
+  const handleCopy = async () => {
+    // Strip [Using tool_name...] markers for clean clipboard content
+    const cleanContent = message.content.replace(/\[Using [^\]]+\.\.\.\]\n*/g, '').trim();
+    await navigator.clipboard.writeText(cleanContent);
+    setIsCopied(true);
+    setTimeout(() => setIsCopied(false), 2000);
   };
 
   // Preprocess content to convert \cite{chunk_id} to HTML <cite> tags
@@ -435,19 +444,34 @@ export function ChatMessage({
                 </button>
               )}
               {!isUser && (
-                <button
-                  onClick={handleRegenerate}
-                  className={cn(
-                    'p-1.5 rounded-lg',
-                    'text-accent-500 hover:text-accent-700',
-                    'dark:text-accent-400 dark:hover:text-accent-200',
-                    'hover:bg-accent-100 dark:hover:bg-accent-800',
-                    'transition-colors'
-                  )}
-                  title={t('chat.regenerate')}
-                >
-                  <RotateCw size={14} />
-                </button>
+                <>
+                  <button
+                    onClick={handleCopy}
+                    className={cn(
+                      'p-1.5 rounded-lg',
+                      'text-accent-500 hover:text-accent-700',
+                      'dark:text-accent-400 dark:hover:text-accent-200',
+                      'hover:bg-accent-100 dark:hover:bg-accent-800',
+                      'transition-colors'
+                    )}
+                    title={t(isCopied ? 'chat.copied' : 'chat.copyResponse')}
+                  >
+                    {isCopied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
+                  </button>
+                  <button
+                    onClick={handleRegenerate}
+                    className={cn(
+                      'p-1.5 rounded-lg',
+                      'text-accent-500 hover:text-accent-700',
+                      'dark:text-accent-400 dark:hover:text-accent-200',
+                      'hover:bg-accent-100 dark:hover:bg-accent-800',
+                      'transition-colors'
+                    )}
+                    title={t('chat.regenerate')}
+                  >
+                    <RotateCw size={14} />
+                  </button>
+                </>
               )}
             </div>
           )}
@@ -632,3 +656,5 @@ export function ChatMessage({
     </div>
   );
 }
+
+export const ChatMessage = React.memo(ChatMessageInner);

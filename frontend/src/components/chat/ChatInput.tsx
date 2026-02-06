@@ -156,12 +156,19 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled, refreshSpen
               type="submit"
               disabled={disabled || !message.trim() || isMessageTooLong}
               className={cn(
-                'flex-shrink-0 p-2',
-                'text-accent-900 dark:text-accent-100',
-                'hover:text-accent-700 dark:hover:text-accent-300',
-                'hover:scale-110 active:scale-95',
-                'disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100',
-                'transition-all duration-200'
+                'flex-shrink-0 self-end',
+                'w-12 h-12 rounded-xl',
+                'flex items-center justify-center',
+                'transition-all duration-200',
+                disabled || !message.trim() || isMessageTooLong
+                  ? 'text-accent-400 dark:text-accent-600 opacity-50 cursor-not-allowed'
+                  : cn(
+                      'bg-accent-900 dark:bg-accent-100',
+                      'text-white dark:text-accent-900',
+                      'hover:bg-accent-800 dark:hover:bg-accent-200',
+                      'hover:scale-105 active:scale-95',
+                      'shadow-md hover:shadow-lg'
+                    )
               )}
               title={
                 disabled
@@ -171,7 +178,7 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled, refreshSpen
                   : t('chat.placeholder')
               }
             >
-              <Send size={22} />
+              <Send size={20} />
             </button>
           )}
         </div>
@@ -246,13 +253,6 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled, refreshSpen
           </div>
         </div>
 
-        {/* Animation keyframes for selection chip */}
-        <style>{`
-          @keyframes chipIn {
-            from { opacity: 0; transform: scale(0.95); }
-            to { opacity: 1; transform: scale(1); }
-          }
-        `}</style>
       </div>
     </form>
   );

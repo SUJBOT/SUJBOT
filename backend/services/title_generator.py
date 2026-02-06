@@ -7,6 +7,7 @@ Uses async OpenAI-compatible API for non-blocking operation.
 
 import logging
 import os
+import re
 from typing import Optional
 
 from openai import AsyncOpenAI
@@ -109,12 +110,15 @@ class TitleGenerator:
         """Clean up LLM-generated title."""
         if not title:
             return ""
+        # Strip <think>...</think> reasoning blocks (Qwen3 models)
+        cleaned = re.sub(r"<think>.*?</think>\s*", "", title, flags=re.DOTALL)
+        cleaned = re.sub(r"<think>.*$", "", cleaned, flags=re.DOTALL)
         # Remove common prefixes LLMs add
         prefixes_to_remove = [
             "Title:", "title:", "Název:", "název:",
             "Here is", "Here's", "The title is",
         ]
-        cleaned = title.strip()
+        cleaned = cleaned.strip()
         for prefix in prefixes_to_remove:
             if cleaned.startswith(prefix):
                 cleaned = cleaned[len(prefix):].strip()

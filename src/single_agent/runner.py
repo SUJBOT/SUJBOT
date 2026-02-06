@@ -118,11 +118,13 @@ class SingleAgentRunner:
             if not connection_string:
                 raise ValueError("DATABASE_URL not set. Cannot initialize vector store.")
 
+            architecture = self.config.get("architecture", "vl")
             vector_store = await load_vector_store_adapter(
                 backend="postgresql",
                 connection_string=connection_string,
                 pool_size=storage_config.get("postgresql", {}).get("pool_size", 20),
                 dimensions=storage_config.get("postgresql", {}).get("dimensions", 4096),
+                architecture=architecture,
             )
         else:
             vector_store_path = Path(self.config.get("vector_store_path", "vector_db"))
@@ -332,7 +334,19 @@ class SingleAgentRunner:
             # Add last 6 messages (3 Q&A pairs) for context
             for msg in conversation_history[-6:]:
                 messages.append({"role": msg["role"], "content": msg["content"]})
-        messages.append({"role": "user", "content": query})
+
+            # Avoid duplicate user message: if history already ends with
+            # the current query (frontend may include it), don't add again.
+            if (
+                messages
+                and messages[-1]["role"] == "user"
+                and messages[-1]["content"].strip() == query.strip()
+            ):
+                pass  # query already in history
+            else:
+                messages.append({"role": "user", "content": query})
+        else:
+            messages.append({"role": "user", "content": query})
 
         # Prepare system prompt (with caching only for providers that support it)
         system = self.system_prompt
