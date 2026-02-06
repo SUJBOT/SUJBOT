@@ -11,6 +11,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { AgentVariantSelector } from './AgentVariantSelector';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { DocumentBrowser } from './DocumentBrowser';
+import { SujbotLogo } from '../common/SujbotLogo';
 
 interface HeaderProps {
   onToggleSidebar: () => void;
@@ -40,7 +41,7 @@ export function Header({
       'bg-white dark:bg-accent-900',
       'border-b border-accent-200 dark:border-accent-800',
       'px-6 py-4',
-      'transition-all duration-700'
+      'transition-colors duration-200'
     )}>
       <div className="flex items-center justify-between">
         {/* Left side: Hamburger + Logo */}
@@ -54,57 +55,21 @@ export function Header({
               'p-2 rounded-lg',
               'text-accent-700 dark:text-accent-300',
               'hover:bg-accent-100 dark:hover:bg-accent-800',
-              'transition-all duration-700'
+              'transition-colors duration-200'
             )}
             aria-label={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
           >
-            <Menu size={20} className="transition-all duration-700" />
+            <Menu size={20} />
           </button>
 
           {/* Logo and title */}
           <div className="flex items-center gap-3">
-            {/* Icon - Atom + Book */}
-            <svg
-              width="40"
-              height="40"
-              viewBox="0 0 512 512"
-              xmlns="http://www.w3.org/2000/svg"
-              className={cn(
-                'text-accent-900 dark:text-accent-100',
-                'flex-shrink-0',
-                'transition-all duration-700'
-              )}
-            >
-              {/* Atom + Book */}
-              <g transform="translate(256 256)" stroke="currentColor" fill="none" strokeLinecap="round">
-                {/* Orbitals (thicker) */}
-                <ellipse rx="185" ry="110" strokeWidth="16" />
-                <ellipse rx="185" ry="110" strokeWidth="16" transform="rotate(60)" />
-                <ellipse rx="185" ry="110" strokeWidth="16" transform="rotate(-60)" />
-
-                {/* Electrons (3 atoms evenly distributed at 0°, 120°, 240°) */}
-                <circle r="20" cx="185" cy="0" fill="currentColor" stroke="none" />
-                <circle r="20" cx="-92.5" cy="160" fill="currentColor" stroke="none" />
-                <circle r="20" cx="-92.5" cy="-160" fill="currentColor" stroke="none" />
-
-                {/* Paragraph symbol § */}
-                <text
-                  x="0"
-                  y="35"
-                  fontSize="140"
-                  fontWeight="bold"
-                  fill="currentColor"
-                  textAnchor="middle"
-                  fontFamily="serif"
-                >§</text>
-              </g>
-            </svg>
+            <SujbotLogo size={40} className="flex-shrink-0" />
             <div>
               <h1
                 className={cn(
                   'text-xl font-light tracking-tight',
-                  'text-accent-900 dark:text-accent-100',
-                  'transition-colors duration-700'
+                  'text-accent-900 dark:text-accent-100'
                 )}
                 style={{ fontFamily: 'var(--font-display)' }}
               >
@@ -112,8 +77,7 @@ export function Header({
               </h1>
               <p className={cn(
                 'text-xs font-light',
-                'text-accent-500 dark:text-accent-400',
-                'transition-colors duration-700'
+                'text-accent-500 dark:text-accent-400'
               )}>
                 {t('header.tagline')}
               </p>
@@ -136,12 +100,12 @@ export function Header({
                 'p-2 rounded-lg',
                 'text-accent-700 dark:text-accent-300',
                 'hover:bg-accent-100 dark:hover:bg-accent-800',
-                'transition-all duration-700',
+                'transition-colors duration-200',
                 documentBrowserOpen && 'bg-accent-100 dark:bg-accent-800'
               )}
               title={t('header.browseDocuments')}
             >
-              <FolderOpen size={20} className="transition-all duration-700" />
+              <FolderOpen size={20} />
             </button>
             <DocumentBrowser
               isOpen={documentBrowserOpen}
@@ -161,11 +125,11 @@ export function Header({
               'p-2 rounded-lg',
               'text-accent-700 dark:text-accent-300',
               'hover:bg-accent-100 dark:hover:bg-accent-800',
-              'transition-all duration-700'
+              'transition-colors duration-200'
             )}
             title={t('header.signOut')}
           >
-            <LogOut size={20} className="transition-all duration-700" />
+            <LogOut size={20} />
           </button>
         </div>
       </div>

@@ -14,7 +14,19 @@ import { useTranslation } from 'react-i18next';
 import { cn } from '../design-system/utils/cn';
 import { useAuth } from '../contexts/AuthContext';
 import { LanguageSwitcher } from '../components/header/LanguageSwitcher';
+import { SujbotLogo } from '../components/common/SujbotLogo';
+import { GradientBackground } from '../components/common/GradientBackground';
 import './LoginPage.css';
+
+// Pre-computed particle positions to avoid Math.random() during render
+const PARTICLES = [
+  { width: 120, height: 180, left: 15, top: 25, duration: 28, delay: 1.2 },
+  { width: 80, height: 95, left: 72, top: 60, duration: 22, delay: 3.5 },
+  { width: 150, height: 130, left: 40, top: 10, duration: 32, delay: 0.8 },
+  { width: 65, height: 110, left: 85, top: 75, duration: 18, delay: 4.2 },
+  { width: 140, height: 70, left: 5, top: 85, duration: 25, delay: 2.0 },
+  { width: 100, height: 160, left: 55, top: 45, duration: 30, delay: 1.5 },
+];
 
 export function LoginPage() {
   const { t } = useTranslation();
@@ -50,31 +62,7 @@ export function LoginPage() {
       'px-6 py-12',
       'relative overflow-hidden'
     )}>
-      {/* Gradient background effects (matching WelcomeScreen) */}
-      <div
-        className="absolute inset-0 -z-10"
-        style={{
-          background: 'var(--gradient-mesh-light)',
-        }}
-      />
-      <div
-        className="absolute inset-0 -z-10 dark:block hidden"
-        style={{
-          background: 'var(--gradient-mesh-dark)',
-        }}
-      />
-      <div
-        className="absolute inset-0 -z-10"
-        style={{
-          background: 'var(--gradient-light)',
-        }}
-      />
-      <div
-        className="absolute inset-0 -z-10 dark:block hidden"
-        style={{
-          background: 'var(--gradient-dark)',
-        }}
-      />
+      <GradientBackground />
 
       {/* Language switcher - top right */}
       <div className="absolute top-6 right-6 z-10">
@@ -83,7 +71,7 @@ export function LoginPage() {
 
       {/* Floating particles effect (subtle decoration) */}
       <div className="absolute inset-0 -z-10 overflow-hidden pointer-events-none">
-        {[...Array(6)].map((_, i) => (
+        {PARTICLES.map((particle, i) => (
           <div
             key={i}
             className={cn(
@@ -91,12 +79,12 @@ export function LoginPage() {
               'bg-accent-200/20 dark:bg-accent-700/10'
             )}
             style={{
-              width: `${Math.random() * 150 + 50}px`,
-              height: `${Math.random() * 150 + 50}px`,
-              left: `${Math.random() * 100}%`,
-              top: `${Math.random() * 100}%`,
-              animation: `float ${Math.random() * 20 + 15}s ease-in-out infinite`,
-              animationDelay: `${Math.random() * 5}s`,
+              width: `${particle.width}px`,
+              height: `${particle.height}px`,
+              left: `${particle.left}%`,
+              top: `${particle.top}%`,
+              animation: `float ${particle.duration}s ease-in-out infinite`,
+              animationDelay: `${particle.delay}s`,
             }}
           />
         ))}
@@ -113,43 +101,11 @@ export function LoginPage() {
         <div className="text-center mb-8">
           {/* SUJBOT Logo */}
           <div className="flex justify-center mb-4">
-            <svg
-              width="80"
-              height="80"
-              viewBox="0 0 512 512"
-              xmlns="http://www.w3.org/2000/svg"
-              className={cn(
-                'text-accent-900 dark:text-accent-100',
-                'opacity-90'
-              )}
-              style={{
-                filter: 'drop-shadow(0 2px 8px rgba(0, 0, 0, 0.1))',
-              }}
-            >
-              {/* Atom + Paragraph Symbol */}
-              <g transform="translate(256 256)" stroke="currentColor" fill="none" strokeLinecap="round">
-                {/* Orbitals */}
-                <ellipse rx="185" ry="110" strokeWidth="16" />
-                <ellipse rx="185" ry="110" strokeWidth="16" transform="rotate(60)" />
-                <ellipse rx="185" ry="110" strokeWidth="16" transform="rotate(-60)" />
-
-                {/* Electrons */}
-                <circle r="20" cx="185" cy="0" fill="currentColor" stroke="none" />
-                <circle r="20" cx="-92.5" cy="160" fill="currentColor" stroke="none" />
-                <circle r="20" cx="-92.5" cy="-160" fill="currentColor" stroke="none" />
-
-                {/* § symbol */}
-                <text
-                  x="0"
-                  y="35"
-                  fontSize="140"
-                  fontWeight="bold"
-                  fill="currentColor"
-                  textAnchor="middle"
-                  fontFamily="serif"
-                >§</text>
-              </g>
-            </svg>
+            <SujbotLogo
+              size={80}
+              className="opacity-90"
+              style={{ filter: 'drop-shadow(0 2px 8px rgba(0, 0, 0, 0.1))' }}
+            />
           </div>
 
           {/* App name */}

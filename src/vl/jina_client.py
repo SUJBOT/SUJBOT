@@ -13,6 +13,7 @@ import base64
 import hashlib
 import logging
 import os
+import time
 from typing import List, Optional
 
 import httpx
@@ -26,7 +27,10 @@ logger = logging.getLogger(__name__)
 JINA_API_URL = "https://api.jina.ai/v1/embeddings"
 JINA_MODEL = "jina-embeddings-v4"
 JINA_DIMENSIONS = 2048
-BATCH_SIZE = 8
+BATCH_SIZE = 1
+MAX_RETRIES = 8
+INITIAL_BACKOFF_SECONDS = 2.0
+INTER_BATCH_DELAY_SECONDS = 3.0
 
 
 class JinaClient:
@@ -73,6 +77,48 @@ class JinaClient:
         norm = np.linalg.norm(vec)
         return vec / norm if norm > 0 else vec
 
+    def _post_with_retry(self, payload: dict, timeout: float, context: str = "") -> dict:
+        """
+        POST to Jina API with exponential backoff on 429 rate limit errors.
+
+        Retries up to MAX_RETRIES times. Respects Retry-After header when present,
+        otherwise uses exponential backoff (2s, 4s, 8s, 16s, 32s).
+        """
+        last_error: Optional[httpx.HTTPStatusError] = None
+
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                with httpx.Client(timeout=timeout) as client:
+                    response = client.post(
+                        JINA_API_URL, json=payload, headers=self._headers()
+                    )
+                    response.raise_for_status()
+                    return response.json()
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code != 429 or attempt == MAX_RETRIES:
+                    raise
+                last_error = e
+                # Use Retry-After header if present, otherwise exponential backoff
+                retry_after = e.response.headers.get("Retry-After")
+                if retry_after:
+                    wait = float(retry_after)
+                else:
+                    wait = INITIAL_BACKOFF_SECONDS * (2 ** attempt)
+                logger.warning(
+                    "Jina API 429 rate limit%s, retrying in %.1fs (attempt %d/%d)",
+                    f" ({context})" if context else "",
+                    wait,
+                    attempt + 1,
+                    MAX_RETRIES,
+                )
+                time.sleep(wait)
+
+        # Should not reach here, but satisfy type checker
+        raise JinaAPIError(
+            f"Jina API rate limit exceeded after {MAX_RETRIES} retries",
+            cause=last_error,
+        )
+
     def embed_query(self, text: str) -> np.ndarray:
         """
         Embed a text query using retrieval.query task.
@@ -96,10 +142,7 @@ class JinaClient:
         }
 
         try:
-            with httpx.Client(timeout=30.0) as client:
-                response = client.post(JINA_API_URL, json=payload, headers=self._headers())
-                response.raise_for_status()
-                data = response.json()
+            data = self._post_with_retry(payload, timeout=30.0, context="query")
         except httpx.HTTPStatusError as e:
             raise JinaAPIError(
                 f"Jina API returned {e.response.status_code}",
@@ -159,10 +202,11 @@ class JinaClient:
             }
 
             try:
-                with httpx.Client(timeout=120.0) as client:
-                    response = client.post(JINA_API_URL, json=payload, headers=self._headers())
-                    response.raise_for_status()
-                    data = response.json()
+                data = self._post_with_retry(
+                    payload,
+                    timeout=120.0,
+                    context=f"image batch {batch_start}-{batch_start + len(batch)}",
+                )
             except httpx.HTTPStatusError as e:
                 raise JinaAPIError(
                     f"Jina API returned {e.response.status_code} for image batch",
@@ -199,5 +243,10 @@ class JinaClient:
                 f"Embedded image batch {batch_start}-{batch_start + len(batch)} "
                 f"({len(batch)} pages)"
             )
+
+            # Delay between batches to avoid hitting Jina rate limits
+            next_batch_start = batch_start + self.batch_size
+            if next_batch_start < len(page_images):
+                time.sleep(INTER_BATCH_DELAY_SECONDS)
 
         return np.array(all_embeddings, dtype=np.float32)

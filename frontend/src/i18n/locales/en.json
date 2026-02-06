@@ -7,7 +7,17 @@
   "documentBrowser": {
     "title": "Available Documents",
     "loadError": "Failed to load documents",
-    "noDocuments": "No documents available"
+    "noDocuments": "No documents available",
+    "upload": "Upload PDF",
+    "uploading": "Uploading...",
+    "rendering": "Rendering pages...",
+    "embedding": "Creating embeddings...",
+    "storing": "Storing in database...",
+    "uploadComplete": "Document indexed successfully",
+    "uploadError": "Upload failed",
+    "pdfOnly": "Only PDF files are supported",
+    "fileTooLarge": "File too large (max 100 MB)",
+    "alreadyExists": "Document already exists"
   },
   "login": {
     "email": "Email",
@@ -50,7 +60,9 @@
     "tokensOut": "out",
     "blocked": "Blocked",
     "spendingLimitTitle": "Spending Limit Reached",
-    "spendingUsed": "Used"
+    "spendingUsed": "Used",
+    "copyResponse": "Copy response",
+    "copied": "Copied!"
   },
   "progress": {
     "planning": "Planning",
@@ -144,7 +156,11 @@
     "error403": "You do not have permission to view this document.",
     "error404": "Document not found.",
     "error500": "Server temporarily unavailable.",
-    "errorGeneric": "Error loading PDF"
+    "errorGeneric": "Error loading PDF",
+    "search": "Search in document",
+    "searchPlaceholder": "Search...",
+    "noResults": "No results",
+    "matchCount": "{{current}} / {{total}}"
   },
   "selection": {
     "lines_one": "{{count}} line",

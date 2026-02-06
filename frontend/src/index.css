@@ -1,5 +1,4 @@
-/* Import sophisticated fonts - must be first in CSS */
-@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+/* Fonts loaded via <link> tags in index.html for non-blocking loading */
 
 @tailwind base;
 @tailwind components;
@@ -68,71 +67,6 @@ body {
   backface-visibility: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-}
-
-/* Smooth theme transition animation - The Magic ✨ */
-:root {
-  /* Extra smooth easing curve for luxurious organic feel */
-  --theme-transition-duration: 750ms;
-  --theme-transition-easing: cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-* {
-  transition-property: background-color, border-color, color, fill, stroke, opacity, box-shadow;
-  transition-duration: var(--theme-transition-duration);
-  transition-timing-function: var(--theme-transition-easing);
-}
-
-/* Smooth icon transitions */
-svg, svg * {
-  transition-property: fill, stroke, color, opacity, transform;
-  transition-duration: var(--theme-transition-duration);
-  transition-timing-function: var(--theme-transition-easing);
-}
-
-/* Exceptions: Don't animate certain properties */
-*:where(.no-theme-transition, [class*="animate-"], [class*="transition-transform"], [class*="transition-opacity"]) {
-  transition-property: transform, opacity;
-}
-
-/* Preserve explicit transitions (respect component-specific durations) */
-*[class*="duration-"] {
-  transition-duration: inherit !important;
-}
-
-/* Cross-fade for gradient backgrounds - creates smooth blend effect */
-div[style*="background"],
-div[style*="gradient"] {
-  transition-property: opacity, background;
-  transition-duration: 900ms;
-  transition-timing-function: ease-in-out;
-}
-
-/* Stagger effect: elements fade in sequentially during theme change */
-@keyframes themeChangeStagger {
-  0% {
-    opacity: 0.85;
-  }
-  100% {
-    opacity: 1;
-  }
-}
-
-/* Apply subtle stagger to major UI sections */
-header, main, aside {
-  animation: themeChangeStagger 500ms var(--theme-transition-easing);
-}
-
-/* Extra smooth text color transitions */
-h1, h2, h3, h4, h5, h6, p, span, a, label, button {
-  transition-property: color, background-color, border-color;
-  transition-duration: 750ms;
-  transition-timing-function: cubic-bezier(0.25, 0.1, 0.25, 1);
-}
-
-/* Button hover states should remain snappy */
-button:hover, a:hover {
-  transition-duration: 200ms;
 }
 
 /* Custom scrollbar with accent colors */
@@ -251,6 +185,17 @@ button:hover, a:hover {
   }
 }
 
+/* Chip appear animation */
+@keyframes chipIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
 
 /* Spinning animation for loaders */
 @keyframes spin {
@@ -360,4 +305,16 @@ button:hover, a:hover {
 /* Hover effect to indicate it's highlighted */
 .react-pdf__Page__textContent mark.chunk-highlight:hover {
   background-color: rgba(250, 204, 21, 0.7);
+}
+
+/* Search highlight (amber, distinct from chunk highlight yellow) */
+.react-pdf__Page__textContent mark.search-highlight {
+  background-color: rgba(251, 191, 36, 0.6); /* amber-400 */
+  color: transparent;
+  border-radius: 2px;
+  padding: 2px 0;
+}
+
+.dark .react-pdf__Page__textContent mark.search-highlight {
+  background-color: rgba(251, 191, 36, 0.5);
 }

@@ -118,7 +118,7 @@ export interface Conversation {
 }
 
 export interface SSEEvent {
-  event: 'tool_health' | 'text_delta' | 'tool_call' | 'tool_result' | 'tool_calls_summary' | 'cost_summary' | 'done' | 'error' | 'clarification_needed' | 'agent_start' | 'progress' | 'title_update' | 'message_saved';
+  event: 'tool_health' | 'text_delta' | 'tool_call' | 'tool_result' | 'tool_calls_summary' | 'cost_summary' | 'done' | 'error' | 'clarification_needed' | 'agent_start' | 'progress' | 'title_update' | 'message_saved' | 'complete';
   data: any;
 }
 

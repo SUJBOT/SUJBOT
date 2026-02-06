@@ -8,6 +8,7 @@ Model configuration is in config.json (SSOT).
 import logging
 import json
 import os
+import re
 from typing import List, Dict, Any, Optional, Iterator
 
 from openai import OpenAI
@@ -277,20 +278,53 @@ class DeepInfraProvider(BaseProvider):
         )
 
         if has_tool_results:
-            # Convert tool_result blocks to OpenAI tool messages
+            # Convert tool_result blocks to OpenAI tool messages.
+            # OpenAI API requires tool message content to be a string, so
+            # multimodal results (images) must be split: text → tool message,
+            # images → interleaved user message with labels.
+            deferred_image_blocks = []  # (label_text, image_url_block) pairs
             for block in content:
                 if not isinstance(block, dict):
                     continue
                 if block.get("type") == "tool_result":
                     tool_content = block.get("content", "")
                     if isinstance(tool_content, list):
-                        # Multimodal tool result — convert images, extract text
-                        openai_parts = self._convert_multimodal_content(tool_content)
+                        # Multimodal tool result — split text from images,
+                        # preserving label↔image association.
+                        # Runner emits: image, text, image, text, ...
+                        # We pair each image with the NEXT text block as its label.
+                        text_parts = []
+                        images = []
+                        labels = []
+                        for sub in tool_content:
+                            if not isinstance(sub, dict):
+                                continue
+                            if sub.get("type") == "text":
+                                label = sub.get("text", "")
+                                text_parts.append(label)
+                                labels.append(label)
+                            elif sub.get("type") == "image":
+                                source = sub.get("source", {})
+                                if source.get("type") == "base64":
+                                    media_type = source.get("media_type", "image/png")
+                                    data = source.get("data", "")
+                                    images.append(
+                                        {
+                                            "type": "image_url",
+                                            "image_url": {
+                                                "url": f"data:{media_type};base64,{data}"
+                                            },
+                                        }
+                                    )
+                        # Pair images with labels (zip shortest)
+                        for idx, img_block in enumerate(images):
+                            label = labels[idx] if idx < len(labels) else None
+                            deferred_image_blocks.append((label, img_block))
                         formatted.append(
                             {
                                 "role": "tool",
                                 "tool_call_id": block["tool_use_id"],
-                                "content": openai_parts if openai_parts else "",
+                                "content": "\n".join(text_parts) if text_parts else "See images below.",
                             }
                         )
                     else:
@@ -303,6 +337,25 @@ class DeepInfraProvider(BaseProvider):
                         )
                 elif block.get("type") == "text":
                     formatted.append({"role": "user", "content": block.get("text", "")})
+
+            # Append images as a user message with interleaved labels so the
+            # model can associate each image with its page metadata.
+            if deferred_image_blocks:
+                user_content = [
+                    {
+                        "type": "text",
+                        "text": (
+                            "Below are the page images returned by the search tool. "
+                            "READ each image carefully to find the answer. "
+                            "Each image is labeled with its page_id for citation."
+                        ),
+                    }
+                ]
+                for label, img_block in deferred_image_blocks:
+                    if label:
+                        user_content.append({"type": "text", "text": label})
+                    user_content.append(img_block)
+                formatted.append({"role": "user", "content": user_content})
         elif has_images:
             # Multimodal user message
             openai_content = self._convert_multimodal_content(content)
@@ -363,6 +416,15 @@ class DeepInfraProvider(BaseProvider):
 
         return openai_blocks
 
+    @staticmethod
+    def _strip_think_tags(text: str) -> str:
+        """Strip <think>...</think> reasoning blocks from Qwen3 model output."""
+        # Strip complete think blocks
+        text = re.sub(r"<think>.*?</think>\s*", "", text, flags=re.DOTALL)
+        # Strip truncated think block (no closing tag, e.g. max_tokens hit)
+        text = re.sub(r"<think>.*$", "", text, flags=re.DOTALL)
+        return text.strip()
+
     def _convert_response(self, response) -> ProviderResponse:
         """
         Convert OpenAI response to Anthropic ProviderResponse format.
@@ -386,7 +448,9 @@ class DeepInfraProvider(BaseProvider):
         content_blocks = []
 
         if message.content:
-            content_blocks.append({"type": "text", "text": message.content})
+            clean_text = self._strip_think_tags(message.content)
+            if clean_text:
+                content_blocks.append({"type": "text", "text": clean_text})
 
         # Convert tool calls
         if hasattr(message, "tool_calls") and message.tool_calls:

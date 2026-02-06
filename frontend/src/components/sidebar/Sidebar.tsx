@@ -5,9 +5,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { Plus, MessageSquare, Trash2, Pencil } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { Virtuoso } from 'react-virtuoso';
 import { cn } from '../../design-system/utils/cn';
 import { useSlideIn } from '../../design-system/animations/hooks/useSlideIn';
-import { useHover } from '../../design-system/animations/hooks/useHover';
 import type { Conversation } from '../../types';
 
 interface ContextMenuState {
@@ -34,7 +34,6 @@ export function Sidebar({
   onRenameConversation,
 }: SidebarProps) {
   const { t } = useTranslation();
-  const newChatHover = useHover({ scale: true });
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -78,24 +77,23 @@ export function Sidebar({
       <div className={cn(
         'p-4',
         'border-b border-accent-200 dark:border-accent-800',
-        'transition-colors duration-700'
+        'transition-colors duration-200'
       )}>
         <button
           onClick={onNewConversation}
-          {...newChatHover.hoverProps}
-          style={newChatHover.style}
           className={cn(
             'w-full flex items-center justify-center gap-2',
             'px-4 py-2 rounded-lg',
             'bg-accent-700 dark:bg-accent-300',
             'text-white dark:text-accent-900',
             'hover:bg-accent-800 dark:hover:bg-accent-400',
-            'transition-all duration-700',
+            'hover:scale-[1.02] active:scale-[0.98]',
+            'transition-all duration-200',
             'font-medium'
           )}
         >
-          <Plus size={18} className="transition-all duration-700" />
-          <span className="transition-colors duration-700">{t('sidebar.newChat')}</span>
+          <Plus size={18} />
+          <span>{t('sidebar.newChat')}</span>
         </button>
       </div>
 
@@ -104,16 +102,18 @@ export function Sidebar({
         {conversations.length === 0 ? (
           <div className={cn(
             'text-center py-8 text-sm',
-            'text-accent-500 dark:text-accent-400',
-            'transition-colors duration-700'
+            'text-accent-500 dark:text-accent-400'
           )}>
             {t('sidebar.noConversations')}
           </div>
         ) : (
-          <div className="space-y-1">
-            {conversations
-              .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-              .map((conversation, index) => (
+          <Virtuoso
+            data={[...conversations].sort(
+              (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+            )}
+            overscan={10}
+            itemContent={(index, conversation) => (
+              <div className="mb-1">
                 <ConversationItem
                   key={conversation.id}
                   conversation={conversation}
@@ -125,8 +125,9 @@ export function Sidebar({
                   onRename={handleRename}
                   animationDelay={index * 30}
                 />
-              ))}
-          </div>
+              </div>
+            )}
+          />
         )}
       </div>
 
@@ -137,8 +138,7 @@ export function Sidebar({
             'fixed z-50 py-1 min-w-[140px]',
             'bg-white dark:bg-accent-900',
             'border border-accent-200 dark:border-accent-700',
-            'rounded-lg shadow-lg',
-            'transition-colors duration-700'
+            'rounded-lg shadow-lg'
           )}
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onClick={(e) => e.stopPropagation()}
@@ -206,7 +206,6 @@ function ConversationItem({
     delay: animationDelay,
     duration: 'fast',
   });
-  const deleteHover = useHover({ scale: true });
   const inputRef = useRef<HTMLInputElement>(null);
   const [editValue, setEditValue] = useState(conversation.title);
 
@@ -235,13 +234,13 @@ function ConversationItem({
       onContextMenu={(e) => onContextMenu(e, conversation.id)}
       className={cn(
         'group flex items-center gap-2 px-3 py-2 rounded-lg',
-        'cursor-pointer transition-all duration-700',
+        'cursor-pointer transition-all duration-200',
         isActive
           ? 'bg-accent-200 dark:bg-accent-800 text-accent-900 dark:text-accent-100'
           : 'hover:bg-accent-100 dark:hover:bg-accent-800/50 hover:translate-x-1'
       )}
     >
-      <MessageSquare size={16} className="flex-shrink-0 transition-all duration-700" />
+      <MessageSquare size={16} className="flex-shrink-0" />
       <div className="flex-1 min-w-0">
         {isEditing ? (
           <input
@@ -262,14 +261,13 @@ function ConversationItem({
             )}
           />
         ) : (
-          <div className="text-sm font-medium truncate transition-colors duration-700">
+          <div className="text-sm font-medium truncate">
             {conversation.title}
           </div>
         )}
         <div className={cn(
           'text-xs',
-          'text-accent-500 dark:text-accent-400',
-          'transition-colors duration-700'
+          'text-accent-500 dark:text-accent-400'
         )}>
           {t('sidebar.messageCount', { count: conversation.messageCount })}
         </div>
@@ -279,20 +277,16 @@ function ConversationItem({
           e.stopPropagation();
           onDelete(conversation.id);
         }}
-        {...deleteHover.hoverProps}
-        style={deleteHover.style}
         className={cn(
           'opacity-0 group-hover:opacity-100',
           'p-1 rounded',
           'hover:bg-accent-300 dark:hover:bg-accent-700',
-          'transition-all duration-700'
+          'hover:scale-110 active:scale-95',
+          'transition-all duration-200'
         )}
         title={t('sidebar.deleteConversation')}
       >
-        <Trash2 size={14} className={cn(
-          'text-accent-700 dark:text-accent-300',
-          'transition-colors duration-700'
-        )} />
+        <Trash2 size={14} className="text-accent-700 dark:text-accent-300" />
       </button>
     </div>
   );

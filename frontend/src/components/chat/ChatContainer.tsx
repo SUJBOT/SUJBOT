@@ -15,6 +15,7 @@ import { WelcomeScreen } from './WelcomeScreen';
 import { ClarificationModal } from './ClarificationModal';
 import { useCitationContext } from '../../contexts/CitationContext';
 import { cn } from '../../design-system/utils/cn';
+import { GradientBackground } from '../common/GradientBackground';
 import type { Conversation, ClarificationData } from '../../types';
 import type { SpendingLimitError } from '../../hooks/useChat';
 
@@ -84,7 +85,7 @@ export function ChatContainer({
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [conversation?.messages]);
+  }, [conversation?.messages.length]);
 
   // Reset scroll when clearing messages (New Conversation)
   useEffect(() => {
@@ -102,42 +103,7 @@ export function ChatContainer({
 
   return (
     <div className="flex-1 flex flex-col h-full relative">
-      {/* Gradient background */}
-      <div
-        className={cn(
-          'absolute inset-0 -z-10',
-          'bg-white dark:bg-accent-950'
-        )}
-        style={{
-          background: 'var(--gradient-mesh-light)',
-        }}
-      />
-      <div
-        className={cn(
-          'absolute inset-0 -z-10',
-          'dark:block hidden'
-        )}
-        style={{
-          background: 'var(--gradient-mesh-dark)',
-        }}
-      />
-      <div
-        className={cn(
-          'absolute inset-0 -z-10'
-        )}
-        style={{
-          background: 'var(--gradient-light)',
-        }}
-      />
-      <div
-        className={cn(
-          'absolute inset-0 -z-10',
-          'dark:block hidden'
-        )}
-        style={{
-          background: 'var(--gradient-dark)',
-        }}
-      />
+      <GradientBackground />
 
       {/* Messages area */}
       <div
