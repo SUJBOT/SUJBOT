@@ -189,8 +189,8 @@ export interface CitationMetadata {
 }
 
 export interface CitationContextValue {
-  /** Cache of fetched citation metadata */
-  citationCache: Map<string, CitationMetadata>;
+  /** Cache of fetched citation metadata (null = not found, prevents re-fetch loop) */
+  citationCache: Map<string, CitationMetadata | null>;
   /** Currently active PDF viewer state */
   activePdf: {
     documentId: string;

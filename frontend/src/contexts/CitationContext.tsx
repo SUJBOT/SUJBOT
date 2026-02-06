@@ -19,7 +19,7 @@ interface CitationProviderProps {
 
 export function CitationProvider({ children }: CitationProviderProps) {
   // Citation metadata cache
-  const [citationCache, setCitationCache] = useState<Map<string, CitationMetadata>>(new Map());
+  const [citationCache, setCitationCache] = useState<Map<string, CitationMetadata | null>>(new Map());
 
   // PDF side panel state
   const [activePdf, setActivePdf] = useState<{
@@ -100,6 +100,12 @@ export function CitationProvider({ children }: CitationProviderProps) {
           const errorMsg = `Failed to fetch citations (${response.status})`;
           console.error('Failed to fetch citation metadata:', response.status);
           setError(errorMsg);
+          // Mark all as null to prevent infinite re-fetch loop
+          setCitationCache(prev => {
+            const next = new Map(prev);
+            idsToFetch.forEach(id => next.set(id, null));
+            return next;
+          });
           return;
         }
 
@@ -115,7 +121,8 @@ export function CitationProvider({ children }: CitationProviderProps) {
           content: string | null;
         }> = await response.json();
 
-        // Update cache
+        // Update cache: store found metadata and null sentinels for unfound IDs
+        const foundIds = new Set(data.map(item => item.chunk_id));
         setCitationCache(prev => {
           const next = new Map(prev);
           data.forEach(item => {
@@ -131,12 +138,24 @@ export function CitationProvider({ children }: CitationProviderProps) {
               content: item.content,
             });
           });
+          // Mark unfound IDs as null to prevent infinite re-fetch loop
+          idsToFetch.forEach(id => {
+            if (!foundIds.has(id)) {
+              next.set(id, null);
+            }
+          });
           return next;
         });
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : 'Network error';
         console.error('Error fetching citation metadata:', err);
         setError(`Citation fetch failed: ${errorMsg}`);
+        // Mark all as null to prevent infinite re-fetch loop
+        setCitationCache(prev => {
+          const next = new Map(prev);
+          idsToFetch.forEach(id => next.set(id, null));
+          return next;
+        });
       } finally {
         // Remove fetched IDs from loading state
         setLoadingIds(prev => {
