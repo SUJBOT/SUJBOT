@@ -30,7 +30,7 @@ BATCH_SIZE = 8
 
 class JinaClient:
     """
-    Async-ready client for Jina Embeddings v4 API.
+    Synchronous client for Jina Embeddings v4 API.
 
     Supports two embedding modes:
     - Text queries (retrieval.query task)

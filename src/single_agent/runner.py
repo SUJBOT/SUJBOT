@@ -78,7 +78,7 @@ class SingleAgentRunner:
             self.langsmith = None
 
     async def _initialize_tools(self) -> None:
-        """Initialize tool registry with RAG components (reuses MultiAgentRunner logic)."""
+        """Initialize tool registry with all RAG components (vector store, embedder, VL components)."""
         from ..agent.tools import get_registry
         from ..storage import load_vector_store_adapter
         from ..embedding_generator import EmbeddingGenerator

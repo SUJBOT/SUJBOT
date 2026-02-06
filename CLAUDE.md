@@ -136,20 +136,19 @@ curl -sI https://sujbot.fjfi.cvut.cz/admin  # Should return 200
 ```
 User Query
     ↓
-Orchestrator (routing + synthesis)
+SingleAgentRunner (autonomous tool loop)
     ↓
-Specialized Agents (extractor, classifier, compliance, risk_verifier, etc.)
+RAG Tools (search, expand_context, get_document_info, etc.)
     ↓
-RAG Tools (search, graph_search, multi_doc_synthesizer, etc.)
-    ↓
-Retrieval (HyDE + Expansion Fusion → PostgreSQL pgvector)
+Retrieval: OCR mode (HyDE + Expansion Fusion) or VL mode (Jina v4 cosine)
     ↓
 Storage (PostgreSQL: vectors + graph + checkpoints)
 ```
 
 **Key directories:**
+- `src/single_agent/` - Production single-agent runner (autonomous tool loop with unified prompt)
 - `src/agent/` - Agent CLI and tools (`tools/` has individual tool files)
-- `src/multi_agent/` - LangGraph-based multi-agent system (orchestrator, 7 specialized agents)
+- `src/multi_agent/` - Legacy LangGraph-based multi-agent system (orchestrator, 7 specialized agents)
 - `src/retrieval/` - HyDE + Expansion Fusion retrieval pipeline
 - `src/vl/` - Vision-Language RAG module (Jina v4 embeddings, page store, VL retriever)
 - `src/graph/` - Graphiti temporal knowledge graph (Neo4j + PostgreSQL)
@@ -190,8 +189,8 @@ FROM vectors.vl_pages ORDER BY embedding <=> $1::vector LIMIT 5;
 **No HNSW index** — with ~500 pages, exact cosine scan is <50ms and gives 100% recall.
 
 **Agent variant for VL mode:**
-- `"local"` variant uses `Qwen/Qwen2.5-VL-32B-Instruct` via DeepInfra (supports vision)
-- `"cheap"` (Haiku 4.5) and `"premium"` (Anthropic) also support vision natively
+- `"local"` variant uses `Qwen/Qwen3-VL-235B-A22B-Instruct` via DeepInfra (supports vision)
+- `"remote"` (Haiku 4.5) supports vision natively
 - DeepInfra provider converts Anthropic image blocks → OpenAI `image_url` format
 
 **VL commands:**

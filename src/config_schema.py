@@ -83,7 +83,7 @@ class LLMModelConfig(BaseModel):
     )
     supports_extended_thinking: bool = Field(
         default=False,
-        description="Whether model supports extended thinking (Claude 3.5+)"
+        description="Whether model supports extended thinking"
     )
 
 

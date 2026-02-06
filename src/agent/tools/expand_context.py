@@ -1,7 +1,7 @@
 """
 Expand Context Tool
 
-Auto-extracted and cleaned from tier2_advanced.py
+Expand chunk/page context with adjacent or related content for both OCR and VL modes.
 """
 
 import logging
