@@ -102,8 +102,6 @@ class AgentAdapter:
             "models": full_config.get("models", {}),
             "storage": full_config.get("storage", {}),
             "agent_tools": full_config.get("agent_tools", {}),
-            "knowledge_graph": full_config.get("knowledge_graph", {}),
-            "neo4j": full_config.get("neo4j", {}),
             "single_agent": full_config.get("single_agent", {}),
             "multi_agent": full_config.get("multi_agent", {}),  # For LangSmith config
             "architecture": full_config.get("architecture", "ocr"),

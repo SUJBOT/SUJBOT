@@ -12,17 +12,7 @@ CRITICAL: See sudo password @sudo.txt
 
 **IMPORTANT:** When debugging conversations/traces, ALWAYS use **LangSmith MCP tools** (`mcp__langsmith__*`), NOT Python scripts.
 
-```
-# Available MCP tools for debugging:
-mcp__langsmith__list_projects      # List projects
-mcp__langsmith__fetch_runs         # Fetch runs with filters
-mcp__langsmith__list_experiments   # List experiments
-mcp__langsmith__list_datasets      # List evaluation datasets
-```
-
 ## LangSmith Evaluation
-
-Run QA evaluation on indexed documents using LLM-as-judge.
 
 **When user says "evaluuj v langsmith", run this command:**
 ```bash
@@ -34,25 +24,7 @@ uv run python scripts/langsmith_eval.py \
     --judge-model anthropic:claude-sonnet-4-5
 ```
 
-**Other commands:**
-```bash
-# Quick test (5 examples)
-uv run python scripts/langsmith_eval.py --limit 5
-
-# Upload dataset only
-uv run python scripts/langsmith_eval.py --upload-only
-
-# With cheaper judge model
-uv run python scripts/langsmith_eval.py --judge-model openai:gpt-4o-mini
-```
-
-**Metrics evaluated:**
-- `semantic_correctness` - Does answer match reference meaning?
-- `factual_accuracy` - Are numbers/names/dates correct?
-- `completeness` - Are all key points covered?
-
-**Dataset:** `dataset/dataset_exp_ver_2.json` (40 Czech legal/nuclear QA pairs)
-**LangSmith Dataset:** `sujbot-eval-qa-40`
+Other: `--limit 5` (quick test), `--upload-only`, `--judge-model openai:gpt-4o-mini`
 
 ## Common Commands
 
@@ -67,8 +39,7 @@ uv run pytest tests/ -v                                    # All tests
 uv run pytest tests/test_phase4_indexing.py -v             # Single file
 uv run pytest tests/agent/test_tool_registry.py::test_name -v  # Single test
 uv run pytest tests/ --cov=src --cov-report=html           # With coverage
-# NOTE: pytest-asyncio is NOT installed. Use @pytest.mark.anyio for async tests.
-# Async tests need conftest.py with anyio_backend="asyncio" fixture (trio not installed).
+# NOTE: pytest-asyncio NOT installed. Use @pytest.mark.anyio + conftest anyio_backend="asyncio".
 
 # Production tests (requires running Docker stack)
 PROD_BASE_URL="http://localhost:8200" \
@@ -84,19 +55,12 @@ uv run mypy src/                                           # Type check
 # Docker (full stack)
 docker compose up -d                       # Start all services
 docker compose logs -f backend             # Watch backend logs
-docker compose exec backend uv run pytest  # Run tests in container
 
-# Frontend development (HOT RELOAD)
-# Frontend runs with Vite hot reload - NO rebuild needed for .tsx/.css changes!
-# Just edit files and changes appear instantly in browser.
+# Frontend: Vite hot reload — NO rebuild needed for .tsx/.css changes
 
 # Agent CLI
 uv run python -m src.agent.cli             # Interactive mode
 uv run python -m src.agent.cli --debug     # Debug mode
-
-# Evaluation
-uv run python scripts/langsmith_eval.py             # Full QA evaluation
-uv run python scripts/langsmith_eval.py --limit 5   # Quick test
 ```
 
 ## Production Deployment
@@ -116,588 +80,182 @@ docker run -d --name sujbot_frontend \
   --network-alias frontend \
   --restart unless-stopped \
   sujbot-frontend
-
-# Verify deployment
-curl -sI https://sujbot.fjfi.cvut.cz/admin  # Should return 200
 ```
 
-**Key points:**
-- Frontend production uses `nginx:alpine` serving static files on port 80
-- External nginx (`sujbot_nginx`) proxies to `frontend:80`
 - `--network-alias frontend` is REQUIRED for Docker DNS resolution
-- `VITE_API_BASE_URL=""` ensures relative API calls work with nginx proxy
-- SPA routing handled by `frontend/nginx.conf` with `try_files $uri $uri/ /index.html;`
-
-**Common issues:**
-- 404 on `/admin`: Missing SPA fallback in frontend nginx config
-- 502 on admin routes: Missing `--network-alias frontend` on container
-- `localhost:8000` errors in browser: Built with wrong `VITE_API_BASE_URL`
+- 404 on `/admin` → missing SPA fallback; 502 → missing `--network-alias`; `localhost:8000` in browser → wrong `VITE_API_BASE_URL`
 
 ## Architecture Overview
 
 ```
-User Query
-    ↓
-SingleAgentRunner (autonomous tool loop)
-    ↓
-RAG Tools (search, expand_context, get_document_info, etc.)
-    ↓
-Retrieval: OCR mode (HyDE + Expansion Fusion) or VL mode (Jina v4 cosine)
-    ↓
-Storage (PostgreSQL: vectors + graph + checkpoints)
+User Query → SingleAgentRunner (autonomous tool loop)
+  → RAG Tools (search, expand_context, get_document_info, etc.)
+  → Retrieval: OCR mode (HyDE + Expansion Fusion) or VL mode (Jina v4 cosine)
+  → Storage (PostgreSQL: vectors + checkpoints)
 ```
 
 **Key directories:**
-- `src/single_agent/` - Production single-agent runner (autonomous tool loop with unified prompt)
+- `src/single_agent/` - Production runner (autonomous tool loop with unified prompt)
 - `src/agent/` - Agent CLI and tools (`tools/` has individual tool files)
-- `src/multi_agent/` - Legacy LangGraph-based multi-agent system (orchestrator, 7 specialized agents)
+- `src/multi_agent/` - Legacy LangGraph-based multi-agent system
 - `src/retrieval/` - HyDE + Expansion Fusion retrieval pipeline
 - `src/vl/` - Vision-Language RAG module (Jina v4 embeddings, page store, VL retriever)
-- `src/graph/` - Graphiti temporal knowledge graph (Neo4j + PostgreSQL)
 - `backend/` - FastAPI web backend with auth, routes, middleware
 - `frontend/` - React + Vite web UI
 
-**Key utility modules:**
-- `src/exceptions.py` - Typed exception hierarchy (SSOT for error handling)
-- `src/utils/cache.py` - Unified `LRUCache` + `TTLCache` abstractions
-- `src/multi_agent/core/agent_initializer.py` - SSOT for agent initialization
-- `src/multi_agent/prompts/loader.py` - SSOT for loading system prompts from `prompts/`
+**Key SSOT modules (use these, don't duplicate):**
+- `src/exceptions.py` - Typed exception hierarchy
+- `src/utils/cache.py` - `LRUCache` + `TTLCache`
+- `src/multi_agent/core/agent_initializer.py` - Agent initialization
+- `src/multi_agent/prompts/loader.py` - Prompt loading from `prompts/`
 - `src/agent/providers/factory.py` - Provider creation + `detect_provider_from_model()`
-- `src/vl/__init__.py:create_vl_components()` - SSOT factory for VL initialization (used by both runners)
-- `backend/constants.py:get_variant_model()` - Falls back to default variant for unknown names (legacy DB compat)
+- `src/vl/__init__.py:create_vl_components()` - VL initialization factory (both runners use this)
+- `backend/constants.py:get_variant_model()` - Variant→model mapping (falls back for unknown names)
 
 ### VL (Vision-Language) Architecture
 
 **Dual architecture: OCR vs VL** — switchable via `config.json` → `"architecture": "ocr" | "vl"`.
 
 ```
-VL mode flow:
-User Query → Jina v4 embed_query() → PostgreSQL exact cosine scan (vectors.vl_pages)
-    → top-k page images (base64 PNG) → multimodal tool result → VL-capable LLM (vision)
+VL flow: Query → Jina v4 embed_query() → PostgreSQL exact cosine (vectors.vl_pages)
+  → top-k page images (base64 PNG) → multimodal tool result → VL-capable LLM
 ```
 
-**Key components:**
-- `src/vl/jina_client.py` - Jina Embeddings v4 API (2048-dim, task-specific LoRA)
-- `src/vl/page_store.py` - PDF→PNG rendering (PyMuPDF, 150 DPI), base64 loading
-- `src/vl/vl_retriever.py` - Simple pipeline: text query → Jina → PostgreSQL → VLPageResult
-- `src/vl/vl_indexing.py` - Index PDFs or load pre-computed embeddings
-
-**PostgreSQL schema:**
-```sql
--- Table: vectors.vl_pages (2048-dim Jina v4 embeddings, no HNSW — exact scan)
-SELECT page_id, document_id, page_number,
-       1 - (embedding <=> $1::vector) AS score
-FROM vectors.vl_pages ORDER BY embedding <=> $1::vector LIMIT 5;
-```
-
-**No HNSW index** — with ~500 pages, exact cosine scan is <50ms and gives 100% recall.
-
-**Agent variant for VL mode:**
-- `"local"` variant uses `Qwen/Qwen3-VL-235B-A22B-Instruct` via DeepInfra (supports vision)
-- `"remote"` (Haiku 4.5) supports vision natively
+- No HNSW index — ~500 pages, exact cosine scan <50ms, 100% recall
+- `"local"` variant: `Qwen/Qwen3-VL-235B-A22B-Instruct` (DeepInfra, vision)
+- `"remote"` variant: Haiku 4.5 (vision natively)
 - DeepInfra provider converts Anthropic image blocks → OpenAI `image_url` format
 
-**VL commands:**
-```bash
-# Load pre-computed embeddings
-DATABASE_URL="..." uv run python scripts/load_page_embeddings.py
-# Render page images for existing PDFs
-uv run python -c "from src.vl import PageStore; s=PageStore(); s.render_pdf_pages('data/doc.pdf', 'doc_id')"
-# Run DB migration
-uv run python scripts/migrate_vl_schema.py
-```
-
-**Key differences from OCR mode:**
 | | OCR mode | VL mode |
 |---|---|---|
-| Embedding model | Qwen3-Embedding-8B (4096-dim) | Jina Embeddings v4 (2048-dim) |
-| Content unit | Text chunks (512 tokens) | Full page images (PNG) |
+| Embedding | Qwen3-Embedding-8B (4096-dim) | Jina v4 (2048-dim) |
+| Content unit | Text chunks (512 tokens) | Page images (PNG) |
 | DB table | `vectors.layer3` | `vectors.vl_pages` |
-| Search method | HyDE + Expansion Fusion | Simple cosine search |
-| Agent input | Text chunks with citations | Page images (multimodal) |
-| Token cost | ~100 tokens/chunk | ~1600 tokens/page image |
+| Search | HyDE + Expansion Fusion | Simple cosine |
+| Token cost | ~100 tokens/chunk | ~1600 tokens/page |
 
 ## Critical Constraints (DO NOT CHANGE)
 
-These are research-backed decisions from published papers. **DO NOT modify** without explicit approval.
+Research-backed decisions. **DO NOT modify** without explicit approval.
 
 ### 1. SINGLE SOURCE OF TRUTH (SSOT)
 
-**Principles:**
-- **One canonical implementation** - Each feature has EXACTLY ONE authoritative version
-- **No duplicate code** - Delete obsolete implementations immediately
-- **No legacy code** - Remove unused/deprecated code
-- **API keys in `.env` ONLY** - NEVER in config.json, NEVER in code
-
-**Why:** Prevents confusion, reduces maintenance burden, protects secrets.
+- **One canonical implementation** per feature — delete obsolete code immediately
+- **No duplicate code** — no legacy wrappers, no re-exports
+- **API keys in `.env` ONLY** — NEVER in config.json or code
 
 ### 2. Autonomous Agents (NOT Hardcoded)
 
-**CRITICAL: Agents MUST be LLM-driven, NOT hardcoded workflows!**
-
-```python
-# ❌ WRONG (Hardcoded)
-def execute():
-    step1 = call_tool_a()  # Predefined sequence
-    step2 = call_tool_b()
-    return synthesize(step1, step2)
-
-# ✅ CORRECT (Autonomous)
-def execute():
-    return llm.run(
-        system_prompt="You are an expert...",
-        tools=[search, analyze, verify],  # LLM decides sequence
-        messages=[user_query]
-    )
-```
-
-**Principles:**
-- LLM decides tool calling sequence autonomously
-- No "step 1, step 2, step 3" logic in code
-- System prompts guide behavior (NOT code)
-- Exception: Orchestrator has routing logic
-
-Agents inherit from `BaseAgent.run_autonomous_tool_loop()`. LLM decides tool calling order.
+Agents MUST be LLM-driven. LLM decides tool calling sequence via `BaseAgent.run_autonomous_tool_loop()`. System prompts guide behavior, NOT code. No "step 1, step 2" logic. **NEVER use hardcoded template responses.**
 
 ### 3. Hierarchical Document Summaries
 
-**NEVER pass full document text to LLM for summarization!**
-
-```
-Flow: Sections → Section Summaries → Document Summary
-```
-
-- **Why:** Prevents context overflow, handles 100+ page documents
-- **Implementation:** PHASE 2 generates section summaries, then aggregates
-- **Length:** 100-1000 chars (adaptive based on document complexity)
-- **Fallback:** `"(Document summary unavailable)"` if section summaries fail
+`Sections → Section Summaries → Document Summary`. NEVER pass full document text to LLM. Length: 100-1000 chars (adaptive).
 
 ### 4. Token-Aware Chunking
 
-- **Max tokens:** 512 (tiktoken, text-embedding-3-large tokenizer)
-- **Research:** LegalBench-RAG optimal for legal documents
-- **Why tokens not chars:** Guarantees embedding model compatibility, handles Czech diacritics
-- **Warning:** Changing this invalidates ALL vector stores!
+512 tokens max (tiktoken). Changing this invalidates ALL vector stores!
 
 ### 5. Summary-Augmented Chunking (SAC)
 
-- Prepend document summary during embedding
-- Strip summaries during retrieval
-- **Result:** -58% context drift (Anthropic, 2024)
+Prepend document summary during embedding, strip during retrieval. -58% context drift (Anthropic, 2024).
 
 ### 6. Multi-Layer Embeddings
 
-- **3 separate indexes** (document/section/chunk) - NOT merged
-- **Result:** 2.3x essential chunks vs single-layer (Lima, 2024)
+3 separate indexes (document/section/chunk) — NOT merged. 2.3x essential chunks vs single-layer.
 
-### 6.1 Chunk JSON Format (phase3_chunks.json)
-
-**IMPORTANT:** Chunks serialized to JSON use this format. Do NOT use `content` field!
+### 6.1 Chunk JSON Format
 
 ```json
 {
   "chunk_id": "doc_L3_c1_sec_1",
-  "context": "SAC context summary (what chunk is about)",
-  "raw_content": "Actual text content from the document",
+  "context": "SAC context summary",
+  "raw_content": "Actual document text",
   "embedding_text": "[breadcrumb]\n\ncontext\n\nraw_content",
   "metadata": { "chunk_id": "...", "layer": 3, "document_id": "..." }
 }
 ```
 
-| Field | Purpose |
-|-------|---------|
-| `context` | SAC context summary - LLM-generated description of what the chunk contains |
-| `raw_content` | Actual document text (used for LLM generation, NOT just titles) |
-| `embedding_text` | `[breadcrumb]\n\ncontext\n\nraw_content` - full text for embedding |
+Do NOT use `content` field in JSON. `PhaseLoaders` use `embedding_text` as Chunk's `content`.
 
-**PhaseLoaders**: When loading chunks from JSON, use `embedding_text` as the Chunk's `content` field.
+### 6.2 PostgreSQL Vector Schema
 
-### 6.2 Chunked PDF Extraction Deduplication
+Vectors in `vectors` schema (NOT `public`). Tables: `layer1` (docs), `layer2` (sections), `layer3` (chunks), `vl_pages`.
 
-When Gemini extracts large PDFs in chunks (TOC pages first, content pages later), duplicate sections appear:
-- **TOC sections** (`c1_sec_*`): contain only section titles as content
-- **Content sections** (`c2_sec_*`): contain actual text
-
-**Solution**: `GeminiKGExtractor._deduplicate_sections_by_path()` merges sections with the same hierarchical path, keeping the one with the longest content. This happens automatically during chunked extraction.
-
-### 6.3 PostgreSQL Vector Schema
-
-**IMPORTANT:** Vectors are stored in the `vectors` schema (NOT `public`). Always use `vectors.layer{n}` when querying.
-
-```sql
--- Schema: vectors
--- Tables: layer1 (documents), layer2 (sections), layer3 (chunks)
-
--- Primary table for RAG retrieval: vectors.layer3
--- Columns:
---   id (serial)           - Primary key
---   chunk_id (text)       - Unique chunk identifier (e.g., "BZ_VR1_L3_266")
---   document_id (text)    - Source document (e.g., "BZ_VR1")
---   section_id (text)     - Section identifier (e.g., "sec_383")
---   section_title (text)  - Section heading
---   section_path (text)   - Hierarchical breadcrumb path
---   embedding (vector)    - 4096-dimension vector (Qwen3-Embedding-8B)
---   content (text)        - SAC-formatted text: "[breadcrumb]\n\ncontext\n\nraw_content"
---   content_tsv (tsvector)- Full-text search index
---   metadata (jsonb)      - Additional chunk metadata
---   created_at (timestamp)
-```
-
-**Key implementation details:**
-- Embeddings: 4096 dimensions via `Qwen/Qwen3-Embedding-8B` (DeepInfra)
-- Content field: Contains SAC context prepended (breadcrumb format for retrieval)
+- Embeddings: 4096-dim (Qwen3-Embedding-8B) for OCR, 2048-dim (Jina v4) for VL
 - Cosine similarity: `1 - (embedding <=> query_vector)`
-
-**Query example:**
-```sql
-SELECT chunk_id, content, 1 - (embedding <=> $1::vector) AS similarity
-FROM vectors.layer3
-WHERE document_id = 'BZ_VR1'
-ORDER BY embedding <=> $1::vector
-LIMIT 10;
-```
 
 ### 7. No Cohere Reranking
 
 Cohere performs WORSE on legal docs. Use `ms-marco` or `bge-reranker` instead.
 
-### 8. Generic Summaries (Counterintuitive!)
+### 8. Generic Summaries
 
-- **Style:** GENERIC (NOT expert terminology)
-- **Research:** Reuter et al. (2024) - generic summaries improve retrieval
-
-### 9. Autonomous Agent Responses
-
-**NEVER use hardcoded template responses!**
-
-```python
-# ❌ WRONG
-if is_greeting(query):
-    return "Hello! How can I help?"
-
-# ✅ CORRECT
-orchestrator.run(query)  # LLM generates contextual response
-```
+GENERIC style (NOT expert terminology). Reuter et al. (2024) — generic summaries improve retrieval.
 
 ## Configuration
 
-**Two-file system:**
+**Two-file system:** `.env` (secrets, gitignored) + `config.json` (settings, version-controlled). NO secrets in config.json.
 
-1. **`.env`** - Secrets (gitignored)
-   - API keys: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`
-   - Database: `DATABASE_URL`, `POSTGRES_PASSWORD`
-   - Auth: `AUTH_SECRET_KEY`
-
-2. **`config.json`** - Settings (version-controlled)
-   - Models, retrieval method, agent config, pipeline params
-   - **NO secrets allowed!**
-
-**Key config.json settings:**
-```json
-{
-  "retrieval": {
-    "method": "hyde_expansion_fusion",
-    "hyde_weight": 0.6,
-    "expansion_weight": 0.4
-  },
-  "storage": {
-    "backend": "postgresql"
-  },
-  "agent": {
-    "model": "claude-haiku-4-5"
-  }
-}
-```
-
-**Extraction Backend Selection:**
-```bash
-# Environment variable (default: "auto")
-EXTRACTION_BACKEND=auto     # Use Gemini if GOOGLE_API_KEY available, else Unstructured
-EXTRACTION_BACKEND=gemini   # Force Gemini (requires GOOGLE_API_KEY)
-EXTRACTION_BACKEND=unstructured  # Force Unstructured
-```
+**Extraction backend:** `EXTRACTION_BACKEND=auto|gemini|unstructured` (env var, default: auto).
 
 ## Best Practices
 
-### SSOT (Single Source of Truth)
+### System Prompts
 
-- **One implementation per feature** - delete obsolete code immediately
-- **No duplicate helpers** - use `src/utils/` for shared functions
-- **API keys in `.env` ONLY** - never in config.json or code
-
-**SSOT Modules (use these, don't duplicate):**
-```python
-# Agent initialization (all 8 agents use this)
-from src.multi_agent.core.agent_initializer import initialize_agent
-components = initialize_agent(config, "agent_name")
-
-# Caching (thread-safe, with hit rate tracking)
-from src.utils.cache import LRUCache, TTLCache
-cache = LRUCache[str](max_size=500, name="my_cache")
-cache.set("key", "value")
-result = cache.get("key")  # None if not found
-
-# Provider detection (don't inline this logic!)
-from src.agent.providers.factory import detect_provider_from_model
-provider = detect_provider_from_model("claude-sonnet-4")  # → "anthropic"
-
-# Load prompts (SSOT: prompts/ directory)
-from src.multi_agent.prompts.loader import load_prompt, get_prompt_loader
-system_prompt = load_prompt("extractor")  # Loads prompts/agents/extractor.txt
-```
-
-### System Prompts (SSOT: `prompts/` directory)
-
-**CRITICAL: ALL LLM system prompts MUST be loaded from `prompts/` directory!**
-
-```
-prompts/
-├── agents/                    # Multi-agent system prompts
-│   ├── orchestrator.txt       # Orchestrator routing/synthesis
-│   ├── extractor.txt          # Extractor agent
-│   ├── classifier.txt         # Classifier agent
-│   ├── compliance.txt         # Compliance agent
-│   ├── risk_verifier.txt      # Risk verifier agent
-│   ├── requirement_extractor.txt
-│   ├── citation_auditor.txt
-│   └── gap_synthesizer.txt
-├── document_summary.txt       # Document summary generation
-├── section_summary.txt        # Section summary generation
-├── hyde_expansion.txt         # HyDE query expansion
-├── entity_extraction.txt      # Entity extraction (legacy)
-└── relationship_extraction.txt # Relationship extraction (legacy)
-```
-
-**How to load prompts:**
-```python
-# For multi-agent system (agents in prompts/agents/)
-from src.multi_agent.prompts.loader import load_prompt, get_prompt_loader
-system_prompt = load_prompt("extractor")  # → prompts/agents/extractor.txt
-
-# For pipeline components (prompts in prompts/)
-from pathlib import Path
-prompts_dir = Path(__file__).parent.parent / "prompts"
-prompt = (prompts_dir / "document_summary.txt").read_text()
-```
-
-**Rules:**
-- ❌ **NEVER** hardcode system prompts in Python code
-- ❌ **NEVER** use inline f-strings for complex system prompts
-- ✅ **ALWAYS** load from `prompts/` directory
-- ✅ **ALWAYS** use `PromptLoader` for agent prompts (supports caching, hot-reload)
-
-**Why:** Prompts are easier to iterate on, version control, and review when externalized.
+**ALL LLM system prompts MUST be loaded from `prompts/` directory!** Never hardcode prompts in Python. Use `load_prompt("agent_name")` for agents, `Path("prompts/template.txt").read_text()` for pipeline components.
 
 ### Code Quality
 
-- Type hints required for public APIs
-- Google-style docstrings
-- Graceful degradation (e.g., reranker unavailable → fall back)
-- TDD: Write tests BEFORE implementing features
-- Narrow exception catches - catch specific exceptions, not bare `Exception`
-
-### Post-Implementation Code Review
-
-**IMPORTANT:** After completing any implementation, ALWAYS run the Code Simplifier agent to review and refactor the code.
-
-```
-# Use the code-simplifier agent after implementation
-Task tool → subagent_type: "code-simplifier:code-simplifier"
-```
-
-**Why:** Ensures code clarity, consistency, and maintainability. Catches over-engineering, redundant code, and opportunities for simplification while the implementation is fresh.
+- Type hints for public APIs, Google-style docstrings
+- TDD: write tests BEFORE implementing
+- Narrow exception catches — catch specific exceptions, not bare `Exception`
+- After implementation, run code-simplifier: `Task tool → subagent_type: "code-simplifier:code-simplifier"`
 
 ### Error Handling
 
-**Use typed exceptions from `src/exceptions.py`:**
-```python
-from src.exceptions import (
-    ExtractionError, ValidationError, ProviderError,
-    APIKeyError, ToolExecutionError, AgentInitializationError
-)
-
-# ✅ CORRECT - typed exception
-raise APIKeyError(
-    "Missing API key for model",
-    details={"model": model_name},
-    cause=original_exception
-)
-
-# ❌ WRONG - generic exception
-raise ValueError("Missing API key")
-```
-
-**Exception hierarchy:**
-- `SujbotError` (base) → `ExtractionError`, `ValidationError`, `ProviderError`, `ToolExecutionError`, `AgentError`, `StorageError`, `RetrievalError`
-- Each has `message`, `details` dict, and optional `cause` for chaining
-
-**Best practices:**
-- Catch specific exceptions (e.g., `APIKeyError`, not bare `Exception`)
-- Log errors with context (file name, operation, exception type)
-- Use `exc_info=True` for unexpected errors to capture traceback
-- Use `wrap_exception()` helper to convert generic exceptions
+Use typed exceptions from `src/exceptions.py`: `SujbotError` → `ExtractionError`, `ValidationError`, `ProviderError`, `ToolExecutionError`, `AgentError`, `StorageError`, `RetrievalError`. Each has `message`, `details` dict, optional `cause`. Use `exc_info=True` for unexpected errors.
 
 ### Internationalization (i18n)
 
-Frontend supports CZ/EN language switching via react-i18next.
-
-**Rules:**
-- **Always maintain translations**: When adding/changing UI text, update BOTH files:
-  - `/frontend/src/i18n/locales/cs.json` - Czech
-  - `/frontend/src/i18n/locales/en.json` - English
-- **Use useTranslation hook**: `const { t } = useTranslation()`
-- **Hierarchical keys**: `section.subsection.key` (e.g., `login.signIn`)
-- **No hardcoded strings**: All user-visible text must use `t('key')`
-
-**Translation files structure:**
-```json
-{
-  "header": { "tagline": "...", "signOut": "..." },
-  "login": { "email": "...", "password": "...", "signIn": "..." },
-  "sidebar": { "newChat": "...", "noConversations": "..." },
-  "chat": { "placeholder": "...", "processing": "..." },
-  "welcome": { "suggestedQuestions": "..." },
-  "common": { "loading": "...", "verifyingSession": "..." }
-}
-```
-
-### Git Workflow
-
-- Use `gh` CLI for PRs: `gh pr create --title "..." --body "..."`
-- Update CLAUDE.md when making major architectural changes
+Frontend CZ/EN via react-i18next. When adding UI text, update BOTH `/frontend/src/i18n/locales/cs.json` and `en.json`. Use `t('key')` — no hardcoded strings.
 
 ### Adding New Backend API Routes
 
-**IMPORTANT:** When adding new backend API endpoints, you MUST update nginx routing!
-
-The nginx reverse proxy (`docker/nginx/reverse-proxy.conf`) routes requests based on URL patterns.
-New backend routes must be added to the location regex in the "Direct backend endpoints" section:
-
-```nginx
-# In reverse-proxy.conf, find "# Direct backend endpoints" section
-location ~ ^/(health|docs|openapi.json|chat|models|clarify|auth|conversations|settings|documents) {
-    proxy_pass http://backend;
-    ...
-}
-```
-
-**Checklist for new backend routes:**
-1. Create route file in `backend/routes/` with `APIRouter(prefix="/newroute", tags=["newroute"])`
-2. Register router in `backend/main.py`:
-   - Add import: `from backend.routes.newroute import router as newroute_router`
-   - Add registration: `app.include_router(newroute_router)`
-3. (If needed) Add dependency setter function and call it in `main.py` lifespan handler
-4. **Add route to nginx regex** in `docker/nginx/reverse-proxy.conf`
-5. Reload nginx: `docker compose exec nginx nginx -s reload`
-
-**Alternative:** Routes prefixed with `/api/` are automatically proxied to backend (rewritten to remove `/api/` prefix). No nginx changes needed for `/api/*` routes.
-
-**Note:** Admin routes (`/admin/*`) have separate location blocks in nginx config (lines 149-174).
-
-**Symptom if forgotten:** Frontend receives HTML (`<!doctype...`) instead of JSON - nginx falls through to frontend catch-all and returns `index.html`.
-
-### Model Selection
-
-- **Production:** `claude-sonnet-4-5`
-- **Development:** `gpt-4o-mini` (best cost/performance)
-- **Budget:** `claude-haiku-4-5` (fastest)
+New routes MUST be added to nginx regex in `docker/nginx/reverse-proxy.conf` ("Direct backend endpoints" section). Alternative: prefix with `/api/` (auto-proxied, no nginx changes needed). **Symptom if forgotten:** Frontend receives HTML instead of JSON.
 
 ### Adding New Models
 
-**IMPORTANT:** When adding a new model, ALWAYS fetch current pricing from the provider API first!
+1. Fetch current pricing from provider API first
+2. Add to `config.json` → `model_registry.llm_models` with `id`, `provider`, `pricing`, `context_window`
+3. If DeepInfra: add to `agent_variants.deepinfra_supported_models`
 
-**Pricing sources:**
-- **Anthropic:** https://docs.anthropic.com/en/docs/about-claude/models#model-comparison-table
-- **OpenAI:** https://platform.openai.com/docs/models
-- **DeepInfra:** https://deepinfra.com/models (or API: `curl https://api.deepinfra.com/models/list`)
-- **Google:** https://ai.google.dev/gemini-api/docs/models/gemini
+### Model Selection
 
-**Checklist for adding a new model:**
-1. Fetch current pricing (input/output per 1M tokens)
-2. Add model to `config.json` → `model_registry.llm_models` section with full metadata:
-   ```json
-   "my-model": {
-     "id": "vendor/model-name",
-     "provider": "deepinfra",
-     "pricing": { "input": 0.50, "output": 1.50 },
-     "context_window": 128000
-   }
-   ```
-3. If DeepInfra: also add to `agent_variants.deepinfra_supported_models` list
-4. Test the model works: `uv run python -c "from src.agent.providers.factory import create_provider; p = create_provider('model-name'); print(p)"`
-
-### Pre-Call Token Counting
-
-Providers support `count_tokens(messages, tools, system)` for estimating input tokens **before** an API call:
-
-| Provider | Method | Accuracy |
-|---|---|---|
-| Anthropic | `client.messages.count_tokens()` API | Exact |
-| OpenAI | tiktoken `cl100k_base` estimation | Approximate |
-| DeepInfra | tiktoken `cl100k_base` estimation | Approximate |
-| Gemini | Not implemented (returns `None`) | N/A |
-
-**Usage:** Called automatically in `_run_autonomous_tool_loop()` at DEBUG log level. Never blocks the flow — returns `None` on failure.
-
-**Future work:** Investigate native token counting APIs for OpenAI, Google, and DeepInfra as they become available to replace tiktoken approximation.
+- **Production:** `claude-sonnet-4-5` | **Development:** `gpt-4o-mini` | **Budget:** `claude-haiku-4-5`
 
 ### LangSmith Observability
 
-**Configuration:**
 ```bash
-# .env (EU endpoint for EU workspaces)
+# .env — use EU endpoint for EU workspaces
 LANGSMITH_API_KEY=lsv2_pt_xxx
 LANGSMITH_PROJECT_NAME=sujbot-multi-agent
-LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com  # US: https://api.smith.langchain.com
+LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com
 ```
 
-**Accessing Traces:**
-```bash
-# List projects
-curl -s "https://eu.api.smith.langchain.com/api/v1/sessions" \
-  -H "X-API-Key: $LANGSMITH_API_KEY"
-
-# Query runs (requires session ID as list)
-curl -s "https://eu.api.smith.langchain.com/api/v1/runs/query" \
-  -H "X-API-Key: $LANGSMITH_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"session": ["SESSION_ID"], "limit": 10}'
-
-# Query specific trace
-curl -s "https://eu.api.smith.langchain.com/api/v1/runs/query" \
-  -H "X-API-Key: $LANGSMITH_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"trace": "TRACE_ID", "limit": 100}'
-```
-
-**Key Metrics to Monitor:**
-- **Latency per agent**: extractor, orchestrator_synthesis, compliance
-- **Token usage**: prompt_tokens, completion_tokens (track overflow)
-- **Tool calls**: which tools called, how many iterations
-- **Error rate**: failed runs, timeout patterns
-
-**Common Issues:**
-- `403 Forbidden`: Wrong endpoint (EU vs US) or invalid API key
-- `0 tokens`: Token counting may not propagate in LangGraph chains
-- Double agent execution: Check workflow routing logic
+Common issues: `403` → wrong endpoint (EU vs US); `0 tokens` → token counting doesn't propagate in LangGraph chains.
 
 ## Research Papers (DO NOT CONTRADICT)
 
-1. **LegalBench-RAG** (Pipitone & Alami, 2024) - RCTS, 500-char chunks
-2. **Summary-Augmented Chunking** (Reuter et al., 2024) - SAC, generic summaries
-3. **Multi-Layer Embeddings** (Lima, 2024) - 3-layer indexing
-4. **Contextual Retrieval** (Anthropic, 2024) - Context prepending
-5. **HybridRAG** (2024) - Graph boosting
-6. **HyDE** (Gao et al., 2022) - Hypothetical Document Embeddings
+1. **LegalBench-RAG** (Pipitone & Alami, 2024) — RCTS, 500-char chunks
+2. **Summary-Augmented Chunking** (Reuter et al., 2024) — SAC, generic summaries
+3. **Multi-Layer Embeddings** (Lima, 2024) — 3-layer indexing
+4. **Contextual Retrieval** (Anthropic, 2024) — Context prepending
+5. **HyDE** (Gao et al., 2022) — Hypothetical Document Embeddings
 
 ## Documentation
 
-- [`README.md`](README.md) - Installation, quick start
-- [`docs/DOCKER_SETUP.md`](docs/DOCKER_SETUP.md) - Docker configuration
-- [`docs/HITL_IMPLEMENTATION_SUMMARY.md`](docs/HITL_IMPLEMENTATION_SUMMARY.md) - Human-in-the-Loop
-- [`docs/WEB_INTERFACE.md`](docs/WEB_INTERFACE.md) - Web UI features
-
----
-
-**Last Updated:** 2026-02-06
-**Version:** PHASE 1-7 + Multi-Agent + Graphiti KG + Gemini Extractor + Exception Hierarchy + SSOT Refactoring + LangSmith Evaluation + Prompts SSOT + VL Architecture
+- [`README.md`](README.md) — Installation, quick start
+- [`docs/DOCKER_SETUP.md`](docs/DOCKER_SETUP.md) — Docker configuration
+- [`docs/HITL_IMPLEMENTATION_SUMMARY.md`](docs/HITL_IMPLEMENTATION_SUMMARY.md) — Human-in-the-Loop
+- [`docs/WEB_INTERFACE.md`](docs/WEB_INTERFACE.md) — Web UI features

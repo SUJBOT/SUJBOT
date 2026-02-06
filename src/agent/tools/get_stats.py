@@ -1,7 +1,7 @@
 """
 Get Stats Tool
 
-Auto-extracted and cleaned from tier3_analysis.py
+Corpus/index statistics for the RAG system.
 """
 
 import logging
@@ -18,7 +18,7 @@ class GetStatsInput(ToolInput):
 
     stat_scope: str = Field(
         ...,
-        description="Statistics scope: 'corpus' (overall stats), 'index' (comprehensive index stats with embedding/cache info), 'document' (per-document stats), 'entity' (knowledge graph stats)",
+        description="Statistics scope: 'corpus' (overall stats), 'index' (comprehensive index stats with embedding/cache info), 'document' (per-document stats)",
     )
     include_cache_stats: bool = Field(
         False, description="Include embedding cache statistics (for 'index' scope)"
@@ -32,13 +32,12 @@ class GetStatsTool(BaseTool):
     name = "get_stats"
     description = "Get corpus/index stats"
     detailed_help = """
-    Get statistics about corpus, index, documents, or entities.
+    Get statistics about corpus, index, or documents.
 
     **Stat scopes:**
     - 'corpus': Overall document counts, sizes
-    - 'index': Comprehensive FAISS index stats (layers, dimensions, cache)
+    - 'index': Comprehensive index stats (layers, dimensions, cache)
     - 'document': Per-document statistics
-    - 'entity': Knowledge graph entity statistics
 
     **When to use:**
     - "How many documents?"
@@ -48,12 +47,12 @@ class GetStatsTool(BaseTool):
 
     **Best practices:**
     - Use 'corpus' for quick document counts
-    - Use 'index' for detailed FAISS information
+    - Use 'index' for detailed information
     - Set include_cache_stats=true for embedding cache info
     - Fast metadata aggregation (no search required)
 
     **Method:** Metadata aggregation
-    
+
     """
 
     input_schema = GetStatsInput
@@ -82,40 +81,6 @@ class GetStatsTool(BaseTool):
                     # If we can't get document list, skip it (non-critical)
                     logger.debug(f"Could not extract document list: {e}")
                     stats["document_list"] = []
-
-            if stat_scope in ["corpus", "entity", "index"]:
-                # Get knowledge graph statistics
-                if self.knowledge_graph:
-                    from collections import Counter
-
-                    entity_types = Counter()
-                    relationship_types = Counter()
-
-                    for entity in self.knowledge_graph.entities:
-                        entity_types[entity.type] += 1
-
-                    for rel in self.knowledge_graph.relationships:
-                        relationship_types[rel.type] += 1
-
-                    stats["knowledge_graph"] = {
-                        "total_entities": len(self.knowledge_graph.entities),
-                        "total_relationships": len(self.knowledge_graph.relationships),
-                        "entity_types": {k.value: v for k, v in entity_types.items()},
-                        "relationship_types": {k.value: v for k, v in relationship_types.items()},
-                    }
-
-                    if stat_scope == "index":
-                        # Add top entities for index scope
-                        stats["knowledge_graph"]["top_entities"] = [
-                            {"id": e.id, "name": e.value, "type": e.type.value}
-                            for e in sorted(
-                                self.knowledge_graph.entities,
-                                key=lambda x: x.confidence,
-                                reverse=True,
-                            )[:10]
-                        ]
-                else:
-                    stats["knowledge_graph"] = None
 
             if stat_scope == "index":
                 # Additional index-specific information
@@ -148,11 +113,11 @@ class GetStatsTool(BaseTool):
                     and self.context_assembler is not None,
                 }
 
-            if stat_scope not in ["corpus", "index", "document", "entity"]:
+            if stat_scope not in ["corpus", "index", "document"]:
                 return ToolResult(
                     success=False,
                     data=None,
-                    error=f"Invalid stat_scope: {stat_scope}. Must be 'corpus', 'index', 'document', or 'entity'",
+                    error=f"Invalid stat_scope: {stat_scope}. Must be 'corpus', 'index', or 'document'",
                 )
 
             return ToolResult(
@@ -167,4 +132,3 @@ class GetStatsTool(BaseTool):
         except Exception as e:
             logger.error(f"Get stats failed: {e}", exc_info=True)
             return ToolResult(success=False, data=None, error=str(e))
-

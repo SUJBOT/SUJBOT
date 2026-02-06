@@ -24,12 +24,10 @@ Usage:
     pipeline = IndexingPipeline(
         embedding_model="Qwen/Qwen3-Embedding-8B",
         enable_sac=True,
-        enable_knowledge_graph=True,
     )
 
     result = pipeline.index_document("document.pdf")
     result["vector_store"].save("output/vector_store")
-    result["knowledge_graph"].save_json("output/knowledge_graph.json")
 """
 
 import asyncio
@@ -53,21 +51,6 @@ from src.multi_layer_chunker import MultiLayerChunker
 from src.embedding_generator import EmbeddingGenerator
 from src.storage import create_vector_store_adapter, load_vector_store_adapter
 from src.cost_tracker import get_global_tracker, reset_global_tracker
-
-# Knowledge Graph imports (optional)
-try:
-    from src.graph import (
-        KnowledgeGraphConfig,
-        EntityExtractionConfig as KGEntityConfig,
-        RelationshipExtractionConfig as KGRelationshipConfig,
-        GraphStorageConfig,
-        GraphBackend,
-    )
-    from src.graph.graphiti_extractor import GraphitiExtractor, GraphitiExtractionResult
-
-    KG_AVAILABLE = True
-except ImportError:
-    KG_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +95,6 @@ def check_existing_components(document_id: str, connection_string: str = None) -
     result = {
         "exists": False,
         "has_dense": False,
-        "has_kg": False,
         "existing_doc_id": None,
     }
 
@@ -159,13 +141,6 @@ def check_existing_components(document_id: str, connection_string: str = None) -
             f"Failed to check PostgreSQL: {e}. "
             f"Document may be re-indexed if check fails. Verify DATABASE_URL and schema."
         )
-
-    # Check Knowledge Graph (in output directory)
-    if result["existing_doc_id"]:
-        output_dir = Path("output")
-        kg_files = list(output_dir.glob(f"{result['existing_doc_id']}*/*/knowledge_graph.json"))
-        if kg_files:
-            result["has_kg"] = True
 
     return result
 
@@ -216,17 +191,8 @@ class IndexingConfig:
     enable_semantic_clustering: bool = False  # Cluster chunks by semantic similarity
     clustering_config: Optional["ClusteringConfig"] = None
 
-    # PHASE 5A: Knowledge Graph (enabled by default for SOTA 2025)
-    enable_knowledge_graph: bool = True
-    kg_config: Optional[KnowledgeGraphConfig] = None
-
     # PHASE 5C: Cross-Encoder Reranking (optional, not used with HyDE+Fusion)
     enable_reranking: bool = False  # Not used - HyDE+Fusion handles retrieval
-
-    # PHASE 5D: Graph-Vector Integration (optional)
-    enable_graph_retrieval: bool = False  # Graph-enhanced retrieval
-    graph_boost_weight: float = 0.3  # Boost weight for graph matches
-    enable_multi_hop: bool = False  # Multi-hop graph traversal
 
     # PHASE 6: Context Assembly (optional)
     enable_context_assembly: bool = False  # Assemble retrieved chunks for LLM
@@ -260,15 +226,6 @@ class IndexingConfig:
             # Fast mode: Use completions (full price, fast)
             self.summarization_config.use_batch_api = False
             logger.info(f"⚡ FAST MODE: Using completions (full price, 2-3 min latency)")
-
-        # Initialize KG config if enabled
-        if self.enable_knowledge_graph and self.kg_config is None:
-            try:
-                from src.graph.config import KnowledgeGraphConfig
-
-                self.kg_config = KnowledgeGraphConfig.from_env()
-            except ImportError:
-                logger.warning("Knowledge Graph enabled but graph module not available")
 
         # Initialize clustering config if enabled
         if self.enable_semantic_clustering and self.clustering_config is None:
@@ -314,7 +271,6 @@ class IndexingConfig:
             chunking_config=ChunkingConfig.from_config(root_config.chunking),
             embedding_config=EmbeddingConfig.from_config(root_config.embedding),
             enable_semantic_clustering=root_config.clustering.enable_labels,
-            enable_knowledge_graph=root_config.knowledge_graph.enable,
             enable_duplicate_detection=True,  # Always enabled
             duplicate_similarity_threshold=0.85,  # Match field default (was 0.98, too strict)
             duplicate_sample_pages=1,  # Default value
@@ -373,59 +329,13 @@ class IndexingPipeline:
         # Initialize PHASE 4: Embedding (uses nested config)
         self.embedder = EmbeddingGenerator(self.config.embedding_config)
 
-        # Initialize PHASE 5A: Knowledge Graph (optional, using Gemini)
-        self.kg_extractor = None
-        if self.config.enable_knowledge_graph:
-            if not KG_AVAILABLE:
-                logger.warning(
-                    "Knowledge Graph requested but not available. "
-                    "Install with: pip install google-generativeai"
-                )
-            else:
-                self._initialize_kg_pipeline()
-
         logger.info(
             f"Pipeline initialized: "
             f"SAC={self.config.chunking_config.enable_contextual}, "
             f"model={self.config.embedding_config.model} "
             f"({self.embedder.dimensions}D), "
-            f"KG={self.config.enable_knowledge_graph}, "
             f"Storage=PostgreSQL"
         )
-
-    def _initialize_kg_pipeline(self):
-        """Initialize Knowledge Graph extractor using Gemini 2.5 Pro."""
-        if self.config.kg_config is None:
-            logger.warning("Knowledge Graph enabled but no kg_config provided")
-            self.kg_extractor = None
-            return
-
-        # Validate OpenAI API key for Graphiti (uses GPT-4o-mini)
-        openai_api_key = os.getenv("OPENAI_API_KEY")
-        if not openai_api_key:
-            logger.warning("OPENAI_API_KEY not found. Set OPENAI_API_KEY for Graphiti KG extraction.")
-            self.kg_extractor = None
-            return
-
-        # Validate Neo4j password for Graphiti
-        neo4j_password = os.getenv("NEO4J_PASSWORD")
-        if not neo4j_password:
-            logger.warning("NEO4J_PASSWORD not found. Set NEO4J_PASSWORD for Graphiti KG extraction.")
-            self.kg_extractor = None
-            return
-
-        # Initialize Graphiti extractor (uses GPT-4o-mini for extraction)
-        try:
-            model_name = os.getenv("GRAPHITI_MODEL", "gpt-4o-mini")
-            batch_size = getattr(self.config.kg_config, 'batch_size', 10) if self.config.kg_config else 10
-            self.kg_extractor = GraphitiExtractor(
-                model_name=model_name,
-                batch_size=batch_size,
-            )
-            logger.info(f"Knowledge Graph initialized: GraphitiExtractor ({model_name})")
-        except Exception as e:
-            logger.warning(f"Failed to initialize GraphitiExtractor: {e}")
-            self.kg_extractor = None
 
     def index_document(
         self,
@@ -455,7 +365,6 @@ class IndexingPipeline:
         Returns:
             Dict with pipeline results, or None if document is a duplicate and was skipped:
                 - vector_store: VectorStoreAdapter (FAISS) with indexed document
-                - knowledge_graph: KnowledgeGraph (if enabled, else None)
                 - chunks: Dict of chunks (if save_intermediate)
                 - stats: Pipeline statistics
 
@@ -656,7 +565,6 @@ class IndexingPipeline:
         if existing["exists"]:
             logger.info(f"Document '{existing['existing_doc_id']}' found in PostgreSQL:")
             logger.info(f"  - Vector embeddings: {'EXISTS' if existing['has_dense'] else 'MISSING'}")
-            logger.info(f"  - Knowledge Graph: {'EXISTS' if existing['has_kg'] else 'MISSING'}")
             logger.info("")
             logger.info("Will skip existing components and add only missing ones...")
         else:
@@ -668,7 +576,6 @@ class IndexingPipeline:
 
         # Determine what to skip
         skip_dense = existing["has_dense"]
-        skip_kg = existing["has_kg"]
 
         # PHASE 3: Multi-layer chunking + SAC (skip if cached)
         if cached_chunks is not None and phase_status and phase_status.completed_phase >= 3:
@@ -887,89 +794,6 @@ class IndexingPipeline:
                 f"({store_stats['documents']} documents)"
             )
 
-        # PHASE 5A: Knowledge Graph (optional, skip if exists)
-        knowledge_graph = None
-        kg_error = None
-
-        if self.kg_extractor:
-            if skip_kg:
-                logger.info("PHASE 5A: [SKIPPED] - Knowledge Graph already exists")
-                # Try to load existing KG for stats
-                try:
-                    kg_files = list(output_dir.glob("*_kg.json")) if output_dir else []
-                    if kg_files:
-                        with open(kg_files[0], 'r') as f:
-                            kg_data = json.load(f)
-                        logger.info(
-                            f"Loaded existing KG: {len(kg_data.get('entities', []))} entities, "
-                            f"{len(kg_data.get('relationships', []))} relationships"
-                        )
-                except Exception as e:
-                    logger.warning(f"Could not load existing KG stats: {e}")
-            else:
-                logger.info("PHASE 5A: Knowledge Graph Extraction (Graphiti + GPT-4o-mini)")
-
-                try:
-                    # Graphiti uses phase3_chunks.json for episode-based ingestion
-                    phase3_path = output_dir / "phase3_chunks.json" if output_dir else None
-
-                    # Save phase3_chunks.json EARLY for entity-to-chunk mapping
-                    if phase3_path and not phase3_path.exists() and chunks:
-                        self._save_phase3(output_dir, result, chunks, chunking_stats)
-
-                    if phase3_path and phase3_path.exists():
-                        # Extract KG from phase3 chunks using async Graphiti
-                        # Each chunk becomes a Graphiti episode for entity/relationship extraction
-                        knowledge_graph = asyncio.run(
-                            self.kg_extractor.extract_from_phase3(
-                                phase3_path=phase3_path,
-                                document_id=result.document_id,
-                            )
-                        )
-
-                        logger.info(
-                            f"Knowledge Graph: {knowledge_graph.total_entities} entities, "
-                            f"{knowledge_graph.total_relationships} relationships "
-                            f"({knowledge_graph.successful_chunks}/{knowledge_graph.total_chunks} chunks processed)"
-                        )
-
-                        # Save KG extraction result to output directory
-                        if output_dir:
-                            kg_output_path = output_dir / f"{result.document_id.replace('/', '_').replace(' ', '_')}_kg.json"
-                            with open(kg_output_path, "w", encoding="utf-8") as f:
-                                json.dump(knowledge_graph.to_dict(), f, indent=2, ensure_ascii=False)
-                            logger.info(f"Knowledge Graph saved to: {kg_output_path}")
-                    else:
-                        logger.warning(f"phase3_chunks.json not found at {phase3_path}, skipping KG extraction")
-                        knowledge_graph = None
-
-                except (ValueError, RuntimeError, KeyError) as e:
-                    # Expected KG construction errors (LLM API, data issues)
-                    logger.error(f"[ERROR] Knowledge Graph extraction failed ({type(e).__name__}): {e}")
-                    knowledge_graph = None
-                    kg_error = str(e)
-                except (FileNotFoundError, json.JSONDecodeError) as e:
-                    # File system or parsing errors
-                    logger.error(f"[ERROR] Knowledge Graph data error ({type(e).__name__}): {e}")
-                    knowledge_graph = None
-                    kg_error = str(e)
-                except Exception as e:
-                    # Unexpected errors - log with full traceback for debugging
-                    logger.error(f"[ERROR] Knowledge Graph extraction failed unexpectedly: {e}", exc_info=True)
-                    knowledge_graph = None
-                    kg_error = str(e)
-
-            # Surface KG failure prominently to user
-            if self.config.enable_knowledge_graph and knowledge_graph is None and kg_error:
-                logger.warning(
-                    "=" * 60 + "\n"
-                    "KNOWLEDGE GRAPH EXTRACTION FAILED\n"
-                    f"Error: {kg_error}\n"
-                    "Document indexed for vector search, but graph search unavailable.\n"
-                    "Check Neo4j connection and API keys in .env file.\n" +
-                    "=" * 60
-                )
-
         # Save intermediate results
         if save_intermediate and output_dir:
             self._save_intermediate(
@@ -995,20 +819,12 @@ class IndexingPipeline:
         # Prepare result
         result_dict = {
             "vector_store": vector_store,
-            "knowledge_graph": knowledge_graph,
             "stats": {
                 "document_id": result.document_id,
                 "source_path": _make_relative_path(document_path),
                 "vector_store": store_stats,
                 "chunking": chunking_stats,
                 "storage_backend": "postgresql",
-                "kg_enabled": self.config.enable_knowledge_graph,
-                "kg_entities": knowledge_graph.total_entities if knowledge_graph else 0,
-                "kg_relationships": knowledge_graph.total_relationships if knowledge_graph else 0,
-                "kg_construction_failed": self.config.enable_knowledge_graph
-                and knowledge_graph is None
-                and kg_error is not None,
-                "kg_error": kg_error if kg_error else None,
             },
         }
 
@@ -1036,7 +852,6 @@ class IndexingPipeline:
         Returns:
             Dict with:
                 - vector_store: PostgresVectorStoreAdapter
-                - knowledge_graphs: List of KnowledgeGraphs (if enabled)
                 - stats: Batch statistics
         """
         output_dir = Path(output_dir)
@@ -1044,8 +859,6 @@ class IndexingPipeline:
 
         logger.info(f"Batch indexing {len(document_paths)} documents to PostgreSQL...")
 
-        # Collect knowledge graphs and track successful documents
-        knowledge_graphs = []
         successful_docs = 0
         vector_store = None
 
@@ -1069,11 +882,6 @@ class IndexingPipeline:
                 vector_store = result["vector_store"]
                 successful_docs += 1
 
-                # Collect knowledge graph
-                doc_kg = result.get("knowledge_graph")
-                if doc_kg:
-                    knowledge_graphs.append(doc_kg)
-
             except KeyboardInterrupt:
                 logger.warning(f"Batch indexing interrupted at document {i + 1}/{len(document_paths)}")
                 raise
@@ -1089,43 +897,17 @@ class IndexingPipeline:
                 logger.error(f"[ERROR] Unexpected error indexing {document_path}: {e}", exc_info=True)
                 continue
 
-        # Save combined knowledge graph (if any)
-        if knowledge_graphs and self.kg_extractor:
-            try:
-                # Merge all KGs
-                from src.graph import KnowledgeGraph
-
-                combined_kg = KnowledgeGraph(
-                    entities=[e for kg in knowledge_graphs for e in kg.entities],
-                    relationships=[r for kg in knowledge_graphs for r in kg.relationships],
-                )
-                combined_kg.compute_stats()
-
-                kg_output = output_dir / "combined_kg.json"
-                combined_kg.save_json(str(kg_output))
-                logger.info(f"Saved combined Knowledge Graph: {kg_output}")
-                logger.info(
-                    f"  Total: {len(combined_kg.entities)} entities, "
-                    f"{len(combined_kg.relationships)} relationships"
-                )
-            except Exception as e:
-                logger.error(f"[ERROR] Failed to save combined KG: {e}")
-
         # Get final stats from PostgreSQL
         store_stats = vector_store.get_stats() if vector_store else {}
         logger.info(f"\nBatch indexing complete: {store_stats}")
 
         return {
             "vector_store": vector_store,
-            "knowledge_graphs": knowledge_graphs,
             "stats": {
                 "total_documents": len(document_paths),
                 "successful": successful_docs,
                 "vector_store": store_stats,
                 "storage_backend": "postgresql",
-                "kg_enabled": self.config.enable_knowledge_graph,
-                "total_entities": sum(len(kg.entities) for kg in knowledge_graphs),
-                "total_relationships": sum(len(kg.relationships) for kg in knowledge_graphs),
             },
         }
 
@@ -1278,14 +1060,6 @@ if __name__ == "__main__":
 
     # Extract components
     vector_store = result["vector_store"]  # PostgresVectorStoreAdapter
-    knowledge_graph = result["knowledge_graph"]
-
-    # Save knowledge graph (vector store is already in PostgreSQL)
-    if knowledge_graph:
-        knowledge_graph.save_json("output/knowledge_graph.json")
-        print(f"\nKnowledge Graph:")
-        print(f"  Entities: {len(knowledge_graph.entities)}")
-        print(f"  Relationships: {len(knowledge_graph.relationships)}")
 
     # Search example (using Layer 3 search)
     query_embedding = pipeline.embedder.embed_texts(["safety specification"])

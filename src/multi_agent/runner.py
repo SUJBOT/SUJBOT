@@ -291,130 +291,6 @@ class MultiAgentRunner:
             # See CLAUDE.md: "Cohere performs WORSE on legal docs"
             logger.info("Reranking DISABLED (HyDE + Expansion Fusion pipeline)")
 
-            # Knowledge graph (optional) - supports both Neo4j and JSON backends
-            knowledge_graph = None
-            kg_config = self.config.get("knowledge_graph", {})
-            kg_backend = kg_config.get("backend", "simple")
-
-            if kg_config.get("enable", True):
-                try:
-                    if kg_backend == "neo4j":
-                        # Load from Neo4j database
-                        from ..graph.config import Neo4jConfig
-                        from ..graph.neo4j_manager import Neo4jManager
-                        from ..graph.models import KnowledgeGraph, Entity
-                        from datetime import datetime
-
-                        neo4j_cfg = self.config.get("neo4j", {})
-                        # SSOT: Environment variables take precedence over config.json
-                        # (passwords should be in .env, not config.json)
-                        neo4j_config = Neo4jConfig(
-                            uri=os.getenv(
-                                "NEO4J_URI", neo4j_cfg.get("uri", "bolt://localhost:7687")
-                            ),
-                            username=os.getenv(
-                                "NEO4J_USERNAME", neo4j_cfg.get("username", "neo4j")
-                            ),
-                            password=os.getenv("NEO4J_PASSWORD", neo4j_cfg.get("password", "")),
-                            database=neo4j_cfg.get("database", "neo4j"),
-                        )
-
-                        # Use try/finally to ensure Neo4j connection is always closed
-                        neo4j_manager = Neo4jManager(neo4j_config)
-
-                        try:
-                            # Query all entities from Neo4j
-                            # Include labels(e) because Neo4j labels are metadata, not properties
-                            cypher = "MATCH (e:Entity) RETURN e, labels(e) AS node_labels"
-                            result = neo4j_manager.execute(cypher)
-
-                            entities = []
-                            for record in result:
-                                node = record["e"]
-                                # Neo4j labels are returned separately (not as node property)
-                                node_labels = record.get("node_labels", [])
-
-                                # Validate required fields
-                                # Support both SUJBOT schema (id/type) and Graphiti schema (uuid/labels)
-                                entity_id = node.get("id") or node.get("uuid", "")
-                                # Try multiple sources for type: direct property, entity_type, or node labels
-                                # Filter out generic "Entity" label to get the actual type
-                                type_labels = [lbl for lbl in node_labels if lbl != "Entity"]
-                                entity_type_str = (
-                                    node.get("type")
-                                    or node.get("entity_type")
-                                    or (type_labels[0] if type_labels else "")
-                                    or "Entity"  # Default to "Entity" if no type specified (Graphiti schema)
-                                )
-
-                                if not entity_id:
-                                    logger.warning(f"Skipping malformed Neo4j entity: missing id")
-                                    continue
-
-                                # Convert Neo4j node to Entity
-                                # FIX: Convert string type to EntityType enum (was causing AttributeError)
-                                try:
-                                    from src.graph.models import EntityType
-
-                                    entity_type = EntityType(entity_type_str)
-                                except (ValueError, KeyError):
-                                    logger.warning(
-                                        f"Unknown entity type '{entity_type_str}', using UNKNOWN"
-                                    )
-                                    entity_type = EntityType.UNKNOWN
-
-                                # FIX: source_chunk_ids should be List[str], not set (type annotation mismatch)
-                                source_chunk_ids = node.get("source_chunk_ids", [])
-                                if not isinstance(source_chunk_ids, list):
-                                    source_chunk_ids = (
-                                        [] if source_chunk_ids is None else list(source_chunk_ids)
-                                    )
-
-                                entities.append(
-                                    Entity(
-                                        id=entity_id,
-                                        type=entity_type,  # ✓ Now EntityType enum
-                                        value=node.get("value", ""),
-                                        normalized_value=node.get(
-                                            "normalized_value", node.get("value", "")
-                                        ),
-                                        confidence=node.get("confidence", 1.0),
-                                        source_chunk_ids=source_chunk_ids,  # ✓ Now List[str]
-                                        document_id=node.get("document_id", ""),
-                                        first_mention_chunk_id=node.get("first_mention_chunk_id"),
-                                        extraction_method=node.get("extraction_method"),
-                                    )
-                                )
-
-                            # Create KnowledgeGraph from Neo4j entities
-                            knowledge_graph = KnowledgeGraph(
-                                source_document_id="neo4j_unified",
-                                created_at=datetime.now(),
-                            )
-                            knowledge_graph.entities = entities
-                            logger.info(f"✓ KG loaded from Neo4j: {len(entities)} entities")
-
-                        finally:
-                            # FIX: Always close Neo4j connection, even if exception occurs (resource leak)
-                            neo4j_manager.close()
-
-                    else:
-                        # Load from JSON file (simple backend)
-                        kg_path = Path("vector_db/unified_kg.json")
-                        if not kg_path.exists():
-                            kg_path = Path("output/knowledge_graph.json")  # Fallback
-
-                        if kg_path.exists():
-                            from ..graph.models import KnowledgeGraph
-
-                            knowledge_graph = KnowledgeGraph.load_json(str(kg_path))
-                            logger.info(
-                                f"✓ KG loaded from {kg_path.name}: {len(knowledge_graph.entities)} entities"
-                            )
-
-                except Exception as e:
-                    logger.warning(f"Failed to load knowledge graph from {kg_backend}: {e}")
-
             # Tool config from config.json (not hardcoded defaults)
             agent_tools_config = self.config.get("agent_tools", {})
             tool_config = ToolConfig(
@@ -440,37 +316,6 @@ class MultiAgentRunner:
                     "query_expansion_model", "gpt-4o-mini"
                 ),
             )
-
-            # Initialize graph-enhanced retriever (optional)
-            graph_retriever = None
-            graph_retrieval_config = self.config.get("graph_retrieval", {})
-            if graph_retrieval_config.get("enable_graph_boost", False) and knowledge_graph:
-                try:
-                    from ..graph_retrieval import GraphEnhancedRetriever, GraphRetrievalConfig
-
-                    gr_config = GraphRetrievalConfig(
-                        enable_graph_boost=graph_retrieval_config.get("enable_graph_boost", True),
-                        graph_boost_weight=graph_retrieval_config.get("graph_boost_weight", 0.3),
-                        enable_entity_extraction=graph_retrieval_config.get(
-                            "enable_entity_extraction", True
-                        ),
-                        enable_multi_hop=graph_retrieval_config.get("enable_multi_hop", False),
-                        max_hop_depth=graph_retrieval_config.get("max_hop_depth", 2),
-                        fusion_mode=graph_retrieval_config.get("fusion_mode", "weighted"),
-                    )
-
-                    graph_retriever = GraphEnhancedRetriever(
-                        vector_store=vector_store,
-                        knowledge_graph=knowledge_graph,
-                        config=gr_config,
-                    )
-                    logger.info(
-                        f"Graph-enhanced retriever initialized: "
-                        f"multi_hop={gr_config.enable_multi_hop}, "
-                        f"boost_weight={gr_config.graph_boost_weight}"
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to initialize graph-enhanced retriever: {e}")
 
             # Initialize VL components if architecture == "vl"
             vl_retriever = None
@@ -498,11 +343,9 @@ class MultiAgentRunner:
                 vector_store=vector_store,
                 embedder=embedder,
                 reranker=None,  # Reranker removed - HyDE + Expansion Fusion pipeline
-                graph_retriever=graph_retriever,
-                knowledge_graph=knowledge_graph,
                 context_assembler=None,
                 llm_provider=self.llm_provider,
-                config=tool_config,  # Use the full config from above, not minimal config
+                config=tool_config,
                 vl_retriever=vl_retriever,
                 page_store=page_store,
             )
@@ -587,7 +430,7 @@ class MultiAgentRunner:
 
             # Critical tools that must be available for core functionality
             critical_tools = ["search", "expand_context", "get_document_info"]
-            optional_tools = ["graphiti_search", "section_search", "browse_sections"]
+            optional_tools = ["get_document_list", "get_stats"]
 
             # Check critical tool availability
             missing_critical = [t for t in critical_tools if t not in available]

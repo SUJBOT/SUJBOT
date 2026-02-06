@@ -1,14 +1,15 @@
 """
 RAG Tools
 
-14 specialized tools for retrieval and analysis.
+5 VL-adapted tools for retrieval and analysis.
 All tools are registered automatically via @register_tool decorator.
 
-Tools include:
-- Basic retrieval (5): search, get_document_info, get_document_list, etc.
-- Advanced retrieval (5): graphiti_search, multi_doc_synthesizer, etc.
-- Section-level (2): section_search, browse_sections (Layer 2 utilization)
-- Analysis (2): get_stats, definition_aligner
+Tools:
+- search: Jina v4 cosine search -> page images (VL mode)
+- expand_context: Adjacent page expansion
+- get_document_list: List all indexed documents
+- get_document_info: Document metadata/summaries
+- get_stats: Corpus/index statistics
 """
 
 import logging
@@ -45,27 +46,14 @@ def _safe_import(module_name: str):
         return None
 
 
-# Basic retrieval tools (5)
-_safe_import("get_tool_help")
+# Retrieval tools
 _safe_import("search")
-_safe_import("list_available_tools")
-_safe_import("get_document_info")  # Document metadata and summaries
-_safe_import("get_document_list")  # List all documents for orchestrator routing
-
-# Advanced retrieval tools (5)
-_safe_import("graphiti_search")  # Temporal knowledge graph search (replaces graph_search)
-_safe_import("multi_doc_synthesizer")
 _safe_import("expand_context")
-_safe_import("browse_entities")
-_safe_import("cluster_search")
+_safe_import("get_document_info")
+_safe_import("get_document_list")
 
-# Section-level tools (Layer 2 utilization) - NEW
-_safe_import("section_search")   # Section-level search with HyDE fusion
-_safe_import("browse_sections")  # Hierarchical section navigation
-
-# Analysis tools (2)
+# Analysis tools
 _safe_import("get_stats")
-_safe_import("definition_aligner")
 
 # Report import failures
 if _failed_imports:

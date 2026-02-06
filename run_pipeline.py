@@ -7,8 +7,7 @@ Runs complete indexing pipeline with ALL advanced features:
 - PHASE 2: Generic summaries
 - PHASE 3: Multi-layer chunking + SAC (contextual retrieval)
 - PHASE 4: Embeddings + FAISS indexing
-- PHASE 5A: Knowledge Graph extraction ✅
-- PHASE 5B: Hybrid Search (BM25 + Dense + RRF) ✅
+- PHASE 5: Hybrid Search (BM25 + Dense + RRF) ✅
 
 Supported formats: PDF, DOCX, PPTX, XLSX, HTML
 Input: Single document OR directory (batch processing)
@@ -27,13 +26,11 @@ Outputs saved to: output/<document_name>/<timestamp>/
 - phase2_summaries.json - Generic summaries
 - phase3_chunks.json - Multi-layer chunks with SAC
 - phase4_vector_store/ - FAISS + BM25 indexes + metadata
-- <document_id>_kg.json - Knowledge graph (if enabled)
 
 Configuration: All settings controlled via config.json file
 - Copy config.json.example to config.json and fill in your values
 - See config.json.example for available options
 - Hybrid Search: "hybrid_search": {"enable": true}
-- Knowledge Graph: "knowledge_graph": {"enable": true}
 """
 
 import sys
@@ -254,7 +251,6 @@ def run_single_document(
     print_info(f"Max Tokens: {config.chunking_config.max_tokens} tokens (HybridChunker)")
     print_info(f"SAC (Contextual Retrieval): {'ON' if config.chunking_config.enable_contextual else 'OFF'}")
     print_info(f"HyDE + Expansion Fusion: ON (w_hyde=0.6, w_exp=0.4)")
-    print_info(f"Knowledge Graph: {'ON' if config.enable_knowledge_graph else 'OFF'}")
     print_info(f"Storage Backend: {config.storage_backend.upper()}")
 
     # Show wrapper/entity labeling status
@@ -301,128 +297,16 @@ def run_single_document(
             return
 
         vector_store = result["vector_store"]
-        knowledge_graph = result["knowledge_graph"]
         stats = result["stats"]
 
         # PHASE 4: Vector store is stored in PostgreSQL (no file save needed)
         print_success(f"Vector store persisted in PostgreSQL database")
 
-        # Save PHASE 5A: Knowledge Graph (if enabled)
-        # Note: KG may already be saved by indexing_pipeline.py
-        kg_path = None
-        if knowledge_graph:
-            kg_path = output_dir / f"{doc_name}_kg.json"
-            if kg_path.exists():
-                print_success(f"Knowledge graph saved: {kg_path}")
-            else:
-                # Fallback: save using appropriate method
-                print_info("KG not saved by indexing pipeline, using fallback save...")
-                try:
-                    import json
-                    # Try save_json method first (KnowledgeGraph), fallback to to_dict (GraphitiExtractionResult)
-                    if hasattr(knowledge_graph, 'save_json'):
-                        knowledge_graph.save_json(str(kg_path))
-                    else:
-                        with open(kg_path, "w", encoding="utf-8") as f:
-                            json.dump(knowledge_graph.to_dict(), f, indent=2, ensure_ascii=False)
-                    print_success(f"Knowledge graph saved (via fallback): {kg_path}")
-                except (IOError, PermissionError) as e:
-                    print_info(f"[WARNING] Could not save knowledge graph to {kg_path}: {e}")
-
-        # Knowledge graph merging with --merge flag (PostgreSQL handles vector merging automatically)
+        # Merging with --merge flag (PostgreSQL handles vector merging automatically)
         if merge_target:
             merge_target = Path(merge_target)
             print()
             print_info(f"Note: PostgreSQL stores vectors directly in database (no manual merging needed)")
-
-            # Knowledge graph merging
-            if knowledge_graph and config.enable_knowledge_graph:
-                # Skip merge for GraphitiExtractionResult - Graphiti stores entities directly in Neo4j
-                from src.graph.graphiti_extractor import GraphitiExtractionResult
-                if isinstance(knowledge_graph, GraphitiExtractionResult):
-                    print()
-                    print_info(f"Graphiti KG stored directly in Neo4j: {knowledge_graph.total_entities} entities, "
-                              f"{knowledge_graph.total_relationships} relationships")
-                    print_info("Skipping unified KG merge (Graphiti uses Neo4j as primary storage)")
-                else:
-                    try:
-                        print()
-                        print_info("Merging knowledge graphs with cross-document deduplication...")
-
-                        from src.graph import (
-                            KnowledgeGraph,
-                            UnifiedKnowledgeGraphManager,
-                            CrossDocumentRelationshipDetector
-                        )
-
-                        # Initialize unified KG manager (uses merge_target directory for storage)
-                        manager = UnifiedKnowledgeGraphManager(storage_dir=str(merge_target))
-
-                        # Initialize cross-document detector
-                        detector = CrossDocumentRelationshipDetector(
-                            use_llm_validation=False,  # Fast pattern-based detection
-                            confidence_threshold=0.7
-                        )
-
-                        # Load or create unified KG
-                        unified_kg = manager.load_or_create()
-
-                        print_info(f"Current unified KG: {len(unified_kg.entities)} entities, "
-                                  f"{len(unified_kg.relationships)} relationships")
-                        print_info(f"New document KG: {len(knowledge_graph.entities)} entities, "
-                                  f"{len(knowledge_graph.relationships)} relationships")
-
-                        # Merge with deduplication and cross-doc detection
-                        unified_kg = manager.merge_document_graph(
-                            unified_kg=unified_kg,
-                            document_kg=knowledge_graph,
-                            document_id=doc_name,
-                            cross_doc_detector=detector
-                        )
-
-                        # Save unified KG + per-document backup
-                        manager.save(unified_kg, document_id=doc_name)
-
-                        # Get statistics
-                        doc_stats = manager.get_document_statistics(unified_kg)
-
-                        print_success(f"KG merge complete with cross-document relationships!")
-                        print_info(f"Unified KG: {len(unified_kg.entities)} entities, "
-                                  f"{len(unified_kg.relationships)} relationships")
-                        print_info(f"Documents in unified KG: {doc_stats['total_documents']}")
-                        print_info(f"Cross-document entities: {doc_stats['cross_document_entities']} "
-                                  f"({doc_stats['cross_document_entity_percentage']:.1f}%)")
-                        print_info(f"Saved: {merge_target / 'unified_kg.json'}")
-
-                    except FileNotFoundError as e:
-                        print()
-                        print_info(f"[ERROR] KG file not found: {e}")
-                        logger.error(f"KG merge failed - file missing: {e}", exc_info=True)
-                        logger.error(f"Document: {doc_name}, Merge target: {merge_target}")
-                        print_info(f"Document '{doc_name}' KG will not be merged into unified graph")
-                    except PermissionError as e:
-                        print()
-                        print_info(f"[ERROR] Cannot write to {merge_target}: Permission denied")
-                        logger.error(f"KG merge failed - permission error: {e}", exc_info=True)
-                        print_info(f"Document '{doc_name}' KG will not be merged")
-                    except (KeyError, AttributeError) as e:
-                        # Data structure errors - likely data corruption
-                        print()
-                        print_info(f"[ERROR] KG data structure error: {e}")
-                        logger.error(f"KG merge failed - data integrity issue: {e}", exc_info=True)
-                        logger.error(f"Document: {doc_name}")
-                        if 'unified_kg' in locals():
-                            logger.error(f"Unified KG state: {len(unified_kg.entities)} entities, {len(unified_kg.relationships)} relationships")
-                        if hasattr(knowledge_graph, 'entities'):
-                            logger.error(f"New KG state: {len(knowledge_graph.entities)} entities, {len(knowledge_graph.relationships)} relationships")
-                        print_info(f"Document '{doc_name}' KG appears corrupted - skipping merge")
-                    except (ValueError, RuntimeError) as e:
-                        # Expected validation/merge errors
-                        print()
-                        print_info(f"[ERROR] KG merge validation failed: {e}")
-                        logger.error(f"KG merge failed - validation error: {e}", exc_info=True)
-                        print_info(f"Document '{doc_name}' KG validation failed - skipping merge")
-                    # Removed broad Exception catch - let unexpected errors propagate!
 
         # Print comprehensive statistics
         print_header("INDEXING COMPLETE")
@@ -458,24 +342,6 @@ def run_single_document(
         print_info(f"   HyDE weight:       0.6")
         print_info(f"   Expansion weight:  0.4")
         print_info(f"   Storage:           PostgreSQL pgvector")
-
-        # Knowledge graph stats
-        if stats.get("kg_construction_failed"):
-            print()
-            print_info("[FAILED]Knowledge Graph: FAILED")
-            print_info(f"   Error: {stats.get('kg_error', 'Unknown error')}")
-            print_info("   Continuing with vector search only")
-        elif stats.get("kg_enabled") and knowledge_graph:
-            print()
-            print_info("✅ Knowledge Graph: ACTIVE")
-            print_info(f"   Entities:          {stats['kg_entities']}")
-            print_info(f"   Relationships:     {stats['kg_relationships']}")
-        elif stats.get("kg_enabled"):
-            print()
-            print_info("[WARNING]  Knowledge Graph: ENABLED but no graph generated")
-        else:
-            print()
-            print_info("[INFO]  Knowledge Graph: DISABLED")
 
         print()
 
@@ -571,8 +437,6 @@ def run_single_document(
     print(f"  • phase3_chunks.json         - Multi-layer chunks")
     if storage_backend != "postgresql":
         print(f"  • phase4_vector_store/       - FAISS + BM25 indexes")
-    if knowledge_graph:
-        print(f"  • {doc_name}_kg.json         - Knowledge graph")
     print()
     print("🚀 To use with agent:")
     if storage_backend == "postgresql":

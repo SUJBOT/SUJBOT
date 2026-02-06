@@ -6,7 +6,6 @@ LLM that decides which tools to call and when to stop.
 """
 
 import asyncio
-import json
 import logging
 import os
 import time
@@ -26,7 +25,7 @@ class SingleAgentRunner:
 
     Replaces MultiAgentRunner by:
     - Using one LLM call loop instead of orchestrator + specialist routing
-    - Exposing ALL tools (search, expand_context, graphiti, etc.) to one agent
+    - Exposing ALL tools (search, expand_context, etc.) to one agent
     - Loading a unified system prompt from prompts/agents/unified.txt
     """
 
@@ -149,28 +148,6 @@ class SingleAgentRunner:
         )
         embedder = EmbeddingGenerator(embedding_config)
 
-        # Knowledge graph (optional)
-        knowledge_graph = None
-        kg_config = self.config.get("knowledge_graph", {})
-        if kg_config.get("enable", False):
-            kg_path = Path("vector_db/unified_kg.json")
-            if not kg_path.exists():
-                kg_path = Path("output/knowledge_graph.json")
-            if kg_path.exists():
-                try:
-                    from ..graph.models import KnowledgeGraph
-
-                    knowledge_graph = KnowledgeGraph.load_json(str(kg_path))
-                    logger.info(f"KG loaded: {len(knowledge_graph.entities)} entities")
-                except (json.JSONDecodeError, KeyError, ValueError) as e:
-                    logger.error(
-                        "Knowledge graph file is corrupt at %s: %s", kg_path, e, exc_info=True
-                    )
-                except ImportError as e:
-                    logger.warning(f"Knowledge graph module unavailable: {e}")
-            else:
-                logger.info("Knowledge graph enabled but no file found, skipping")
-
         # Tool config
         agent_tools_config = self.config.get("agent_tools", {})
         tool_config = ToolConfig(
@@ -217,8 +194,6 @@ class SingleAgentRunner:
             vector_store=vector_store,
             embedder=embedder,
             reranker=None,
-            graph_retriever=None,
-            knowledge_graph=knowledge_graph,
             context_assembler=None,
             llm_provider=self.llm_provider,
             config=tool_config,
@@ -603,7 +578,7 @@ class SingleAgentRunner:
         if len(tool_call_history) < 2:
             return False
 
-        search_tools = {"search", "section_search", "similarity_search", "hierarchical_search"}
+        search_tools = {"search", "similarity_search", "hierarchical_search"}
         failed = 0
         for call in reversed(tool_call_history[-3:]):
             if call.get("tool") in search_tools and not call.get("success", True):

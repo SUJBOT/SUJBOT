@@ -174,38 +174,6 @@ class TestPhaseDetector:
         assert status.phase_files[4] == phase4_dir
         assert status.is_valid is True
 
-    def test_detect_knowledge_graph(
-        self, temp_dir, sample_phase1_data, sample_phase2_data, sample_phase3_data
-    ):
-        """Test detection with knowledge graph (phase 5)."""
-        # Create phases 1-3
-        phase1_path = temp_dir / "phase1_extraction.json"
-        phase2_path = temp_dir / "phase2_summaries.json"
-        phase3_path = temp_dir / "phase3_chunks.json"
-
-        with open(phase1_path, "w", encoding="utf-8") as f:
-            json.dump(sample_phase1_data, f)
-        with open(phase2_path, "w", encoding="utf-8") as f:
-            json.dump(sample_phase2_data, f)
-        with open(phase3_path, "w", encoding="utf-8") as f:
-            json.dump(sample_phase3_data, f)
-
-        # Create phase 4 directory
-        phase4_dir = temp_dir / "phase4_vector_store"
-        phase4_dir.mkdir()
-
-        # Create KG file
-        kg_path = temp_dir / "test_doc_kg.json"
-        with open(kg_path, "w", encoding="utf-8") as f:
-            json.dump({"entities": [], "relationships": []}, f)
-
-        status = PhaseDetector.detect(temp_dir)
-
-        assert status.completed_phase == 5
-        assert 5 in status.phase_files
-        assert status.phase_files[5] == kg_path
-        assert status.is_valid is True
-
     def test_detect_corrupted_json(self, temp_dir):
         """Test detection with corrupted JSON file."""
         phase1_path = temp_dir / "phase1_extraction.json"

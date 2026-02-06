@@ -175,14 +175,10 @@ def test_file_structure():
     # Expected infrastructure files
     expected_infra = ["_base.py", "_registry.py", "_utils.py", "_token_manager.py", "__init__.py"]
 
-    # Expected tool files (17)
+    # Expected tool files (5)
     expected_tools = [
-        "get_tool_help.py", "search.py", "get_document_list.py",
-        "list_available_tools.py", "get_document_info.py",
-        "graph_search.py", "multi_doc_synthesizer.py", "contextual_chunk_enricher.py",
-        "explain_search_results.py", "assess_retrieval_confidence.py", "filtered_search.py",
-        "similarity_search.py", "expand_context.py", "browse_entities.py", "cluster_search.py",
-        "get_stats.py", "definition_aligner.py"
+        "search.py", "expand_context.py", "get_document_info.py",
+        "get_document_list.py", "get_stats.py",
     ]
 
     # Check infrastructure files

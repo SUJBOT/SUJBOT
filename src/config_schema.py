@@ -548,227 +548,6 @@ class HybridSearchConfig(BaseModel):
     )
 
 
-class KnowledgeGraphConfig(BaseModel):
-    """
-    Knowledge graph configuration (PHASE 5A) - config.json schema.
-
-    NOTE: This is the CONFIG SCHEMA for validating config.json.
-    For the internal pipeline configuration, see src/graph/config.py::KnowledgeGraphConfig.
-    The two classes serve different purposes:
-    - This class: Validates user-provided config.json (flat structure)
-    - graph/config.py: Rich internal representation with nested sub-configs
-    """
-
-    enable: bool = Field(..., description="Enable knowledge graph extraction")
-    llm_provider: str = Field(
-        ...,
-        description="LLM provider for entity/relationship extraction"
-    )
-    llm_model: str = Field(
-        ...,
-        description="LLM model for KG extraction (gpt-4o-mini recommended)"
-    )
-    backend: Literal["simple", "neo4j", "networkx"] = Field(
-        ...,
-        description="Graph storage backend"
-    )
-    export_path: str = Field(
-        ...,
-        description="JSON export path for simple backend"
-    )
-    verbose: bool = Field(..., description="Enable verbose logging")
-    min_entity_confidence: float = Field(
-        ...,
-        description="Minimum entity confidence threshold",
-        ge=0.0,
-        le=1.0
-    )
-    min_relationship_confidence: float = Field(
-        ...,
-        description="Minimum relationship confidence threshold",
-        ge=0.0,
-        le=1.0
-    )
-    enable_entity_extraction: bool = Field(..., description="Enable entity extraction")
-    enable_relationship_extraction: bool = Field(..., description="Enable relationship extraction")
-    enable_cross_document_relationships: bool = Field(
-        ...,
-        description="Extract cross-document relationships (expensive)"
-    )
-    batch_size: int = Field(
-        default=10,
-        description="Batch size for Graphiti chunk processing (parallel)",
-        ge=1,
-        le=50
-    )
-    max_retries: int = Field(..., description="Max retry attempts", ge=0)
-    retry_delay: float = Field(..., description="Delay between retries in seconds", ge=0.0)
-    timeout: int = Field(..., description="Timeout per extraction batch in seconds", ge=1)
-    log_path: str = Field(..., description="KG extraction log file path")
-
-
-class EntityExtractionConfig(BaseModel):
-    """Entity extraction configuration."""
-
-    temperature: float = Field(
-        ...,
-        description="Temperature for extraction (0.0 for deterministic)",
-        ge=0.0,
-        le=2.0
-    )
-    min_confidence: float = Field(
-        ...,
-        description="Minimum confidence threshold",
-        ge=0.0,
-        le=1.0
-    )
-    extract_definitions: bool = Field(..., description="Extract entity definitions")
-    normalize: bool = Field(..., description="Normalize entity values")
-    batch_size: int = Field(..., description="Batch size for extraction", ge=1)
-    max_workers: int = Field(..., description="Parallel extraction threads", ge=1)
-    cache_results: bool = Field(..., description="Cache extraction results")
-    include_examples: bool = Field(..., description="Include few-shot examples in prompt")
-    max_per_chunk: int = Field(..., description="Max entities per chunk", ge=1)
-    enabled_types: Optional[List[str]] = Field(
-        None,
-        description="Enabled entity types (None = all types)"
-    )
-
-
-class RelationshipExtractionConfig(BaseModel):
-    """Relationship extraction configuration."""
-
-    temperature: float = Field(
-        ...,
-        description="Temperature for extraction",
-        ge=0.0,
-        le=2.0
-    )
-    min_confidence: float = Field(
-        ...,
-        description="Minimum confidence threshold",
-        ge=0.0,
-        le=1.0
-    )
-    extract_evidence: bool = Field(..., description="Extract supporting evidence text")
-    max_evidence_length: int = Field(..., description="Max characters for evidence snippets", ge=1)
-    within_chunk: bool = Field(..., description="Extract relationships within single chunk")
-    cross_chunk: bool = Field(..., description="Extract relationships across chunks")
-    from_metadata: bool = Field(..., description="Extract relationships from chunk metadata")
-    batch_size: int = Field(..., description="Batch size for extraction", ge=1)
-    max_workers: int = Field(..., description="Parallel extraction threads", ge=1)
-    cache_results: bool = Field(..., description="Cache extraction results")
-    max_per_entity: int = Field(..., description="Max relationships per entity", ge=1)
-    enabled_types: Optional[List[str]] = Field(
-        None,
-        description="Enabled relationship types (None = all types)"
-    )
-
-
-class Neo4jConfig(BaseModel):
-    """Neo4j connection configuration."""
-
-    uri: str = Field(..., description="Neo4j connection URI")
-    username: str = Field(..., description="Neo4j username")
-    password: str = Field(..., description="Neo4j password")
-    database: str = Field(..., description="Neo4j database name")
-    max_connection_lifetime: int = Field(
-        ...,
-        description="Max connection lifetime in seconds",
-        ge=1
-    )
-    max_connection_pool_size: int = Field(
-        ...,
-        description="Max concurrent connections",
-        ge=1
-    )
-    connection_timeout: int = Field(
-        ...,
-        description="Connection timeout in seconds",
-        ge=1
-    )
-    create_indexes: bool = Field(..., description="Auto-create indexes for entity types")
-    create_constraints: bool = Field(..., description="Auto-create uniqueness constraints")
-
-
-class EntityDeduplicationConfig(BaseModel):
-    """Entity deduplication configuration."""
-
-    enable: bool = Field(
-        ...,
-        description="Master switch for entity deduplication (3-layer strategy)"
-    )
-    use_embeddings: bool = Field(
-        ...,
-        description="Layer 2: Use embedding-based semantic similarity (50-200ms overhead)"
-    )
-    similarity_threshold: float = Field(
-        ...,
-        description="Cosine similarity threshold for Layer 2",
-        ge=0.0,
-        le=1.0
-    )
-    use_acronym_expansion: bool = Field(
-        ...,
-        description="Layer 3: Enable acronym expansion (100-500ms overhead)"
-    )
-    acronym_fuzzy_threshold: float = Field(
-        ...,
-        description="Fuzzy match threshold for Layer 3",
-        ge=0.0,
-        le=1.0
-    )
-    custom_acronyms: Optional[str] = Field(
-        None,
-        description="Custom acronym mappings (format: 'ACRO1:expansion1,ACRO2:expansion2')"
-    )
-    apoc_enabled: bool = Field(
-        ...,
-        description="Use APOC for deduplication (~10-20ms), fallback to Cypher (~20-50ms)"
-    )
-    embedding_model: str = Field(
-        ...,
-        description="Embedding model for Layer 2 deduplication"
-    )
-    embedding_batch_size: int = Field(
-        ...,
-        description="Batch size for Layer 2 embeddings",
-        ge=1
-    )
-    cache_embeddings: bool = Field(..., description="Cache embeddings for Layer 2")
-    create_constraints: bool = Field(..., description="Create Neo4j uniqueness constraints")
-
-
-class GraphStorageConfig(BaseModel):
-    """Graph storage configuration."""
-
-    backend: Literal["simple", "neo4j", "networkx"] = Field(
-        ...,
-        description="Graph storage backend"
-    )
-    simple_store_path: str = Field(
-        ...,
-        description="JSON store path for simple backend"
-    )
-    export_json: bool = Field(..., description="Export to JSON after construction")
-    export_path: str = Field(..., description="JSON export path")
-    deduplicate_entities: bool = Field(..., description="Deduplicate entities during graph construction")
-    merge_similar_entities: bool = Field(
-        ...,
-        description="Merge similar entities (expensive)"
-    )
-    similarity_threshold: float = Field(
-        ...,
-        description="Similarity threshold for entity merging",
-        ge=0.0,
-        le=1.0
-    )
-    track_provenance: bool = Field(
-        ...,
-        description="Track provenance (chunk sources) for entities"
-    )
-
-
 class AgentConfig(BaseModel):
     """RAG agent configuration (PHASE 7)."""
 
@@ -792,10 +571,6 @@ class AgentConfig(BaseModel):
     vector_store_path: str = Field(
         ...,
         description="Vector store path (must point to phase4_vector_store directory)"
-    )
-    knowledge_graph_path: Optional[str] = Field(
-        None,
-        description="Knowledge graph path (if using KG with agent)"
     )
     enable_prompt_caching: bool = Field(
         ...,
@@ -843,16 +618,6 @@ class AgentToolConfig(BaseModel):
         ...,
         description="Reranker model"
     )
-    enable_graph_boost: bool = Field(
-        ...,
-        description="Enable graph-based result boosting (+8% factual correctness, +200-500ms)"
-    )
-    graph_boost_weight: float = Field(
-        ...,
-        description="Weight for graph boosting",
-        ge=0.0,
-        le=1.0
-    )
     max_document_compare: int = Field(
         ...,
         description="Max documents to compare",
@@ -872,10 +637,6 @@ class AgentToolConfig(BaseModel):
     lazy_load_reranker: bool = Field(
         ...,
         description="Lazy load reranker (speeds up startup)"
-    )
-    lazy_load_graph: bool = Field(
-        ...,
-        description="Lazy load knowledge graph (speeds up startup)"
     )
     cache_embeddings: bool = Field(..., description="Cache embeddings")
     hyde_num_hypotheses: int = Field(
@@ -1116,7 +877,6 @@ class TimeoutDefaultsConfig(BaseModel):
 
     api_request: int = Field(60, ge=1, description="Default API request timeout")
     ollama_request: int = Field(30, ge=1, description="Ollama/local model request timeout")
-    graph_query: int = Field(60, ge=1, description="Graph database query timeout")
     postgres_command: int = Field(60, ge=1, description="PostgreSQL command timeout")
     batch_api_poll: int = Field(30, ge=1, description="Batch API polling interval")
 
@@ -1132,18 +892,13 @@ class PoolSizesDefaultsConfig(BaseModel):
     """Connection pool size defaults - SSOT for all pool configurations."""
 
     postgres: int = Field(20, ge=1, description="PostgreSQL connection pool size")
-    neo4j: int = Field(50, ge=1, description="Neo4j connection pool size")
 
 
 class BatchSizesDefaultsConfig(BaseModel):
     """Batch processing size defaults - SSOT for all batch operations."""
 
-    entity_extraction: int = Field(20, ge=1, description="Entity extraction batch size")
-    relationship_extraction: int = Field(10, ge=1, description="Relationship extraction batch size")
     embedding: int = Field(64, ge=1, description="Embedding batch size")
     context_generation: int = Field(20, ge=1, description="Context generation batch size")
-    neo4j_operations: int = Field(1000, ge=1, description="Neo4j bulk operations batch size")
-    graph_builder: int = Field(500, ge=1, description="Graph builder batch size")
 
 
 class RetrievalDefaultsConfig(BaseModel):
@@ -1162,8 +917,6 @@ class MaxWorkersDefaultsConfig(BaseModel):
 
     summarization: int = Field(20, ge=1, description="Max workers for summarization")
     context_generation: int = Field(10, ge=1, description="Max workers for context generation")
-    entity_extraction: int = Field(10, ge=1, description="Max workers for entity extraction")
-    relationship_extraction: int = Field(10, ge=1, description="Max workers for relationship extraction")
 
 
 class CacheDefaultsConfig(BaseModel):
@@ -1327,12 +1080,6 @@ class RootConfig(BaseModel):
     embedding: EmbeddingConfig
     clustering: ClusteringConfig
     hybrid_search: HybridSearchConfig
-    knowledge_graph: KnowledgeGraphConfig
-    entity_extraction: EntityExtractionConfig
-    relationship_extraction: RelationshipExtractionConfig
-    neo4j: Neo4jConfig
-    entity_deduplication: EntityDeduplicationConfig
-    graph_storage: GraphStorageConfig
     agent: AgentConfig
     agent_tools: AgentToolConfig
     cli: CLIConfig
