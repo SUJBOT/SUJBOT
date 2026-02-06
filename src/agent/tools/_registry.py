@@ -50,8 +50,6 @@ class ToolRegistry:
         vector_store: VectorStoreAdapter,
         embedder,
         reranker=None,
-        graph_retriever=None,
-        knowledge_graph=None,
         context_assembler=None,
         llm_provider=None,
         config=None,
@@ -67,8 +65,6 @@ class ToolRegistry:
             vector_store: VectorStoreAdapter (FAISS or PostgreSQL backend)
             embedder: EmbeddingGenerator
             reranker: CrossEncoderReranker (optional)
-            graph_retriever: GraphEnhancedRetriever (optional)
-            knowledge_graph: KnowledgeGraph (optional)
             context_assembler: ContextAssembler (optional)
             llm_provider: LLM Provider (optional)
             config: ToolConfig
@@ -76,17 +72,6 @@ class ToolRegistry:
             page_store: PageStore for VL mode (optional)
         """
         for tool_name, tool_class in self._tool_classes.items():
-            # Check requirements
-            if tool_class.requires_kg and not knowledge_graph:
-                reason = "Requires knowledge graph (use --kg option)"
-                logger.warning(
-                    f"Tool '{tool_name}' requires knowledge graph but none provided. Skipping. "
-                    f"Run indexing with ENABLE_KNOWLEDGE_GRAPH=true to generate: "
-                    f"uv run python run_pipeline.py data/your_docs/"
-                )
-                self._unavailable_tools[tool_name] = reason
-                continue
-
             if tool_class.requires_reranker and not reranker:
                 logger.warning(
                     f"Tool '{tool_name}' requires reranker but none provided. "
@@ -98,8 +83,6 @@ class ToolRegistry:
                 vector_store=vector_store,
                 embedder=embedder,
                 reranker=reranker,
-                graph_retriever=graph_retriever,
-                knowledge_graph=knowledge_graph,
                 context_assembler=context_assembler,
                 llm_provider=llm_provider,
                 config=config,

@@ -146,88 +146,6 @@
     "enable": false,
     "fusion_k": 60
   },
-  "knowledge_graph": {
-    "enable": false,
-    "extractor": "graphiti",
-    "llm_provider": "openai",
-    "llm_model": "gpt-4o-mini",
-    "backend": "neo4j",
-    "export_path": "./output/graphs/knowledge_graph.json",
-    "verbose": true,
-    "min_entity_confidence": 0.6,
-    "min_relationship_confidence": 0.5,
-    "enable_entity_extraction": true,
-    "enable_relationship_extraction": true,
-    "enable_cross_document_relationships": false,
-    "enable_temporal": true,
-    "enable_deduplication": true,
-    "max_entity_types": 55,
-    "batch_size": 20,
-    "max_retries": 3,
-    "retry_delay": 1.0,
-    "timeout": 300,
-    "log_path": "./logs/kg_extraction.log"
-  },
-  "entity_extraction": {
-    "temperature": 0.0,
-    "min_confidence": 0.6,
-    "extract_definitions": true,
-    "normalize": true,
-    "batch_size": 20,
-    "max_workers": 10,
-    "cache_results": true,
-    "include_examples": true,
-    "max_per_chunk": 50,
-    "enabled_types": null
-  },
-  "relationship_extraction": {
-    "temperature": 0.0,
-    "min_confidence": 0.5,
-    "extract_evidence": true,
-    "max_evidence_length": 200,
-    "within_chunk": true,
-    "cross_chunk": true,
-    "from_metadata": true,
-    "batch_size": 10,
-    "max_workers": 10,
-    "cache_results": true,
-    "max_per_entity": 100,
-    "enabled_types": null
-  },
-  "neo4j": {
-    "uri": "bolt://localhost:7687",
-    "username": "neo4j",
-    "password": "",
-    "database": "neo4j",
-    "max_connection_lifetime": 3600,
-    "max_connection_pool_size": 50,
-    "connection_timeout": 30,
-    "create_indexes": true,
-    "create_constraints": true
-  },
-  "entity_deduplication": {
-    "enable": true,
-    "use_embeddings": false,
-    "similarity_threshold": 0.9,
-    "use_acronym_expansion": false,
-    "acronym_fuzzy_threshold": 0.85,
-    "custom_acronyms": null,
-    "apoc_enabled": true,
-    "embedding_model": "text-embedding-3-large",
-    "embedding_batch_size": 100,
-    "cache_embeddings": true,
-    "create_constraints": true
-  },
-  "graph_storage": {
-    "backend": "simple",
-    "simple_store_path": "./data/graphs/simple_graph.json",
-    "export_json": true,
-    "export_path": "./data/graphs/knowledge_graph.json",
-    "deduplicate_entities": true,
-    "merge_similar_entities": false,
-    "similarity_threshold": 0.9,
-    "track_provenance": true
-  },
   "agent": {
     "model": "Qwen/Qwen2.5-72B-Instruct",
     "max_tokens": 8192,
@@ -235,7 +153,6 @@
     "enable_tool_validation": true,
     "debug_mode": false,
     "vector_store_path": "vector_db",
-    "knowledge_graph_path": "output/knowledge_graph.json",
     "enable_prompt_caching": true,
     "enable_context_management": true,
     "context_management_trigger": 50000,
@@ -247,23 +164,12 @@
     "enable_reranking": false,
     "reranker_candidates": 50,
     "reranker_model": "bge-reranker-large",
-    "enable_graph_boost": true,
-    "graph_boost_weight": 0.3,
     "max_document_compare": 3,
     "compliance_threshold": 0.7,
     "context_window": 2,
     "lazy_load_reranker": false,
-    "lazy_load_graph": true,
     "cache_embeddings": true,
     "hyde_num_hypotheses": 3
-  },
-  "graph_retrieval": {
-    "enable_graph_boost": true,
-    "graph_boost_weight": 0.3,
-    "enable_entity_extraction": true,
-    "enable_multi_hop": true,
-    "max_hop_depth": 2,
-    "fusion_mode": "weighted"
   },
   "cli": {
     "show_citations": true,
@@ -326,7 +232,6 @@
         "enable_prompt_caching": true,
         "tools": [
           "search",
-          "graphiti_search",
           "expand_context",
           "get_document_info"
         ],
@@ -339,8 +244,7 @@
         "timeout_seconds": 20,
         "enable_prompt_caching": true,
         "tools": [
-          "filtered_search",
-          "explain_results",
+          "search",
           "get_document_list"
         ],
         "system_prompt_file": "prompts/agents/classifier.txt"
@@ -352,10 +256,9 @@
         "timeout_seconds": 45,
         "enable_prompt_caching": true,
         "tools": [
-          "graphiti_search",
-          "assess_confidence",
-          "exact_match_search",
-          "hierarchical_search"
+          "search",
+          "expand_context",
+          "get_document_info"
         ],
         "system_prompt_file": "prompts/agents/compliance.txt"
       },
@@ -366,9 +269,9 @@
         "timeout_seconds": 45,
         "enable_prompt_caching": true,
         "tools": [
-          "multi_doc_synthesizer",
-          "similarity_search",
-          "get_chunk_context"
+          "search",
+          "expand_context",
+          "get_document_info"
         ],
         "system_prompt_file": "prompts/agents/risk_verifier.txt"
       },
@@ -379,9 +282,8 @@
         "timeout_seconds": 25,
         "enable_prompt_caching": true,
         "tools": [
-          "get_document_info",
-          "exact_match_search",
-          "get_chunk_context"
+          "search",
+          "get_document_info"
         ],
         "system_prompt_file": "prompts/agents/citation_auditor.txt"
       },
@@ -392,10 +294,9 @@
         "timeout_seconds": 45,
         "enable_prompt_caching": true,
         "tools": [
-          "hierarchical_search",
-          "graphiti_search",
-          "definition_aligner",
-          "multi_doc_synthesizer"
+          "search",
+          "expand_context",
+          "get_document_info"
         ],
         "system_prompt_file": "prompts/agents/requirement_extractor.txt"
       },
@@ -406,9 +307,9 @@
         "timeout_seconds": 60,
         "enable_prompt_caching": true,
         "tools": [
-          "browse_entities",
-          "graphiti_search",
-          "multi_doc_synthesizer"
+          "search",
+          "expand_context",
+          "get_document_info"
         ],
         "system_prompt_file": "prompts/agents/gap_synthesizer.txt"
       },
@@ -419,8 +320,8 @@
         "timeout_seconds": 30,
         "enable_prompt_caching": true,
         "tools": [
-          "list_available_tools",
-          "get_stats"
+          "get_stats",
+          "get_document_list"
         ],
         "system_prompt_file": "prompts/agents/report_generator.txt"
       }
@@ -740,7 +641,6 @@
     "timeouts": {
       "api_request": 60,
       "ollama_request": 30,
-      "graph_query": 60,
       "postgres_command": 60,
       "batch_api_poll": 30
     },
@@ -749,16 +649,11 @@
       "postgres_max_retries": 5
     },
     "pool_sizes": {
-      "postgres": 20,
-      "neo4j": 50
+      "postgres": 20
     },
     "batch_sizes": {
-      "entity_extraction": 20,
-      "relationship_extraction": 10,
       "embedding": 64,
-      "context_generation": 20,
-      "neo4j_operations": 1000,
-      "graph_builder": 500
+      "context_generation": 20
     },
     "retrieval": {
       "layer_default_k": {
@@ -771,9 +666,7 @@
     },
     "max_workers": {
       "summarization": 20,
-      "context_generation": 10,
-      "entity_extraction": 10,
-      "relationship_extraction": 10
+      "context_generation": 10
     },
     "cache": {
       "embedding_cache_max_size": 1000,
@@ -809,7 +702,6 @@
         "container_prefix": "sujbot_",
         "containers": [
           "sujbot_postgres",
-          "sujbot_neo4j",
           "sujbot_redis",
           "sujbot_backend",
           "sujbot_frontend",
@@ -822,7 +714,6 @@
         "container_prefix": "sujbot_dev_",
         "containers": [
           "sujbot_dev_postgres",
-          "sujbot_dev_neo4j",
           "sujbot_dev_redis",
           "sujbot_dev_backend",
           "sujbot_dev_frontend",
@@ -837,7 +728,6 @@
         "enabled": true,
         "containers": [
           "sujbot_postgres",
-          "sujbot_neo4j",
           "sujbot_redis",
           "sujbot_backend",
           "sujbot_frontend",

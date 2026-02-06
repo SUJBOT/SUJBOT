@@ -77,7 +77,6 @@ class SujbotIngestionPipeline:
     - Phase 3: Chunking (from legacy pipeline)
     - Phase 3.5: Entity Labeling (NEW - Gemini 2.5 Flash)
     - Phase 4: Embedding (from legacy pipeline)
-    - Phase 5: Knowledge Graph (from legacy pipeline)
     """
 
     def __init__(
@@ -111,14 +110,7 @@ class SujbotIngestionPipeline:
         self.redis_port = redis_port or int(os.getenv("REDIS_PORT", "6379"))
 
         # Entity labeling configuration
-        # OPTIMIZATION: Auto-disable if Knowledge Graph is enabled (redundant extraction)
-        if enable_entity_labeling and self.config.enable_knowledge_graph:
-            logger.info(
-                "Entity labeling auto-disabled (redundant with Knowledge Graph extraction)"
-            )
-            self.enable_entity_labeling = False
-        else:
-            self.enable_entity_labeling = enable_entity_labeling
+        self.enable_entity_labeling = enable_entity_labeling
         self.entity_labeling_batch_size = entity_labeling_batch_size
         self.entity_labeling_model = entity_labeling_model
 
@@ -235,7 +227,6 @@ class SujbotIngestionPipeline:
         Returns:
             Dict with pipeline results:
             - vector_store: VectorStoreAdapter
-            - knowledge_graph: KnowledgeGraph (if enabled)
             - chunks: Dict of labeled chunks
             - stats: Pipeline statistics
 
@@ -291,7 +282,6 @@ class SujbotIngestionPipeline:
 
         result = {
             "vector_store": legacy_result.get("vector_store"),
-            "knowledge_graph": legacy_result.get("knowledge_graph"),
             "stats": legacy_result.get("stats", {}),
         }
 

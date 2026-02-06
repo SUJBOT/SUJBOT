@@ -96,15 +96,11 @@ class ToolConfig:
     reranker_candidates: int = 50
     reranker_model: str = "bge-reranker-large"  # SOTA accuracy (was: ms-marco-mini)
 
-    # Graph settings
-    enable_graph_boost: bool = True
-    graph_boost_weight: float = 0.3
-
     # Analysis settings
     max_document_compare: int = 3
     compliance_threshold: float = 0.7
 
-    # Context expansion settings (for get_chunk_context tool)
+    # Context expansion settings (for expand_context tool)
     context_window: int = 2  # Number of chunks before/after for context expansion
 
     # Query expansion settings (for unified search tool)
@@ -116,7 +112,6 @@ class ToolConfig:
 
     # Performance
     lazy_load_reranker: bool = False  # Load reranker at startup for better tool availability
-    lazy_load_graph: bool = True
     cache_embeddings: bool = True
 
     def __post_init__(self):
@@ -127,8 +122,6 @@ class ToolConfig:
             raise ValueError(
                 f"reranker_candidates ({self.reranker_candidates}) must be >= default_k ({self.default_k})"
             )
-        if not 0.0 <= self.graph_boost_weight <= 1.0:
-            raise ValueError(f"graph_boost_weight must be in [0, 1], got {self.graph_boost_weight}")
         if not 0.0 <= self.compliance_threshold <= 1.0:
             raise ValueError(
                 f"compliance_threshold must be in [0, 1], got {self.compliance_threshold}"
@@ -197,7 +190,6 @@ class AgentConfig:
 
     # === Paths ===
     vector_store_path: Path = field(default_factory=lambda: Path("vector_db"))
-    knowledge_graph_path: Optional[Path] = None
 
     # === Embedding Configuration ===
     # Platform-aware embedding model selection (can override via EMBEDDING_MODEL env var)
@@ -205,7 +197,6 @@ class AgentConfig:
 
     # === Feature Flags ===
     enable_tool_validation: bool = True
-    enable_knowledge_graph: bool = False
 
     # === Prompt Caching (Anthropic) ===
     # Enable prompt caching to reduce costs by 90% and improve latency
@@ -309,13 +300,6 @@ class AgentConfig:
                 f"Run indexing pipeline first."
             )
 
-        # Knowledge graph validation
-        if self.enable_knowledge_graph and not self.knowledge_graph_path:
-            raise ValueError(
-                "Knowledge graph enabled but path not specified. "
-                "Set knowledge_graph_path in config."
-            )
-
         # Sub-configs are automatically validated via their __post_init__ methods
 
     @classmethod
@@ -328,7 +312,6 @@ class AgentConfig:
         - AGENT_MODEL: Model to use (default: claude-sonnet-4-5-20250929)
         - AGENT_MAX_TOKENS: Max output tokens (default: 4096, Gemini max: 8192)
         - VECTOR_STORE_PATH: Path to hybrid store
-        - KNOWLEDGE_GRAPH_PATH: Path to KG JSON (optional)
         - QUERY_EXPANSION_MODEL: LLM model for query expansion (default: gpt-4o-mini)
 
         Args:
@@ -350,11 +333,7 @@ class AgentConfig:
             query_expansion_model=query_expansion_model_env,
         )
 
-        # Load enable_knowledge_graph from environment
-        enable_kg_str = os.getenv("ENABLE_KNOWLEDGE_GRAPH", "false").lower()
-        enable_kg = enable_kg_str in ("true", "1", "yes")
-
-        # Load max_tokens from environment (NEW - for Gemini compatibility)
+        # Load max_tokens from environment (for Gemini compatibility)
         max_tokens = int(os.getenv("AGENT_MAX_TOKENS", "4096"))
 
         config = cls(
@@ -362,34 +341,13 @@ class AgentConfig:
             model=os.getenv("AGENT_MODEL", "claude-sonnet-4-5-20250929"),
             max_tokens=max_tokens,
             vector_store_path=Path(os.getenv("VECTOR_STORE_PATH", "vector_db")),
-            enable_knowledge_graph=enable_kg,
             tool_config=tool_config,
         )
-
-        # Auto-detect KG path BEFORE applying overrides
-        kg_path_from_env = None
-        kg_path_str = os.getenv("KNOWLEDGE_GRAPH_PATH")
-        if kg_path_str:
-            kg_path = Path(kg_path_str)
-            if kg_path.exists():
-                kg_path_from_env = kg_path
 
         # Apply overrides
         for key, value in overrides.items():
             if hasattr(config, key):
                 setattr(config, key, value)
-
-        # Set KG path after overrides
-        if kg_path_from_env:
-            config.knowledge_graph_path = kg_path_from_env
-            config.enable_knowledge_graph = True
-        elif config.enable_knowledge_graph and not config.knowledge_graph_path:
-            # Default to vector_store_path if KG enabled but no path specified
-            if config.vector_store_path:
-                default_kg_path = config.vector_store_path
-                if default_kg_path.exists():
-                    config.knowledge_graph_path = default_kg_path
-                    logger.info(f"Using vector store path for knowledge graphs: {default_kg_path}")
 
         return config
 
@@ -432,8 +390,6 @@ class AgentConfig:
             max_tokens=root_config.agent.max_tokens or 4096,
             temperature=root_config.agent.temperature,
             vector_store_path=Path(root_config.agent.vector_store_path),
-            knowledge_graph_path=Path(root_config.agent.knowledge_graph_path) if root_config.agent.knowledge_graph_path else None,
-            enable_knowledge_graph=root_config.knowledge_graph.enable,
             enable_tool_validation=root_config.agent.enable_tool_validation,
             enable_prompt_caching=root_config.agent.enable_prompt_caching,
             enable_context_management=root_config.agent.enable_context_management,

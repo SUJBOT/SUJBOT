@@ -27,8 +27,7 @@ from pydantic import Field
 
 logger = logging.getLogger(__name__)
 
-# Entity types from src/graph/gemini_kg_extractor.py (lines 26-48)
-# Kept in sync with KG extraction for consistent entity modeling
+# Entity types for legal document entity labeling
 ENTITY_TYPES = [
     # Legal entities
     "regulation",       # Laws, decrees, regulations

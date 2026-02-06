@@ -176,7 +176,7 @@ class VectorStoreError(StorageError):
 
 
 class GraphStoreError(StorageError):
-    """Error in knowledge graph operations."""
+    """Error in graph store operations (legacy, kept for compatibility)."""
     pass
 
 

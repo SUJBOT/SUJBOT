@@ -65,7 +65,7 @@ class TestRAGConfidenceScorer:
         assert confidence.overall_confidence >= 0.75
         assert confidence.top_score == 0.95
         assert confidence.score_gap > 0.10  # Clear winner
-        assert confidence.graph_support is True
+        assert confidence.graph_support is False  # Graph boost removed
         assert confidence.document_diversity < 0.5  # Single document
 
     def test_low_confidence_scenario(self, scorer):
@@ -208,47 +208,34 @@ class TestRAGConfidenceScorer:
         confidence_multi = scorer.score_retrieval(chunks_multi_doc)
         assert confidence_multi.document_diversity == 1.0  # 3 unique docs / 3 chunks
 
-    def test_graph_support_detection(self, scorer):
-        """Test knowledge graph support detection."""
-        # With graph support
-        chunks_with_graph = [
+    def test_graph_support_always_false(self, scorer):
+        """Test graph_support is always False (graph boost removed)."""
+        chunks = [
             {"chunk_id": "c1", "graph_boost": 0.1},
-            {"chunk_id": "c2", "graph_boost": 0.0},
-        ]
-
-        confidence_with = scorer.score_retrieval(chunks_with_graph)
-        assert confidence_with.graph_support is True
-
-        # Without graph support
-        chunks_without_graph = [
-            {"chunk_id": "c1", "graph_boost": 0.0},
             {"chunk_id": "c2"},
         ]
 
-        confidence_without = scorer.score_retrieval(chunks_without_graph)
-        assert confidence_without.graph_support is False
+        confidence = scorer.score_retrieval(chunks)
+        assert confidence.graph_support is False
 
     def test_score_extraction_priority(self, scorer):
-        """Test score extraction priority (rerank > boosted > rrf > score)."""
+        """Test score extraction priority (rerank > rrf > score)."""
         chunks = [
             {
                 "chunk_id": "c1",
                 "rerank_score": 0.9,
-                "boosted_score": 0.8,
                 "rrf_score": 0.7,
                 "score": 0.6,
             },
-            {"chunk_id": "c2", "boosted_score": 0.75, "rrf_score": 0.65, "score": 0.55},
-            {"chunk_id": "c3", "rrf_score": 0.70, "score": 0.60},
-            {"chunk_id": "c4", "score": 0.50},
+            {"chunk_id": "c2", "rrf_score": 0.65, "score": 0.55},
+            {"chunk_id": "c3", "score": 0.50},
         ]
 
         scores = scorer._extract_scores(chunks)
 
         assert scores[0] == 0.9  # rerank_score
-        assert scores[1] == 0.75  # boosted_score
-        assert scores[2] == 0.70  # rrf_score
-        assert scores[3] == 0.50  # score
+        assert scores[1] == 0.65  # rrf_score
+        assert scores[2] == 0.50  # score
 
     def test_to_dict_serialization(self, scorer):
         """Test confidence score serialization to dict."""
@@ -305,7 +292,6 @@ class TestRAGConfidenceScorer:
 
         assert methods["hybrid_search"] is True
         assert methods["reranking"] is True
-        assert methods["graph_boost"] is True
         assert methods["bm25_only"] is False
         assert methods["dense_only"] is False
 

@@ -31,10 +31,10 @@ class TestShouldStopEarly:
         assert runner._should_stop_early(history) is True
 
     def test_failed_search_variants_trigger_early_stop(self, runner):
-        """Different search tool names should all be recognized."""
+        """Consecutive failed search calls should trigger early stop."""
         history = [
-            {"tool": "section_search", "success": False},
-            {"tool": "similarity_search", "success": False},
+            {"tool": "search", "success": False},
+            {"tool": "search", "success": False},
         ]
         assert runner._should_stop_early(history) is True
 

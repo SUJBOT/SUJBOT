@@ -406,7 +406,6 @@ class AdaptiveFormatter:
             if include_score:
                 score = (
                     chunk.get("rerank_score")
-                    or chunk.get("boosted_score")
                     or chunk.get("rrf_score")
                     or chunk.get("score")
                     or 0.0

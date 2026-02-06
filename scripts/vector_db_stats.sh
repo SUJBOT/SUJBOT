@@ -137,34 +137,6 @@ fi
 
 echo ""
 
-# Check knowledge graph
-print_info "Knowledge Graph:"
-KG_FOUND=false
-for kg_file in "$VECTOR_STORE"/*_kg.json knowledge_graph.json; do
-    if [ -f "$kg_file" ]; then
-        SIZE=$(du -h "$kg_file" | cut -f1)
-        FILENAME=$(basename "$kg_file")
-        print_stat "$FILENAME" "$SIZE"
-        KG_FOUND=true
-
-        # Count entities and relationships
-        if command -v python3 &> /dev/null && command -v jq &> /dev/null; then
-            ENTITY_COUNT=$(jq '.entities | length' "$kg_file" 2>/dev/null || echo "N/A")
-            REL_COUNT=$(jq '.relationships | length' "$kg_file" 2>/dev/null || echo "N/A")
-            if [ "$ENTITY_COUNT" != "N/A" ]; then
-                print_stat "  Entities" "$ENTITY_COUNT"
-                print_stat "  Relationships" "$REL_COUNT"
-            fi
-        fi
-    fi
-done
-
-if [ "$KG_FOUND" = false ]; then
-    print_warning "No knowledge graph found"
-fi
-
-echo ""
-
 # Check configuration
 print_info "Configuration:"
 CONFIG_FILE="$VECTOR_STORE/hybrid_config.pkl"

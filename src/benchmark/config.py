@@ -31,7 +31,6 @@ class BenchmarkConfig:
     # Retrieval parameters (CRITICAL for apples-to-apples comparison)
     k: int = 5  # Number of chunks to retrieve
     enable_reranking: bool = True
-    enable_graph_boost: bool = False
     enable_hybrid_search: bool = True
 
     # Execution control

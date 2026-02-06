@@ -60,7 +60,7 @@ class RiskVerifierAgent(BaseAgent):
 
         try:
             # Run autonomous tool calling loop
-            # LLM decides which tools to call (similarity_search, compare_documents, etc.)
+            # LLM decides which tools to call (search, expand_context, get_document_info, etc.)
             result = await self._run_autonomous_tool_loop(
                 system_prompt=self.system_prompt,
                 state=state,

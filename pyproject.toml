@@ -70,10 +70,6 @@ dependencies = [
     "hdbscan>=0.8.33", # HDBSCAN clustering with cosine distance
     "umap-learn>=0.5.5", # UMAP dimensionality reduction for visualization
     "matplotlib>=3.5.0", # Plotting for cluster visualization
-    # Knowledge Graph (Neo4j backend + Graphiti)
-    "neo4j>=5.25.0", # Neo4j Python driver for graph database
-    "networkx>=3.0", # Graph algorithms and analysis
-    "graphiti-core==0.24.1", # Graphiti temporal KG with GPT-4o-mini extraction
     # CLI & Utilities
     "click>=8.1.0",
     "tqdm>=4.65.0",
@@ -85,7 +81,6 @@ dependencies = [
     "PyJWT>=2.8.0",  # JWT token generation/validation
     "pdf2image>=1.17.0",
     "json-repair>=0.54.1",
-    "pyvis>=0.3.2",
     "langchain-anthropic>=1.0.4",
     "textgrad>=0.1.8",
     "zss>=1.2.0",
@@ -114,13 +109,6 @@ voyage = [
     "voyageai>=0.2.0",
 ]
 
-# Knowledge Graph support
-knowledge-graph = [
-    "networkx>=3.0",
-    "neo4j>=5.25.0",
-    "pyvis>=0.3.0",  # Interactive graph visualization
-]
-
 # Language processing for BM25 hybrid search (PHASE 5B)
 language-support = [
     "spacy>=3.7.0",  # Lemmatization + stop words (best quality)
@@ -139,8 +127,6 @@ eval = [
 all = [
     "sentence-transformers>=2.2.0",
     "voyageai>=0.2.0",
-    "networkx>=3.0",
-    "neo4j>=5.0.0",
     "spacy>=3.7.0",
     "langdetect>=1.0.9",
     "nltk>=3.8.0",
@@ -184,8 +170,7 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 
-# Exclude manual tests (require optional dependencies like neo4j)
-# and deprecated test files with import errors
+# Exclude manual tests and deprecated test files with import errors
 norecursedirs = ["tests/manual", "tests/old", "tests/deprecated", ".git", "node_modules"]
 addopts = [
     "--ignore=tests/test_docling_extraction.py",

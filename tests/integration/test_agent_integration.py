@@ -153,8 +153,6 @@ def test_pipeline_imports():
         ("src.embedding_generator", "Embedding generator"),
         ("src.reranker", "Cross-encoder reranker"),
         ("src.context_assembly", "Context assembler"),
-        ("src.graph_retrieval", "Graph retrieval"),
-        ("src.graph.models", "Knowledge graph models"),
     ]
 
     all_ok = True

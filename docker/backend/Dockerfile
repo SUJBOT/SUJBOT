@@ -66,7 +66,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     langchain-text-splitters langgraph "langgraph-checkpoint-postgres>=2.0.0" langsmith \
     tiktoken "sentence-transformers>=5.1.2" "faiss-cpu>=1.7.4" "rank-bm25>=0.2.2" \
     numpy scikit-learn hdbscan "umap-learn>=0.5.5" matplotlib \
-    "neo4j>=5.25.0" networkx click tqdm \
+    click tqdm \
     "transformers>=4.34.0" accelerate "safetensors>=0.4.3" \
     # OCR support
     "rapidocr>=3.3.0" "opencv-python-headless>=4.5.1" \

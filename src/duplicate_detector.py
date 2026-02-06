@@ -2,7 +2,7 @@
 Document duplicate detection using semantic similarity.
 
 Detects semantically similar documents before indexing to prevent duplicates
-in PostgreSQL vector store and knowledge graph.
+in PostgreSQL vector store.
 
 Features:
 - Fast first-page text extraction (PyMuPDF, 50-200ms)

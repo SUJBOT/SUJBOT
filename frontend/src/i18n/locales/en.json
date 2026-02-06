@@ -118,7 +118,7 @@
   },
   "degradedMode": {
     "title": "Running in Degraded Mode",
-    "description": "Some features are unavailable: {{components}}. Search quality may be reduced without reranking. Knowledge graph features are disabled."
+    "description": "Some features are unavailable: {{components}}. Search quality may be reduced without reranking."
   },
   "common": {
     "loading": "Loading...",

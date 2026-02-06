@@ -198,10 +198,9 @@ def format_chunk_result(
                     result["section_title"] = f"Page {page_num}"
 
     if include_score:
-        # Prefer rerank_score, fall back to boosted_score, then rrf_score, then score
+        # Prefer rerank_score, fall back to rrf_score, then score
         score = (
             chunk.get("rerank_score")
-            or chunk.get("boosted_score")
             or chunk.get("rrf_score")
             or chunk.get("score")
             or 0.0

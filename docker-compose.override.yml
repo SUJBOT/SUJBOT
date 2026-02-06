@@ -21,12 +21,6 @@
 # =============================================================================
 
 services:
-  neo4j:
-    container_name: ${COMPOSE_PROJECT_NAME:-sujbot}_neo4j
-    ports:
-      - "${NEO4J_HTTP_PORT:-7474}:7474"   # Browser
-      - "${NEO4J_BOLT_PORT:-7687}:7687"   # Bolt
-
   postgres:
     container_name: ${COMPOSE_PROJECT_NAME:-sujbot}_postgres
     ports:
@@ -74,8 +68,6 @@ networks:
 # volumes:
 #   postgres_data:
 #     name: ${COMPOSE_PROJECT_NAME:-sujbot}_postgres_data
-#   neo4j_data:
-#     name: ${COMPOSE_PROJECT_NAME:-sujbot}_neo4j_data
 #   redis_data:
 #     name: ${COMPOSE_PROJECT_NAME:-sujbot}_redis_data
 #   model_cache:

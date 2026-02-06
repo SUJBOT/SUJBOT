@@ -154,7 +154,6 @@ class BaseTool(ABC):
     input_schema: type[ToolInput] = ToolInput
 
     # Metadata flags
-    requires_kg: bool = False  # Requires knowledge graph
     requires_reranker: bool = False  # Requires reranker
 
     def __init__(
@@ -162,8 +161,6 @@ class BaseTool(ABC):
         vector_store: Any,
         embedder: Any,
         reranker: Any = None,
-        graph_retriever: Any = None,
-        knowledge_graph: Any = None,
         context_assembler: Any = None,
         llm_provider: Any = None,
         config: Optional[Any] = None,
@@ -177,8 +174,6 @@ class BaseTool(ABC):
             vector_store: Vector store adapter
             embedder: Embedding generator
             reranker: Reranker (optional)
-            graph_retriever: Graph retriever (optional)
-            knowledge_graph: Knowledge graph (optional)
             context_assembler: Context assembler (optional)
             llm_provider: LLM provider for synthesis/HyDE (optional)
             config: Tool configuration (optional)
@@ -188,8 +183,6 @@ class BaseTool(ABC):
         self.vector_store = vector_store
         self.embedder = embedder
         self.reranker = reranker
-        self.graph_retriever = graph_retriever
-        self.knowledge_graph = knowledge_graph
         self.context_assembler = context_assembler
         self.llm_provider = llm_provider
         self.config = config or {}

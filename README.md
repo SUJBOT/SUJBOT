@@ -51,7 +51,7 @@ Production-ready RAG system based on 4 research papers implementing state-of-the
 - **PHASE 2:** Generic summary generation (150 chars, proven better than expert summaries)
 - **PHASE 3:** RCTS chunking (500 chars) + SAC (58% DRM reduction)
 - **PHASE 4:** Multi-layer indexing (3 separate FAISS indexes)
-- **PHASE 5:** Hybrid search (BM25+Dense+RRF) + Universal language support (Czech, 24+ languages) + Knowledge graph + Cross-encoder reranking + Query expansion
+- **PHASE 5:** Hybrid search (BM25+Dense+RRF) + Universal language support (Czech, 24+ languages) + Cross-encoder reranking + Query expansion
 - **PHASE 6:** Context assembly with citations
 
 **Agent (PHASE 7) - Multi-Agent System:**
@@ -61,8 +61,6 @@ Production-ready RAG system based on 4 research papers implementing state-of-the
 - **Unified cache abstractions** (`src/utils/cache.py`) - thread-safe `LRUCache` + `TTLCache`
 - **PostgreSQL checkpointing** for state persistence and recovery
 - **LangSmith observability** for full workflow tracing
-- **Graphiti temporal knowledge graph** (Neo4j + PostgreSQL hybrid)
-
 ---
 
 ## 🚀 Quick Start
@@ -423,7 +421,7 @@ Document (PDF/DOCX)
     ├─ 3 separate FAISS indexes (IndexFlatIP)
     └─ Cosine similarity search
     ↓
-[PHASE 5] Hybrid Search + Knowledge Graph + Reranking + Query Expansion
+[PHASE 5] Hybrid Search + Reranking + Query Expansion
     ├─ Query expansion (optional, num_expands=0-5)
     ├─ BM25 + Dense retrieval + RRF fusion
     │   ├─ Universal language support (auto-detection)
@@ -456,12 +454,12 @@ Document (PDF/DOCX)
 - `keyword_search` - Exact keyword matching
 - ... (6 more)
 
-**Advanced Tools (Quality, 1-3s):**
-- `hybrid_search` - BM25 + Dense + RRF
-- `graph_query` - Knowledge graph traversal
-- `reranked_search` - Cross-encoder reranking
-- `multi_query` - Query decomposition
-- ... (5 more)
+**5 RAG Tools:**
+- `search` - HyDE + Expansion Fusion (BM25 + Dense + RRF)
+- `expand_context` - Context window expansion
+- `get_document_info` - Document metadata and summaries
+- `get_document_list` - List indexed documents
+- `get_stats` - Retrieval statistics
 
 **Analysis Tools (Deep, 3-10s):**
 - `compare_documents` - Cross-document analysis
@@ -531,7 +529,6 @@ pipeline = IndexingPipeline(config)
 
 # Override specific settings
 config = IndexingConfig.from_env(
-    enable_knowledge_graph=True,
     enable_hybrid_search=True,
     speed_mode="eco"  # 50% cheaper for bulk indexing
 )
@@ -555,7 +552,6 @@ EMBEDDING_MODEL=text-embedding-3-large  # Windows
 # Pipeline
 SPEED_MODE=fast                         # fast or eco (50% savings)
 ENABLE_HYBRID_SEARCH=true
-ENABLE_KNOWLEDGE_GRAPH=true
 ENABLE_PROMPT_CACHING=true              # Anthropic only (90% savings)
 
 # OCR
@@ -585,7 +581,6 @@ IndexingConfig(
 
     # PHASE 5: Advanced Features
     enable_hybrid_search=True,
-    enable_knowledge_graph=True,
 
     # Performance
     speed_mode="fast",        # or "eco" for bulk indexing
@@ -607,9 +602,6 @@ MY_SUJBOT/
 │   ├── embedding_generator.py         # PHASE 4: Embeddings
 │   ├── faiss_vector_store.py          # PHASE 4: FAISS indexes
 │   ├── hybrid_search.py               # PHASE 5: BM25+Dense+RRF
-│   ├── graph/                         # PHASE 5: Knowledge graph
-│   │   ├── entity_extractor.py
-│   │   └── graph_store.py
 │   └── agent/                         # PHASE 7: RAG Agent
 │       ├── cli.py                     # Interactive CLI
 │       ├── config.py                  # Agent configuration

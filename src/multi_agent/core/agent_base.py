@@ -450,7 +450,7 @@ class BaseAgent(ABC):
 
         # Check 2: Multiple consecutive failed/empty searches
         failed_searches = 0
-        search_tools = {"search", "section_search", "similarity_search", "hierarchical_search"}
+        search_tools = {"search"}
 
         for call in reversed(tool_call_history[-3:]):
             tool_name = call.get("tool", "")
@@ -745,8 +745,7 @@ class BaseAgent(ABC):
 
                         # Critical tools that must succeed for valid results
                         critical_tools = {
-                            "hierarchical_search", "similarity_search", "graph_search",
-                            "get_document_info", "bm25_search", "hybrid_search"
+                            "search", "get_document_info",
                         }
 
                         if tool_name in critical_tools:
