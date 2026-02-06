@@ -39,6 +39,8 @@ ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 ENV NODE_OPTIONS="--max-old-space-size=2048"
 
 RUN npm run build && \
+    # PDF.js v5 hardcodes workerSrc="pdf.worker.mjs" — copy worker to document root
+    cp node_modules/pdfjs-dist/build/pdf.worker.min.mjs dist/pdf.worker.mjs && \
     # Cleanup to reduce image size
     rm -rf node_modules/.cache
 
