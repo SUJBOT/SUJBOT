@@ -38,7 +38,7 @@ from dotenv import load_dotenv
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-# Apply nest_asyncio early for Neo4j/graphiti compatibility
+# Apply nest_asyncio early to allow nested event loops
 import nest_asyncio
 nest_asyncio.apply()
 

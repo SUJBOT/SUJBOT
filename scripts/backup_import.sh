@@ -22,7 +22,6 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Container names
 POSTGRES_CONTAINER="sujbot_postgres"
-NEO4J_CONTAINER="sujbot_neo4j"
 REDIS_CONTAINER="sujbot_redis"
 
 # Check arguments
@@ -83,11 +82,9 @@ if [ -f "$BACKUP_DIR/postgres.sql" ]; then
         echo "  Dropping existing data..."
         # Note: DROP IF EXISTS with || true is OK here - we just verified connection works
         docker exec "$POSTGRES_CONTAINER" psql -U postgres -d sujbot -c "DROP SCHEMA IF EXISTS vectors CASCADE;" 2>/dev/null || true
-        docker exec "$POSTGRES_CONTAINER" psql -U postgres -d sujbot -c "DROP SCHEMA IF EXISTS graphs CASCADE;" 2>/dev/null || true
         docker exec "$POSTGRES_CONTAINER" psql -U postgres -d sujbot -c "DROP SCHEMA IF EXISTS checkpoints CASCADE;" 2>/dev/null || true
         docker exec "$POSTGRES_CONTAINER" psql -U postgres -d sujbot -c "DROP SCHEMA IF EXISTS metadata CASCADE;" 2>/dev/null || true
         docker exec "$POSTGRES_CONTAINER" psql -U postgres -d sujbot -c "DROP SCHEMA IF EXISTS bm25 CASCADE;" 2>/dev/null || true
-        docker exec "$POSTGRES_CONTAINER" psql -U postgres -d sujbot -c "DROP SCHEMA IF EXISTS graph CASCADE;" 2>/dev/null || true
         docker exec "$POSTGRES_CONTAINER" psql -U postgres -d sujbot -c "DROP SCHEMA IF EXISTS auth CASCADE;" 2>/dev/null || true
 
         echo "  Importing database dump..."
@@ -105,34 +102,8 @@ else
     echo -e "${YELLOW}  No postgres.sql found, skipping...${NC}"
 fi
 
-# 3. Restore Neo4j
-echo -e "${YELLOW}[3/6] Restoring Neo4j database...${NC}"
-if container_running "$NEO4J_CONTAINER"; then
-    if [ -f "$BACKUP_DIR/neo4j_backup.cypher" ]; then
-        # Import Cypher backup (pass password via env var)
-        if ! docker cp "$BACKUP_DIR/neo4j_backup.cypher" "$NEO4J_CONTAINER:/var/lib/neo4j/import/"; then
-            echo -e "${RED}  ERROR: Failed to copy Cypher file to Neo4j container${NC}"
-        elif docker exec -e NEO4J_PASSWORD="${NEO4J_PASSWORD:-neo4j}" "$NEO4J_CONTAINER" \
-            cypher-shell -u neo4j -p "\$NEO4J_PASSWORD" \
-            "CALL apoc.cypher.runFile('/var/lib/neo4j/import/neo4j_backup.cypher')" 2>/dev/null; then
-            echo -e "${GREEN}  Neo4j restored from Cypher export${NC}"
-        else
-            echo -e "${YELLOW}  WARNING: Neo4j Cypher import failed - may need manual import${NC}"
-        fi
-    elif [ -f "$BACKUP_DIR/neo4j_data.tar.gz" ]; then
-        echo -e "${YELLOW}  Neo4j data archive found - manual restore required${NC}"
-        echo "  1. Stop Neo4j: docker compose stop neo4j"
-        echo "  2. Extract: docker run --rm -v sujbot_neo4j_data:/data -v $BACKUP_DIR:/backup alpine tar -xzf /backup/neo4j_data.tar.gz -C /data"
-        echo "  3. Start Neo4j: docker compose up -d neo4j"
-    else
-        echo -e "${YELLOW}  No Neo4j backup found, skipping...${NC}"
-    fi
-else
-    echo -e "${YELLOW}  WARNING: Neo4j container not running, skipping...${NC}"
-fi
-
-# 4. Restore Redis
-echo -e "${YELLOW}[4/6] Restoring Redis snapshot...${NC}"
+# 3. Restore Redis
+echo -e "${YELLOW}[3/5] Restoring Redis snapshot...${NC}"
 if [ -f "$BACKUP_DIR/dump.rdb" ]; then
     if container_running "$REDIS_CONTAINER"; then
         if docker cp "$BACKUP_DIR/dump.rdb" "$REDIS_CONTAINER:/data/"; then
@@ -157,8 +128,8 @@ else
     echo -e "${YELLOW}  No Redis snapshot found, skipping...${NC}"
 fi
 
-# 5. Restore configuration files
-echo -e "${YELLOW}[5/6] Restoring configuration files...${NC}"
+# 4. Restore configuration files
+echo -e "${YELLOW}[4/5] Restoring configuration files...${NC}"
 cd "$PROJECT_DIR"
 
 if [ -f "$BACKUP_DIR/.env" ]; then
@@ -186,8 +157,8 @@ if [ -f "$BACKUP_DIR/docker-compose.override.yml" ]; then
     echo -e "${GREEN}  docker-compose.override.yml restored${NC}"
 fi
 
-# 6. Restore data directories
-echo -e "${YELLOW}[6/6] Restoring data directories...${NC}"
+# 5. Restore data directories
+echo -e "${YELLOW}[5/5] Restoring data directories...${NC}"
 
 # Helper function to restore a directory with proper error handling
 restore_directory() {

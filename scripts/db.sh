@@ -2,7 +2,7 @@
 # =============================================================================
 # SUJBOT Database Stack Management
 # =============================================================================
-# Manages shared database services (PostgreSQL, Neo4j, Redis, pgAdmin).
+# Manages shared database services (PostgreSQL, Redis, pgAdmin).
 # These run in system Docker and are shared by production and all development
 # instances.
 #
@@ -81,7 +81,6 @@ cmd_up() {
     echo ""
     echo "Access points:"
     echo "  PostgreSQL: localhost:5432 (or $(hostname -I | awk '{print $1}'):5432)"
-    echo "  Neo4j:      localhost:7687 (bolt), localhost:7474 (browser)"
     echo "  Redis:      localhost:6379"
     echo "  pgAdmin:    http://localhost:5050"
     echo ""
@@ -142,7 +141,7 @@ cmd_ps() {
 
     echo -e "${CYAN}=== DATABASE CONTAINERS ===${NC}"
     local output
-    output=$(docker ps --filter "name=sujbot_postgres" --filter "name=sujbot_neo4j" --filter "name=sujbot_redis" --filter "name=sujbot_pgadmin" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}")
+    output=$(docker ps --filter "name=sujbot_postgres" --filter "name=sujbot_redis" --filter "name=sujbot_pgadmin" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}")
     if [ -z "$output" ] || [ "$(echo "$output" | wc -l)" -le 1 ]; then
         echo -e "${YELLOW}No database containers running.${NC}"
         echo "Start with: ./scripts/db.sh up"
@@ -160,7 +159,7 @@ cmd_help() {
     echo "Usage: $0 <command>"
     echo ""
     echo "Commands:"
-    echo "  up       Start database services (postgres, neo4j, redis, pgadmin)"
+    echo "  up       Start database services (postgres, redis, pgadmin)"
     echo "  down     Stop database services (WARNING: affects all dev instances)"
     echo "  status   Show container status"
     echo "  logs     View logs (optional: service name)"
@@ -169,7 +168,6 @@ cmd_help() {
     echo ""
     echo "Access points (when running):"
     echo "  PostgreSQL: localhost:5432"
-    echo "  Neo4j:      localhost:7687 (bolt), localhost:7474 (browser)"
     echo "  Redis:      localhost:6379"
     echo "  pgAdmin:    http://localhost:5050"
 }

@@ -55,9 +55,7 @@ def main():
     for doc_file in doc_files:
         logger.info(f"  - {doc_file.name}")
 
-    # Load production config with KG disabled
     logger.info("\nConfiguration:")
-    logger.info("  - Knowledge Graph: DISABLED (per benchmark requirements)")
     logger.info("  - Hybrid Search: ENABLED (production setting)")
     logger.info("  - Reranking: Default from .env")
     logger.info(f"  - Output: {output_dir}")

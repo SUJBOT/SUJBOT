@@ -34,7 +34,7 @@ class RAGConfidenceScore:
         consensus_count: Number of high-confidence chunks
         bm25_dense_agreement: Correlation between BM25 and dense scores
         reranker_impact: How much reranker changed ranking
-        graph_support: Whether knowledge graph supports results
+        graph_support: Always False (graph boost removed)
         document_diversity: Diversity of source documents
         interpretation: Human-readable confidence level
         should_flag: Whether to flag for review
@@ -235,9 +235,8 @@ class RAGConfidenceScorer:
 
         Priority (highest to lowest):
         1. rerank_score: Cross-encoder reranker score (best for ranking)
-        2. boosted_score: Graph-boosted RRF score (includes KG relevance)
-        3. rrf_score: Reciprocal Rank Fusion score (BM25 + Dense fusion)
-        4. score: Fallback generic score (BM25 for search with search_method='bm25_only')
+        2. rrf_score: Reciprocal Rank Fusion score (BM25 + Dense fusion)
+        3. score: Fallback generic score (BM25 for search with search_method='bm25_only')
 
         Returns:
             List of normalized scores (0-1) from chunks, defaults to 0.0 if missing
@@ -246,7 +245,6 @@ class RAGConfidenceScorer:
         for chunk in chunks:
             score = (
                 chunk.get("rerank_score")
-                or chunk.get("boosted_score")
                 or chunk.get("rrf_score")
                 or chunk.get("score")
                 or 0.0
@@ -456,8 +454,8 @@ class RAGConfidenceScorer:
         # Typical spread: 0.0-0.2, invert (low spread = high confidence)
         spread_norm = max(0.0, 1.0 - (score_spread / 0.2))
 
-        # 6. Graph support (weight: 0.05) - Knowledge graph confirms?
-        graph_norm = 1.0 if graph_support else 0.5
+        # 6. Graph support (weight: 0.05) - Always 0.5 (graph boost removed)
+        graph_norm = 0.5
 
         # 7. Document diversity (weight: 0.05) - Single source?
         # Low diversity = high confidence (for legal docs)

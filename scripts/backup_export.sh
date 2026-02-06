@@ -22,7 +22,6 @@ ARCHIVE_NAME="sujbot_backup_$TIMESTAMP.tar.gz"
 
 # Container names
 POSTGRES_CONTAINER="sujbot_postgres"
-NEO4J_CONTAINER="sujbot_neo4j"
 REDIS_CONTAINER="sujbot_redis"
 
 echo -e "${GREEN}=== SUJBOT Backup Export ===${NC}"
@@ -59,40 +58,8 @@ else
     exit 1
 fi
 
-# 2. Neo4j dump
-echo -e "${YELLOW}[2/6] Exporting Neo4j database...${NC}"
-NEO4J_BACKUP_OK=false
-if container_running "$NEO4J_CONTAINER"; then
-    # Try APOC Cypher export first (pass password via env var to avoid process list exposure)
-    if docker exec -e NEO4J_PASSWORD="${NEO4J_PASSWORD:-neo4j}" "$NEO4J_CONTAINER" \
-        cypher-shell -u neo4j -p "\$NEO4J_PASSWORD" \
-        "CALL apoc.export.cypher.all('/var/lib/neo4j/import/backup.cypher', {format: 'plain'})" 2>/dev/null; then
-        if docker cp "$NEO4J_CONTAINER:/var/lib/neo4j/import/backup.cypher" "$BACKUP_DIR/neo4j_backup.cypher" 2>/dev/null; then
-            echo -e "${GREEN}  Neo4j export: $(du -h "$BACKUP_DIR/neo4j_backup.cypher" | cut -f1)${NC}"
-            NEO4J_BACKUP_OK=true
-        fi
-    fi
-
-    # Fallback: copy data directory as tar
-    if [ "$NEO4J_BACKUP_OK" = false ]; then
-        echo -e "${YELLOW}  Neo4j APOC export failed, trying data directory backup...${NC}"
-        if docker exec "$NEO4J_CONTAINER" tar -czf /tmp/neo4j_data.tar.gz -C /data . 2>/dev/null; then
-            if docker cp "$NEO4J_CONTAINER:/tmp/neo4j_data.tar.gz" "$BACKUP_DIR/" 2>/dev/null; then
-                echo -e "${GREEN}  Neo4j data: $(du -h "$BACKUP_DIR/neo4j_data.tar.gz" | cut -f1)${NC}"
-                NEO4J_BACKUP_OK=true
-            fi
-        fi
-    fi
-
-    if [ "$NEO4J_BACKUP_OK" = false ]; then
-        echo -e "${YELLOW}  WARNING: Neo4j backup failed (knowledge graph may need manual backup)${NC}"
-    fi
-else
-    echo -e "${YELLOW}  WARNING: Neo4j container not running, skipping...${NC}"
-fi
-
-# 3. Redis snapshot
-echo -e "${YELLOW}[3/6] Exporting Redis snapshot...${NC}"
+# 2. Redis snapshot
+echo -e "${YELLOW}[2/5] Exporting Redis snapshot...${NC}"
 if container_running "$REDIS_CONTAINER"; then
     # Trigger BGSAVE and check result
     BGSAVE_RESULT=$(docker exec "$REDIS_CONTAINER" redis-cli BGSAVE 2>&1)
@@ -117,8 +84,8 @@ else
     echo -e "${YELLOW}  WARNING: Redis container not running, skipping...${NC}"
 fi
 
-# 4. Configuration files
-echo -e "${YELLOW}[4/6] Copying configuration files...${NC}"
+# 3. Configuration files
+echo -e "${YELLOW}[3/5] Copying configuration files...${NC}"
 cd "$PROJECT_DIR"
 
 # .env (contains secrets!) - REQUIRED for backup
@@ -164,8 +131,8 @@ if [ -d "docker/postgres/init" ]; then
     echo -e "${GREEN}  SQL init scripts copied${NC}"
 fi
 
-# 5. Data directories
-echo -e "${YELLOW}[5/6] Copying data directories...${NC}"
+# 4. Data directories
+echo -e "${YELLOW}[4/5] Copying data directories...${NC}"
 
 # Source documents
 if [ -d "data" ]; then
@@ -197,8 +164,8 @@ if [ -d "dataset" ]; then
     echo -e "${GREEN}  dataset/: $(du -sh dataset | cut -f1)${NC}"
 fi
 
-# 6. Create archive
-echo -e "${YELLOW}[6/6] Creating archive...${NC}"
+# 5. Create archive
+echo -e "${YELLOW}[5/5] Creating archive...${NC}"
 cd "$PROJECT_DIR"
 tar -czf "$ARCHIVE_NAME" -C "$PROJECT_DIR" "backup_$TIMESTAMP"
 

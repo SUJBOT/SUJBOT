@@ -166,7 +166,6 @@ class BaseTool(ABC):
         config: Optional[Any] = None,
         vl_retriever: Any = None,
         page_store: Any = None,
-        **kwargs,
     ):
         """
         Initialize tool with dependencies.

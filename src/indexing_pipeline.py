@@ -4,10 +4,8 @@ PHASE 1-6: Complete Indexing Pipeline
 Orchestrates:
 1. PHASE 1-3: Extraction, hierarchy, summaries, chunking
 2. PHASE 4: Embedding generation + PostgreSQL pgvector indexing
-3. PHASE 5A: Knowledge Graph construction (optional)
-4. PHASE 5C: Cross-Encoder Reranking (optional)
-5. PHASE 5D: Graph-Vector Integration (optional)
-6. PHASE 6: Context Assembly for LLM (optional)
+3. PHASE 5C: Cross-Encoder Reranking (optional)
+4. PHASE 6: Context Assembly for LLM (optional)
 
 Supported formats: PDF, DOCX, PPTX, XLSX, HTML
 
@@ -15,7 +13,7 @@ Based on research:
 - LegalBench-RAG: Multi-Layer Embeddings (3 separate indexes)
 - HyDE: Gao et al. (2022) - Hypothetical Document Embeddings
 - Query Expansion: Vocabulary coverage via paraphrasing
-- Weighted Fusion: w_hyde=0.6, w_exp=0.4 (empirically optimized)
+- Weighted Fusion: w_orig=0.5, w_hyde=0.25, w_exp=0.25 (empirically optimized)
 
 Embedding model: Qwen3-Embedding-8B (4096 dims) via DeepInfra
 Storage: PostgreSQL with pgvector extension
@@ -87,7 +85,6 @@ def check_existing_components(document_id: str, connection_string: str = None) -
         Dict with:
             - exists: bool - Whether document exists in any component
             - has_dense: bool - Has vector embeddings in PostgreSQL
-            - has_kg: bool - Has Knowledge Graph
             - existing_doc_id: str - Actual doc_id found (may differ slightly)
     """
     import asyncio
@@ -245,8 +242,6 @@ class IndexingConfig:
         Environment Variables:
             SPEED_MODE: "fast" or "eco" (default: "fast")
             ENABLE_SEMANTIC_CLUSTERING: Enable semantic clustering (default: "false")
-            ENABLE_KNOWLEDGE_GRAPH: Enable KG construction (default: "true")
-
         Args:
             **overrides: Override specific fields
 
@@ -291,14 +286,13 @@ class IndexingPipeline:
     2. Generic summary generation (LLM)
     3. Multi-layer chunking + SAC (RCTS 512 tokens)
     4. Embedding + PostgreSQL pgvector indexing (3 separate indexes)
-    5A. Knowledge Graph construction (optional)
-    5D. Graph-vector integration (optional)
+    5C. Cross-Encoder Reranking (optional)
     6. Context assembly for LLM (optional)
 
     Retrieval (at query time):
     - HyDE: Hypothetical Document Embeddings
     - Query Expansion: 2 paraphrases for vocabulary coverage
-    - Weighted Fusion: w_hyde=0.6, w_exp=0.4
+    - Weighted Fusion: w_orig=0.5, w_hyde=0.25, w_exp=0.25
 
     Based on:
     - LegalBench-RAG (Pipitone & Alami, 2024)
@@ -354,7 +348,6 @@ class IndexingPipeline:
         2. Generate summaries (PHASE 2)
         3. Multi-layer chunking + SAC (PHASE 3)
         4. Embed + FAISS index (PHASE 4)
-        5. Build knowledge graph (PHASE 5A - optional)
 
         Args:
             document_path: Path to document file (PDF, DOCX, PPTX, XLSX, HTML)
@@ -515,7 +508,6 @@ class IndexingPipeline:
                 logger.info("=" * 80)
                 logger.info(f"   Document ID: {existing['existing_doc_id']}")
                 logger.info(f"   Vector embeddings: EXISTS")
-                logger.info(f"   Knowledge Graph: {'EXISTS' if existing['has_kg'] else 'MISSING'}")
                 logger.info("")
                 logger.info("[SKIPPED] Skipping re-indexing (document fully embedded)")
                 logger.info("=" * 80)

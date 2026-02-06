@@ -219,26 +219,23 @@ class TestRAGConfidenceScorer:
         assert confidence.graph_support is False
 
     def test_score_extraction_priority(self, scorer):
-        """Test score extraction priority (rerank > boosted > rrf > score)."""
+        """Test score extraction priority (rerank > rrf > score)."""
         chunks = [
             {
                 "chunk_id": "c1",
                 "rerank_score": 0.9,
-                "boosted_score": 0.8,
                 "rrf_score": 0.7,
                 "score": 0.6,
             },
-            {"chunk_id": "c2", "boosted_score": 0.75, "rrf_score": 0.65, "score": 0.55},
-            {"chunk_id": "c3", "rrf_score": 0.70, "score": 0.60},
-            {"chunk_id": "c4", "score": 0.50},
+            {"chunk_id": "c2", "rrf_score": 0.65, "score": 0.55},
+            {"chunk_id": "c3", "score": 0.50},
         ]
 
         scores = scorer._extract_scores(chunks)
 
         assert scores[0] == 0.9  # rerank_score
-        assert scores[1] == 0.75  # boosted_score
-        assert scores[2] == 0.70  # rrf_score
-        assert scores[3] == 0.50  # score
+        assert scores[1] == 0.65  # rrf_score
+        assert scores[2] == 0.50  # score
 
     def test_to_dict_serialization(self, scorer):
         """Test confidence score serialization to dict."""

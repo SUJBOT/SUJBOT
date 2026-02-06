@@ -48,8 +48,8 @@ class RequirementExtractorAgent(BaseAgent):
 
         Workflow:
         1. Identify target legal text (from extractor output or direct law reference)
-        2. Use hierarchical_search to retrieve relevant law sections
-        3. Use definition_aligner to identify legal terminology requiring alignment
+        2. Use search to retrieve relevant law sections
+        3. Use expand_context to get surrounding context for key provisions
         4. Decompose provisions into atomic requirements
         5. Output structured checklist for ComplianceAgent
 

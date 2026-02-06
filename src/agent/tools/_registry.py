@@ -55,7 +55,6 @@ class ToolRegistry:
         config=None,
         vl_retriever=None,
         page_store=None,
-        **kwargs,
     ) -> None:
         """
         Initialize all registered tool classes with dependencies.

@@ -140,7 +140,6 @@ def run_complete_pipeline(
     - Generic summaries
     - Contextual retrieval (SAC)
     - Hybrid search (BM25 + Dense + RRF)
-    - Knowledge graph extraction
     - Automatic merge with existing vector store
     - Entity labeling (when using LlamaIndex wrapper)
 
