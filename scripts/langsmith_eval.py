@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-LangSmith Evaluation Script for SUJBOT Multi-Agent System.
+LangSmith Evaluation Script for SUJBOT Single-Agent System.
 
-Evaluates the multi-agent RAG system using LangSmith's evaluation framework
+Evaluates the single-agent RAG system using LangSmith's evaluation framework
 with LLM-as-judge evaluators for semantic correctness, factual accuracy,
 and completeness.
 
@@ -279,11 +279,11 @@ def create_structured_evaluator(
 
 
 # =============================================================================
-# Multi-Agent Runner Integration
+# Single-Agent Runner Integration
 # =============================================================================
 
-class MultiAgentEvaluator:
-    """Wrapper for MultiAgentRunner that runs queries and returns answers."""
+class SingleAgentEvaluator:
+    """Wrapper for SingleAgentRunner that runs queries and returns answers."""
 
     def __init__(self, config: dict[str, Any]):
         self.config = config
@@ -291,19 +291,19 @@ class MultiAgentEvaluator:
         self._initialized = False
 
     async def initialize(self):
-        """Initialize the multi-agent runner."""
+        """Initialize the single-agent runner."""
         if self._initialized:
             return
 
-        from src.multi_agent.runner import MultiAgentRunner
+        from src.single_agent.runner import SingleAgentRunner
 
-        self.runner = MultiAgentRunner(self.config)
+        self.runner = SingleAgentRunner(self.config)
         await self.runner.initialize()
         self._initialized = True
-        logger.info("MultiAgentRunner initialized successfully")
+        logger.info("SingleAgentRunner initialized successfully")
 
     async def run_query(self, question: str) -> dict[str, Any]:
-        """Run a single query through the multi-agent system."""
+        """Run a single query through the single-agent system."""
         if not self._initialized:
             await self.initialize()
 
@@ -313,18 +313,13 @@ class MultiAgentEvaluator:
                 result = event
 
         if result is None:
-            return {"answer": "ERROR: No response from multi-agent system"}
-
-        # Extract tool usage from tool_executions
-        tool_executions = result.get("tool_executions", [])
-        tools_used = [te.get("tool_name", "unknown") for te in tool_executions]
+            return {"answer": "ERROR: No response from agent system"}
 
         return {
             "answer": result.get("final_answer", "ERROR: No final answer"),
             "success": result.get("success", False),
-            "agent_sequence": result.get("agent_sequence", []),
             "cost_cents": result.get("total_cost_cents", 0),
-            "tools_used": tools_used,
+            "tools_used": result.get("tools_used", []),
         }
 
     async def shutdown(self):
@@ -457,7 +452,7 @@ def wrap_evaluator(evaluator):
 
 async def run_evaluation(
     client: Client,
-    evaluator: MultiAgentEvaluator,
+    evaluator: SingleAgentEvaluator,
     dataset_name: str,
     evaluators: list[Any],
     eval_data: list[dict[str, Any]],
@@ -815,7 +810,7 @@ async def collect_results(results) -> list[dict[str, Any]]:
 def parse_args():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="Run LangSmith evaluation on SUJBOT multi-agent system",
+        description="Run LangSmith evaluation on SUJBOT single-agent system",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
@@ -913,7 +908,7 @@ async def main():
         return
 
     # Initialize evaluator
-    evaluator = MultiAgentEvaluator(config)
+    evaluator = SingleAgentEvaluator(config)
     await evaluator.initialize()
 
     try:

@@ -535,6 +535,25 @@ def create_fusion_retriever(
     return retriever
 
 
+def estimate_tokens_from_vl_result(num_pages: int, tokens_per_page: int = 1600) -> int:
+    """
+    Estimate token count for a VL search result including image overhead.
+
+    Anthropic charges ~1600 tokens per document page image.
+
+    Args:
+        num_pages: Number of page images in result
+        tokens_per_page: Tokens per page image (default: 1600)
+
+    Returns:
+        Estimated total tokens (images + text metadata)
+    """
+    image_tokens = num_pages * tokens_per_page
+    # ~50 tokens per page for text metadata (page_id, score, etc.)
+    metadata_tokens = num_pages * 50
+    return image_tokens + metadata_tokens
+
+
 def merge_chunk_lists(
     *chunk_lists: List[Dict], max_total: int = None, sort_by: str = "score"
 ) -> List[Dict]:

@@ -55,6 +55,8 @@ class ToolRegistry:
         context_assembler=None,
         llm_provider=None,
         config=None,
+        vl_retriever=None,
+        page_store=None,
     ) -> None:
         """
         Initialize all registered tool classes with dependencies.
@@ -70,6 +72,8 @@ class ToolRegistry:
             context_assembler: ContextAssembler (optional)
             llm_provider: LLM Provider (optional)
             config: ToolConfig
+            vl_retriever: VLRetriever for vision-language mode (optional)
+            page_store: PageStore for VL mode (optional)
         """
         for tool_name, tool_class in self._tool_classes.items():
             # Check requirements
@@ -99,6 +103,8 @@ class ToolRegistry:
                 context_assembler=context_assembler,
                 llm_provider=llm_provider,
                 config=config,
+                vl_retriever=vl_retriever,
+                page_store=page_store,
             )
 
             self._tools[tool_name] = tool_instance

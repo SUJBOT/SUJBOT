@@ -204,3 +204,81 @@ class BaseProvider(ABC):
             Provider identifier (e.g., "anthropic", "openai")
         """
         pass
+
+    def count_tokens(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]],
+        system: List[Dict[str, Any]] | str,
+    ) -> Optional[int]:
+        """
+        Count input tokens before sending a request (pre-call estimation).
+
+        Override in subclasses for provider-specific counting.
+        Default returns None (no counting available).
+
+        Args:
+            messages: Conversation history in Anthropic format
+            tools: Tool definitions in Anthropic format
+            system: System prompt (structured list or string)
+
+        Returns:
+            Estimated input token count, or None if not available
+        """
+        return None
+
+    @staticmethod
+    def _tiktoken_estimate(
+        messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]],
+        system: List[Dict[str, Any]] | str,
+    ) -> Optional[int]:
+        """
+        Estimate input tokens using tiktoken (cl100k_base).
+
+        Shared helper for OpenAI-compatible providers (SSOT).
+        Approximation only — does not account for provider-specific overhead.
+
+        Args:
+            messages: Conversation history
+            tools: Tool definitions
+            system: System prompt
+
+        Returns:
+            Approximate token count, or None if tiktoken unavailable
+        """
+        try:
+            import json
+
+            import tiktoken
+        except ImportError:
+            return None
+
+        encoding = tiktoken.get_encoding("cl100k_base")
+        total = 0
+
+        # System prompt
+        if isinstance(system, str):
+            total += len(encoding.encode(system))
+        elif isinstance(system, list):
+            for block in system:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    total += len(encoding.encode(block.get("text", "")))
+
+        # Messages
+        for msg in messages:
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                total += len(encoding.encode(content))
+            elif isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict):
+                        text = block.get("text", "") or block.get("content", "")
+                        if isinstance(text, str):
+                            total += len(encoding.encode(text))
+
+        # Tools
+        if tools:
+            total += len(encoding.encode(json.dumps(tools)))
+
+        return total

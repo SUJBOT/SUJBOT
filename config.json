@@ -1,4 +1,16 @@
 {
+  "architecture": "vl",
+  "vl": {
+    "jina_model": "jina-embeddings-v4",
+    "dimensions": 2048,
+    "default_k": 5,
+    "page_image_dpi": 150,
+    "page_image_format": "png",
+    "page_store_dir": "data/vl_pages",
+    "source_pdf_dir": "data",
+    "max_pages_per_query": 8,
+    "image_tokens_per_page": 1600
+  },
   "models": {
     "llm_model": "gpt-4o-mini",
     "llm_provider": "openai",
@@ -521,6 +533,14 @@
       "send_feedback_to_langsmith": true
     }
   },
+  "single_agent": {
+    "model": "claude-haiku-4-5-20251001",
+    "max_tokens": 4096,
+    "temperature": 0.3,
+    "max_iterations": 10,
+    "enable_prompt_caching": true,
+    "prompt_file": "prompts/agents/unified.txt"
+  },
   "model_registry": {
     "llm_models": {
       "haiku": {
@@ -593,41 +613,19 @@
         "pricing": {"input": 0.10, "output": 0.40},
         "context_window": 1000000
       },
-      "qwen-72b": {
-        "id": "Qwen/Qwen2.5-72B-Instruct",
+      "qwen-vl-32b": {
+        "id": "Qwen/Qwen2.5-VL-32B-Instruct",
         "provider": "deepinfra",
-        "pricing": {"input": 0.12, "output": 0.39},
-        "context_window": 131072
+        "pricing": {"input": 0.20, "output": 0.60},
+        "context_window": 128000,
+        "supports_vision": true
       },
-      "qwen-7b": {
-        "id": "Qwen/Qwen2.5-7B-Instruct",
+      "qwen3-vl-235b": {
+        "id": "Qwen/Qwen3-VL-235B-A22B-Instruct",
         "provider": "deepinfra",
-        "pricing": {"input": 0.04, "output": 0.10},
-        "context_window": 131072
-      },
-      "llama-4-scout": {
-        "id": "meta-llama/Llama-4-Scout-17B-16E-Instruct",
-        "provider": "deepinfra",
-        "pricing": {"input": 0.08, "output": 0.30},
-        "context_window": 512000
-      },
-      "minimax-m2": {
-        "id": "Qwen/Qwen2.5-72B-Instruct",
-        "provider": "deepinfra",
-        "pricing": {"input": 0.25, "output": 1.02},
-        "context_window": 1000000
-      },
-      "llama-70b": {
-        "id": "meta-llama/Meta-Llama-3.1-70B-Instruct",
-        "provider": "deepinfra",
-        "pricing": {"input": 0.40, "output": 0.40},
-        "context_window": 128000
-      },
-      "llama-8b": {
-        "id": "meta-llama/Meta-Llama-3.1-8B-Instruct",
-        "provider": "deepinfra",
-        "pricing": {"input": 0.03, "output": 0.05},
-        "context_window": 128000
+        "pricing": {"input": 0.20, "output": 0.88},
+        "context_window": 262144,
+        "supports_vision": true
       }
     },
     "embedding_models": {
@@ -706,6 +704,12 @@
         "provider": "deepinfra",
         "pricing": {"input": 0.03, "output": 0.0},
         "dimensions": 4096
+      },
+      "jina-v4": {
+        "id": "jina-embeddings-v4",
+        "provider": "jina",
+        "pricing": {"input": 0.00, "output": 0.00},
+        "dimensions": 2048
       }
     },
     "reranker_models": {
@@ -777,38 +781,24 @@
     }
   },
   "agent_variants": {
-    "opus_tier_agents": [
-      "orchestrator",
-      "compliance",
-      "extractor",
-      "requirement_extractor",
-      "gap_synthesizer"
-    ],
     "variants": {
       "premium": {
-        "display_name": "Premium (Opus + Sonnet)",
-        "opus_model": "claude-opus-4-5-20251101",
-        "default_model": "claude-sonnet-4-5-20250929"
+        "display_name": "Premium (Sonnet 4.5)",
+        "model": "claude-sonnet-4-5-20250929"
       },
       "cheap": {
         "display_name": "Cheap (Haiku 4.5)",
-        "opus_model": "claude-haiku-4-5-20251001",
-        "default_model": "claude-haiku-4-5-20251001"
+        "model": "claude-haiku-4-5-20251001"
       },
       "local": {
-        "display_name": "Local (Qwen 2.5 72B)",
-        "opus_model": "Qwen/Qwen2.5-72B-Instruct",
-        "default_model": "Qwen/Qwen2.5-72B-Instruct"
+        "display_name": "Local (Qwen3 VL 235B)",
+        "model": "Qwen/Qwen3-VL-235B-A22B-Instruct"
       }
     },
     "default_variant": "cheap",
     "deepinfra_supported_models": [
-      "Qwen/Qwen2.5-72B-Instruct",
-      "meta-llama/Llama-4-Scout-17B-16E-Instruct",
-      "meta-llama/Meta-Llama-3.1-70B-Instruct",
-      "meta-llama/Meta-Llama-3.1-8B-Instruct",
-      "Qwen/Qwen2.5-72B-Instruct",
-      "Qwen/Qwen2.5-7B-Instruct"
+      "Qwen/Qwen2.5-VL-32B-Instruct",
+      "Qwen/Qwen3-VL-235B-A22B-Instruct"
     ]
   },
   "security_monitoring": {

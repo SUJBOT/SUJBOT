@@ -45,7 +45,6 @@ class TestConfigSchema:
     def test_agent_variants_section_exists(self, config_data):
         """Verify agent_variants section exists in config.json."""
         assert "agent_variants" in config_data
-        assert "opus_tier_agents" in config_data["agent_variants"]
         assert "variants" in config_data["agent_variants"]
         assert "default_variant" in config_data["agent_variants"]
 
@@ -77,11 +76,11 @@ class TestConfigSchema:
         """Verify all variant models reference real model IDs."""
         variants = config_data["agent_variants"]["variants"]
         for variant_name, variant_config in variants.items():
-            assert "opus_model" in variant_config, f"Missing opus_model in {variant_name}"
-            assert "default_model" in variant_config, f"Missing default_model in {variant_name}"
+            assert "model" in variant_config, f"Missing model in {variant_name}"
+            assert "display_name" in variant_config, f"Missing display_name in {variant_name}"
             # Models should have version suffixes (not just aliases)
-            if "claude" in variant_config["opus_model"]:
-                assert "-" in variant_config["opus_model"], f"Model should have version: {variant_config['opus_model']}"
+            if "claude" in variant_config["model"]:
+                assert "-" in variant_config["model"], f"Model should have version: {variant_config['model']}"
 
 
 class TestModelRegistrySSoT:
@@ -124,18 +123,6 @@ class TestModelRegistrySSoT:
 class TestBackendConstantsSSoT:
     """Test that backend/constants reads from config.json."""
 
-    def test_opus_tier_agents_from_config(self):
-        """Verify OPUS_TIER_AGENTS matches config.json."""
-        from backend.constants import get_opus_tier_agents, reload_constants
-
-        reload_constants()  # Ensure fresh load
-        opus_agents = get_opus_tier_agents()
-
-        # Check expected agents are in the set
-        assert "orchestrator" in opus_agents
-        assert "compliance" in opus_agents
-        assert "extractor" in opus_agents
-
     def test_variant_config_from_config(self):
         """Verify VARIANT_CONFIG matches config.json."""
         from backend.constants import get_variant_config, reload_constants
@@ -148,26 +135,24 @@ class TestBackendConstantsSSoT:
         assert "cheap" in variants
         assert "local" in variants
 
-        # Check each variant has required fields
+        # Check each variant has required fields (single model per variant)
         for name, config in variants.items():
             assert "display_name" in config
-            assert "opus_model" in config
-            assert "default_model" in config
+            assert "model" in config
 
-    def test_get_agent_model_function(self):
-        """Verify get_agent_model returns correct models."""
-        from backend.constants import get_agent_model, get_opus_tier_agents
+    def test_get_variant_model_function(self):
+        """Verify get_variant_model returns correct models."""
+        from backend.constants import get_variant_model, reload_constants
 
-        opus_agents = get_opus_tier_agents()
+        reload_constants()
+        model = get_variant_model("premium")
+        assert "claude" in model.lower() or "sonnet" in model.lower()
 
-        # In premium mode, orchestrator should get opus model
-        opus_model = get_agent_model("premium", "orchestrator")
-        assert "opus" in opus_model.lower() or "claude" in opus_model.lower()
+        model = get_variant_model("cheap")
+        assert "haiku" in model.lower() or "claude" in model.lower()
 
-        # Non-opus agent should get default model
-        default_model = get_agent_model("premium", "classifier")
-        # Could be sonnet or another default
-        assert default_model is not None
+        model = get_variant_model("local")
+        assert "Qwen" in model or "qwen" in model.lower()
 
 
 class TestNoDuplicatePricing:

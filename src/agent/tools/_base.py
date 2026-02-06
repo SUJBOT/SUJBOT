@@ -167,6 +167,8 @@ class BaseTool(ABC):
         context_assembler: Any = None,
         llm_provider: Any = None,
         config: Optional[Any] = None,
+        vl_retriever: Any = None,
+        page_store: Any = None,
     ):
         """
         Initialize tool with dependencies.
@@ -180,6 +182,8 @@ class BaseTool(ABC):
             context_assembler: Context assembler (optional)
             llm_provider: LLM provider for synthesis/HyDE (optional)
             config: Tool configuration (optional)
+            vl_retriever: VL retriever for vision-language mode (optional)
+            page_store: Page image store for VL mode (optional)
         """
         self.vector_store = vector_store
         self.embedder = embedder
@@ -189,6 +193,8 @@ class BaseTool(ABC):
         self.context_assembler = context_assembler
         self.llm_provider = llm_provider
         self.config = config or {}
+        self.vl_retriever = vl_retriever
+        self.page_store = page_store
 
         # Statistics
         self.execution_count = 0
@@ -228,6 +234,7 @@ class BaseTool(ABC):
 
         # Track API cost delta (before tool execution)
         from ...cost_tracker import get_global_tracker
+
         cost_tracker = get_global_tracker()
         cost_before = cost_tracker.get_total_cost()
 
@@ -364,6 +371,10 @@ class BaseTool(ABC):
             "total_time_ms": round(self.total_time_ms, 2),
             "avg_time_ms": round(avg_time, 2),
         }
+
+    def _is_vl_mode(self) -> bool:
+        """Check if VL (Vision-Language) architecture is active."""
+        return self.vl_retriever is not None and self.page_store is not None
 
     def get_claude_sdk_definition(self) -> Dict[str, Any]:
         """

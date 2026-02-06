@@ -65,8 +65,8 @@ FROM nginx:alpine AS production
 # Copy built static files from builder
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Copy custom Nginx configuration (commented out - using default nginx config)
-# COPY ../docker/nginx/nginx.conf /etc/nginx/nginx.conf
+# Copy custom Nginx configuration with SPA fallback
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 # Create nginx user for non-root execution
 RUN chown -R nginx:nginx /usr/share/nginx/html && \

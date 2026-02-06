@@ -16,7 +16,7 @@ Features:
 
 import json
 import logging
-from typing import Any, Dict, Iterator, List
+from typing import Any, Dict, Iterator, List, Optional
 
 import openai
 from langsmith.wrappers import wrap_openai
@@ -400,6 +400,15 @@ class OpenAIProvider(BaseProvider):
         old_model = self.model
         self.model = model
         logger.info(f"Model changed: {old_model} → {model}")
+
+    def count_tokens(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]],
+        system: List[Dict[str, Any]] | str,
+    ) -> Optional[int]:
+        """Count input tokens using tiktoken approximation."""
+        return self._tiktoken_estimate(messages, tools, system)
 
     def get_provider_name(self) -> str:
         """Get provider name."""

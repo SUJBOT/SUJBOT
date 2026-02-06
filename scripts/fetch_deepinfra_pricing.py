@@ -229,10 +229,9 @@ def get_configured_models() -> list[str]:
 
         # Get variant models
         for variant in agent_variants.get("variants", {}).values():
-            for key in ["opus_model", "default_model"]:
-                model = variant.get(key, "")
-                if "/" in model:  # HuggingFace-style path = DeepInfra model
-                    models.add(model)
+            model = variant.get("model", "")
+            if "/" in model:  # HuggingFace-style path = DeepInfra model
+                models.add(model)
 
         return list(models)
     except json.JSONDecodeError as e:

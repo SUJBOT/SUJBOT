@@ -19,9 +19,12 @@ from typing import List, Literal, Optional
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+# Architecture mode
+ArchitectureMode = Literal["ocr", "vl"]
+
 # Type alias for providers
 LLMProvider = Literal["anthropic", "openai", "google", "deepinfra"]
-EmbeddingProvider = Literal["openai", "deepinfra", "voyage", "huggingface"]
+EmbeddingProvider = Literal["openai", "deepinfra", "voyage", "huggingface", "jina"]
 
 
 # =============================================================================
@@ -1191,22 +1194,16 @@ class AgentVariantModelConfig(BaseModel):
     """Single agent variant configuration (premium/cheap/local)."""
 
     display_name: str = Field(..., description="Human-readable variant name")
-    opus_model: str = Field(..., description="Model for opus-tier agents")
-    default_model: str = Field(..., description="Model for other agents")
+    model: str = Field(..., description="Model identifier for this variant")
 
 
 class AgentVariantsConfig(BaseModel):
     """
-    Agent variant tier configuration - SSOT for tiered model selection.
+    Agent variant configuration - SSOT for model selection.
 
-    Previously hardcoded in backend/constants.py as VARIANT_CONFIG.
-    Used by multi-agent orchestrator for dynamic model selection.
+    Each variant maps to a single model (no per-agent tiering).
     """
 
-    opus_tier_agents: list[str] = Field(
-        ...,
-        description="Agents that use opus_model instead of default_model"
-    )
     variants: dict[str, AgentVariantModelConfig] = Field(
         ...,
         description="Variant configurations keyed by variant name"
@@ -1224,6 +1221,55 @@ class AgentVariantsConfig(BaseModel):
 # ============================================================================
 # End of SSOT Configuration
 # ============================================================================
+
+
+class VLConfig(BaseModel):
+    """Vision-Language architecture configuration."""
+
+    jina_model: str = Field(
+        default="jina-embeddings-v4",
+        description="Jina embedding model for VL page embeddings"
+    )
+    dimensions: int = Field(
+        default=2048,
+        ge=1,
+        description="Jina embedding dimensions"
+    )
+    default_k: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description="Default number of pages to retrieve"
+    )
+    page_image_dpi: int = Field(
+        default=150,
+        ge=72,
+        le=600,
+        description="DPI for PDF page rendering"
+    )
+    page_image_format: Literal["png", "jpg"] = Field(
+        default="png",
+        description="Image format for rendered pages"
+    )
+    page_store_dir: str = Field(
+        default="data/vl_pages",
+        description="Directory for rendered page images"
+    )
+    source_pdf_dir: str = Field(
+        default="data",
+        description="Directory containing source PDFs"
+    )
+    max_pages_per_query: int = Field(
+        default=8,
+        ge=1,
+        le=20,
+        description="Maximum page images to include in a single LLM call"
+    )
+    image_tokens_per_page: int = Field(
+        default=1600,
+        ge=100,
+        description="Estimated tokens per page image (Anthropic vision API)"
+    )
 
 
 class PipelineConfig(BaseModel):
@@ -1253,6 +1299,14 @@ class RootConfig(BaseModel):
         extra="allow",  # Allow unknown fields (for backwards compatibility with multi_agent, storage, etc.)
     )
 
+    architecture: Optional[ArchitectureMode] = Field(
+        default="ocr",
+        description="RAG architecture mode: 'ocr' (text chunking) or 'vl' (vision-language page images)"
+    )
+    vl: Optional[VLConfig] = Field(
+        default=None,
+        description="Vision-Language configuration (only used when architecture='vl')"
+    )
     api_keys: APIKeysConfig = Field(default_factory=APIKeysConfig)
     models: ModelsConfig
     extraction: ExtractionConfig

@@ -14,7 +14,8 @@ Exception Hierarchy:
     ├── AgentError → AgentInitializationError, AgentExecutionError, OrchestratorError,
     │                ToolHallucinationError, AgentTimeoutError, MaxIterationsError
     ├── EvaluationError → JudgeError, TrajectoryError, FeedbackSubmissionError
-    └── RetrievalError → EmbeddingError, SearchError
+    ├── RetrievalError → EmbeddingError, SearchError
+    └── VLError → JinaAPIError, PageRenderError
 
 Usage:
     from src.exceptions import (
@@ -258,6 +259,25 @@ class EmbeddingError(RetrievalError):
 
 class SearchError(RetrievalError):
     """Error performing search."""
+    pass
+
+
+# =============================================================================
+# Vision-Language Errors
+# =============================================================================
+
+class VLError(SujbotError):
+    """Vision-Language pipeline error."""
+    pass
+
+
+class JinaAPIError(VLError):
+    """Jina Embeddings API error."""
+    pass
+
+
+class PageRenderError(VLError):
+    """PDF page rendering error."""
     pass
 
 

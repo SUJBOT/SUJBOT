@@ -599,6 +599,16 @@ class BaseAgent(ABC):
         for iteration in range(max_iterations):
             self.logger.info(f"Autonomous loop iteration {iteration + 1}/{max_iterations}")
 
+            # Pre-call token counting (debug-level, never blocks the flow)
+            pre_call_tokens = provider.count_tokens(
+                messages=messages, tools=tool_schemas, system=cacheable_system
+            )
+            if pre_call_tokens is not None:
+                self.logger.debug(
+                    f"Pre-call token count: {pre_call_tokens} input tokens "
+                    f"(agent={self.config.name}, iteration={iteration + 1})"
+                )
+
             # Call LLM with tools (measure response time)
             llm_start_time = time.time()
             try:
@@ -751,16 +761,45 @@ class BaseAgent(ABC):
                                 f"Critical tool failure surfaced to user: {tool_name}"
                             )
 
-                    # Summarize tool result content to reduce token bloat
-                    raw_content = str(result.get("data", "")) if result.get("success", False) else f"Error: {result.get('error', 'Unknown error')}"
-                    summarized_content = self._summarize_tool_result_for_context(raw_content)
+                    # Check for VL multimodal page images in tool result metadata
+                    page_images = result.get("metadata", {}).get("page_images") if result.get("success", False) else None
 
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": tool_use.get('id'),
-                        "content": summarized_content,
-                        "is_error": not result.get("success", False)  # Add error flag for debugging
-                    })
+                    if page_images:
+                        # VL mode: build structured multimodal content blocks
+                        content_blocks = []
+                        for page in page_images:
+                            content_blocks.append({
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": page.get("media_type", "image/png"),
+                                    "data": page["base64_data"],
+                                },
+                            })
+                            content_blocks.append({
+                                "type": "text",
+                                "text": (
+                                    f"[Page {page.get('page_number', '?')} from "
+                                    f"{page.get('document_id', 'unknown')}, "
+                                    f"score: {page.get('score', 0):.3f}]"
+                                ),
+                            })
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": tool_use.get('id'),
+                            "content": content_blocks,
+                        })
+                    else:
+                        # OCR mode (or non-search tools): text-only result
+                        raw_content = str(result.get("data", "")) if result.get("success", False) else f"Error: {result.get('error', 'Unknown error')}"
+                        summarized_content = self._summarize_tool_result_for_context(raw_content)
+
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": tool_use.get('id'),
+                            "content": summarized_content,
+                            "is_error": not result.get("success", False)  # Add error flag for debugging
+                        })
 
                     # Build result summary for evaluation tracking
                     result_data = result.get("data", "") if result.get("success", False) else result.get("error", "Unknown error")

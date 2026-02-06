@@ -15,18 +15,30 @@ from ._utils import format_chunk_result
 logger = logging.getLogger(__name__)
 
 
-
 class ExpandContextInput(ToolInput):
     """Input for unified expand_context tool."""
 
-    chunk_ids: List[str] = Field(..., description="List of chunk IDs to expand")
+    chunk_ids: List[str] = Field(
+        ...,
+        description=(
+            "List of chunk IDs (OCR mode) or page IDs (VL mode, format: {doc_id}_p{NNN}) to expand"
+        ),
+    )
     expansion_mode: str = Field(
         ...,
-        description="Expansion mode: 'adjacent' (before/after chunks), 'section' (same section), 'similarity' (semantically similar), 'hybrid' (section + similarity)",
+        description=(
+            "Expansion mode: 'adjacent' (before/after chunks/pages), "
+            "'section' (same section, OCR only), 'similarity' (semantically similar, OCR only), "
+            "'hybrid' (section + similarity, OCR only). "
+            "In VL mode, all modes fall back to 'adjacent' (neighboring pages)."
+        ),
     )
-    k: int = Field(3, description="Number of additional chunks per input chunk", ge=1, le=10)
-
-
+    k: int = Field(
+        3,
+        description="Number of additional chunks/pages per input (in each direction for adjacent)",
+        ge=1,
+        le=10,
+    )
 
 
 @register_tool
@@ -36,33 +48,30 @@ class ExpandContextTool(BaseTool):
     name = "expand_context"
     description = "Expand chunk context"
     detailed_help = """
-    Expand chunks with additional surrounding or related context.
+    Expand chunks/pages with additional surrounding or related context.
 
-    **Expansion modes:**
+    **OCR mode expansion modes:**
     - 'adjacent': Chunks immediately before/after (linear context)
     - 'section': All chunks from same section
     - 'similarity': Semantically similar chunks
     - 'hybrid': Combination of section + similarity
 
-    **When to use:**
-    - Need more context around a specific chunk
-    - Answer requires surrounding text
-    - Chunk alone is insufficient
+    **VL mode:**
+    - All modes fall back to 'adjacent' (neighboring pages by page_number)
+    - Input: page IDs (format: {doc_id}_p{NNN})
+    - Returns: adjacent page images as base64 for multimodal LLM
 
     **Best practices:**
     - Use 'adjacent' for simple before/after context
-    - Use 'section' to see full section around chunk
-    - Use 'similarity' to find related content elsewhere
-    - Use 'hybrid' for comprehensive context
     - Start with k=3, increase if needed
-
-    **Method:** Metadata lookup + embeddings (similarity mode)
-    
     """
 
     input_schema = ExpandContextInput
 
     def execute_impl(self, chunk_ids: List[str], expansion_mode: str, k: int = 3) -> ToolResult:
+        if self._is_vl_mode():
+            return self._execute_vl(page_ids=chunk_ids, expansion_mode=expansion_mode, k=k)
+
         try:
             # Get Layer 3 metadata
             layer3_chunks = []
@@ -204,11 +213,7 @@ class ExpandContextTool(BaseTool):
 
         # Find ALL chunks from same document (NOT filtered by section_id)
         # This allows finding adjacent content even across section boundaries
-        same_doc = [
-            chunk
-            for chunk in all_chunks
-            if chunk.get("document_id") == document_id
-        ]
+        same_doc = [chunk for chunk in all_chunks if chunk.get("document_id") == document_id]
 
         # Sort by chunk_id numerically (L3_266 < L3_267 < L3_268)
         same_doc.sort(key=lambda x: extract_chunk_num(x.get("chunk_id", "")))
@@ -318,3 +323,98 @@ class ExpandContextTool(BaseTool):
             logger.error(f"Similarity expansion failed: {e}", exc_info=True)
             raise
 
+    # =========================================================================
+    # VL Mode — page-based expansion
+    # =========================================================================
+
+    def _execute_vl(
+        self,
+        page_ids: List[str],
+        expansion_mode: str,
+        k: int = 3,
+    ) -> ToolResult:
+        """
+        VL mode: expand page context by returning adjacent pages.
+
+        In VL mode, only 'adjacent' expansion is meaningful (pages ± k).
+        Other modes (section, similarity, hybrid) fall back to adjacent.
+        """
+        if expansion_mode != "adjacent":
+            logger.info(f"VL mode: '{expansion_mode}' not supported, falling back to 'adjacent'")
+
+        try:
+            from ...vl.page_store import PageStore
+
+            expanded_results = []
+            all_page_images = []
+
+            for page_id in page_ids:
+                # Parse page_id → (document_id, page_number)
+                try:
+                    document_id, page_number = PageStore.page_id_to_components(page_id)
+                except ValueError as e:
+                    logger.warning(f"Invalid page_id '{page_id}': {e}")
+                    continue
+
+                # Query adjacent pages from PostgreSQL
+                adjacent_pages = self.vector_store.get_adjacent_vl_pages(
+                    document_id=document_id,
+                    page_number=page_number,
+                    k=k,
+                )
+
+                # Load base64 images for multimodal injection
+                for page in adjacent_pages:
+                    adj_page_id = page["page_id"]
+                    try:
+                        b64_data = self.page_store.get_image_base64(adj_page_id)
+                        all_page_images.append(
+                            {
+                                "page_id": adj_page_id,
+                                "base64_data": b64_data,
+                                "media_type": "image/png",
+                                "page_number": page["page_number"],
+                                "document_id": page["document_id"],
+                                "position": (
+                                    "before" if page["page_number"] < page_number else "after"
+                                ),
+                            }
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to load image for {adj_page_id}: {e}")
+
+                expansion = {
+                    "target_page_id": page_id,
+                    "document_id": document_id,
+                    "page_number": page_number,
+                    "expanded_pages": [
+                        {
+                            "page_id": p["page_id"],
+                            "document_id": p["document_id"],
+                            "page_number": p["page_number"],
+                            "position": "before" if p["page_number"] < page_number else "after",
+                        }
+                        for p in adjacent_pages
+                    ],
+                    "expansion_count": len(adjacent_pages),
+                }
+                expanded_results.append(expansion)
+
+            # Collect unique document citations
+            citations = list({r["document_id"] for r in expanded_results})
+
+            return ToolResult(
+                success=True,
+                data={"expansions": expanded_results, "expansion_mode": "adjacent"},
+                citations=citations,
+                metadata={
+                    "page_count": len(page_ids),
+                    "expansion_mode": "adjacent",
+                    "mode": "vl",
+                    "page_images": all_page_images,
+                },
+            )
+
+        except Exception as e:
+            logger.error(f"VL expand context failed: {e}", exc_info=True)
+            return ToolResult(success=False, data=None, error=str(e))

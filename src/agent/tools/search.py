@@ -27,7 +27,7 @@ class SearchInput(ToolInput):
     query: str = Field(..., description="Natural language search query")
     k: int = Field(
         10,
-        description="Number of results to return (default: 10, optimized for token efficiency)",
+        description="Number of results to return (default: 10 for OCR, 5 for VL mode — page images are ~16x larger than text chunks)",
         ge=1,
         le=100,
     )
@@ -102,7 +102,7 @@ class SearchTool(BaseTool):
         filter_document: Optional[str] = None,
     ) -> ToolResult:
         """
-        Execute HyDE + Expansion fusion search.
+        Execute search — dispatches to VL or OCR mode based on architecture config.
 
         Args:
             query: Natural language query
@@ -110,8 +110,101 @@ class SearchTool(BaseTool):
             filter_document: Optional document ID filter
 
         Returns:
-            ToolResult with formatted chunks and citations
+            ToolResult with formatted chunks/pages and citations
         """
+        if self._is_vl_mode():
+            # VL pages are ~1600 tokens each vs ~100 for text chunks;
+            # default to 5 unless the caller explicitly requested more
+            vl_k = min(k, 5) if k == 10 else k
+            return self._execute_vl(query, vl_k, filter_document)
+        return self._execute_ocr(query, k, filter_document)
+
+    def _execute_vl(
+        self,
+        query: str,
+        k: int = 5,
+        filter_document: Optional[str] = None,
+    ) -> ToolResult:
+        """
+        VL mode: search page embeddings, return page images for multimodal LLM.
+
+        Returns ToolResult with:
+        - data: list of {page_id, document_id, page_number, score}
+        - metadata.page_images: list of {page_id, base64_data, media_type, page_number, document_id, score}
+        """
+        logger.info(f"VL search: '{query[:50]}...' (k={k})")
+
+        try:
+            results = self.vl_retriever.search(
+                query=query,
+                k=k,
+                document_filter=filter_document,
+            )
+
+            # Build text data for logging/history
+            formatted = []
+            page_images = []
+
+            for r in results:
+                formatted.append(
+                    {
+                        "page_id": r.page_id,
+                        "document_id": r.document_id,
+                        "page_number": r.page_number,
+                        "score": round(r.score, 4),
+                    }
+                )
+
+                # Load base64 image for multimodal injection
+                try:
+                    b64_data = self.page_store.get_image_base64(r.page_id)
+                    page_images.append(
+                        {
+                            "page_id": r.page_id,
+                            "base64_data": b64_data,
+                            "media_type": "image/png",
+                            "page_number": r.page_number,
+                            "document_id": r.document_id,
+                            "score": round(r.score, 4),
+                        }
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to load image for {r.page_id}: {e}")
+
+            result_metadata = {
+                "query": query,
+                "k": k,
+                "filter_document": filter_document,
+                "search_method": "vl_jina_v4",
+                "final_count": len(formatted),
+                "page_images": page_images,
+            }
+
+            return ToolResult(
+                success=True,
+                data=formatted,
+                citations=[
+                    f"[{i+1}] {r['document_id']} p.{r['page_number']} (score: {r['score']:.3f})"
+                    for i, r in enumerate(formatted)
+                ],
+                metadata=result_metadata,
+            )
+
+        except Exception as e:
+            logger.error(f"VL search error: {e}", exc_info=True)
+            return ToolResult(
+                success=False,
+                data=None,
+                error=f"VL search failed: {type(e).__name__}: {e}",
+            )
+
+    def _execute_ocr(
+        self,
+        query: str,
+        k: int = 10,
+        filter_document: Optional[str] = None,
+    ) -> ToolResult:
+        """OCR mode: HyDE + Expansion Fusion search (original implementation)."""
         logger.info(f"Fusion search: '{query[:50]}...' (k={k})")
 
         try:
@@ -131,8 +224,7 @@ class SearchTool(BaseTool):
 
             # Generate citations
             citations = [
-                generate_citation(c, i + 1, format="inline")
-                for i, c in enumerate(formatted)
+                generate_citation(c, i + 1, format="inline") for i, c in enumerate(formatted)
             ]
 
             # Build metadata

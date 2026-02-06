@@ -880,18 +880,17 @@ def validate_pricing_coverage(config: Any) -> List[str]:
         if not _has_pricing(model):
             missing.append(f"deepinfra/{model}")
 
-    # Check variant models (opus_model, default_model)
+    # Check variant models
     for variant_name, variant in (variants.items() if isinstance(variants, dict) else []):
         # Handle both dict and Pydantic object
         variant_dict = variant if isinstance(variant, dict) else variant.model_dump() if hasattr(variant, "model_dump") else {}
-        for key in ["opus_model", "default_model"]:
-            model = variant_dict.get(key, "")
-            # Skip Anthropic/OpenAI models (handled by their providers)
-            if not model or model.startswith("claude-") or model.startswith("gpt-"):
-                continue
-            # Check if it's a DeepInfra model (contains "/" = HuggingFace-style path)
-            if "/" in model and not _has_pricing(model):
-                missing.append(f"deepinfra/{model} (variant: {variant_name})")
+        model = variant_dict.get("model", "")
+        # Skip Anthropic/OpenAI models (handled by their providers)
+        if not model or model.startswith("claude-") or model.startswith("gpt-"):
+            continue
+        # Check if it's a DeepInfra model (contains "/" = HuggingFace-style path)
+        if "/" in model and not _has_pricing(model):
+            missing.append(f"deepinfra/{model} (variant: {variant_name})")
 
     return missing
 

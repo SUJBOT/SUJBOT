@@ -15,7 +15,7 @@ Features:
 """
 
 import logging
-from typing import Any, Dict, Iterator, List
+from typing import Any, Dict, Iterator, List, Optional
 
 import anthropic
 from langsmith.wrappers import wrap_anthropic
@@ -214,6 +214,33 @@ class AnthropicProvider(BaseProvider):
         old_model = self.model
         self.model = model
         logger.info(f"Model changed: {old_model} → {model}")
+
+    def count_tokens(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]],
+        system: List[Dict[str, Any]] | str,
+    ) -> Optional[int]:
+        """
+        Count input tokens using Anthropic's exact token counting API.
+
+        Returns:
+            Exact input token count, or None on API error
+        """
+        try:
+            count_kwargs: Dict[str, Any] = {
+                "model": self.model,
+                "messages": messages,
+                "system": system,
+            }
+            if tools:
+                count_kwargs["tools"] = tools
+
+            result = self._client.messages.count_tokens(**count_kwargs)
+            return result.input_tokens
+        except Exception as e:
+            logger.debug(f"count_tokens API call failed: {e}")
+            return None
 
     def get_provider_name(self) -> str:
         """Get provider name."""

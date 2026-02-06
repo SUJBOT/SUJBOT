@@ -97,6 +97,40 @@ uv run python scripts/langsmith_eval.py             # Full QA evaluation
 uv run python scripts/langsmith_eval.py --limit 5   # Quick test
 ```
 
+## Production Deployment
+
+**CRITICAL: Frontend must be built with empty `VITE_API_BASE_URL` for production!**
+
+```bash
+# Build frontend for production (uses relative URLs)
+docker build -t sujbot-frontend --target production \
+  --build-arg VITE_API_BASE_URL="" \
+  -f docker/frontend/Dockerfile frontend/
+
+# Deploy frontend container
+docker stop sujbot_frontend && docker rm sujbot_frontend
+docker run -d --name sujbot_frontend \
+  --network sujbot_sujbot_prod_net \
+  --network-alias frontend \
+  --restart unless-stopped \
+  sujbot-frontend
+
+# Verify deployment
+curl -sI https://sujbot.fjfi.cvut.cz/admin  # Should return 200
+```
+
+**Key points:**
+- Frontend production uses `nginx:alpine` serving static files on port 80
+- External nginx (`sujbot_nginx`) proxies to `frontend:80`
+- `--network-alias frontend` is REQUIRED for Docker DNS resolution
+- `VITE_API_BASE_URL=""` ensures relative API calls work with nginx proxy
+- SPA routing handled by `frontend/nginx.conf` with `try_files $uri $uri/ /index.html;`
+
+**Common issues:**
+- 404 on `/admin`: Missing SPA fallback in frontend nginx config
+- 502 on admin routes: Missing `--network-alias frontend` on container
+- `localhost:8000` errors in browser: Built with wrong `VITE_API_BASE_URL`
+
 ## Architecture Overview
 
 ```
@@ -117,6 +151,7 @@ Storage (PostgreSQL: vectors + graph + checkpoints)
 - `src/agent/` - Agent CLI and tools (`tools/` has individual tool files)
 - `src/multi_agent/` - LangGraph-based multi-agent system (orchestrator, 7 specialized agents)
 - `src/retrieval/` - HyDE + Expansion Fusion retrieval pipeline
+- `src/vl/` - Vision-Language RAG module (Jina v4 embeddings, page store, VL retriever)
 - `src/graph/` - Graphiti temporal knowledge graph (Neo4j + PostgreSQL)
 - `backend/` - FastAPI web backend with auth, routes, middleware
 - `frontend/` - React + Vite web UI
@@ -127,6 +162,57 @@ Storage (PostgreSQL: vectors + graph + checkpoints)
 - `src/multi_agent/core/agent_initializer.py` - SSOT for agent initialization
 - `src/multi_agent/prompts/loader.py` - SSOT for loading system prompts from `prompts/`
 - `src/agent/providers/factory.py` - Provider creation + `detect_provider_from_model()`
+
+### VL (Vision-Language) Architecture
+
+**Dual architecture: OCR vs VL** — switchable via `config.json` → `"architecture": "ocr" | "vl"`.
+
+```
+VL mode flow:
+User Query → Jina v4 embed_query() → PostgreSQL exact cosine scan (vectors.vl_pages)
+    → top-k page images (base64 PNG) → multimodal tool result → VL-capable LLM (vision)
+```
+
+**Key components:**
+- `src/vl/jina_client.py` - Jina Embeddings v4 API (2048-dim, task-specific LoRA)
+- `src/vl/page_store.py` - PDF→PNG rendering (PyMuPDF, 150 DPI), base64 loading
+- `src/vl/vl_retriever.py` - Simple pipeline: text query → Jina → PostgreSQL → VLPageResult
+- `src/vl/vl_indexing.py` - Index PDFs or load pre-computed embeddings
+
+**PostgreSQL schema:**
+```sql
+-- Table: vectors.vl_pages (2048-dim Jina v4 embeddings, no HNSW — exact scan)
+SELECT page_id, document_id, page_number,
+       1 - (embedding <=> $1::vector) AS score
+FROM vectors.vl_pages ORDER BY embedding <=> $1::vector LIMIT 5;
+```
+
+**No HNSW index** — with ~500 pages, exact cosine scan is <50ms and gives 100% recall.
+
+**Agent variant for VL mode:**
+- `"local"` variant uses `Qwen/Qwen2.5-VL-32B-Instruct` via DeepInfra (supports vision)
+- `"cheap"` (Haiku 4.5) and `"premium"` (Anthropic) also support vision natively
+- DeepInfra provider converts Anthropic image blocks → OpenAI `image_url` format
+
+**VL commands:**
+```bash
+# Load pre-computed embeddings
+DATABASE_URL="..." uv run python scripts/load_page_embeddings.py
+# Render page images for existing PDFs
+uv run python -c "from src.vl import PageStore; s=PageStore(); s.render_pdf_pages('data/doc.pdf', 'doc_id')"
+# Run DB migration
+uv run python scripts/migrate_vl_schema.py
+```
+
+**Key differences from OCR mode:**
+| | OCR mode | VL mode |
+|---|---|---|
+| Embedding model | Qwen3-Embedding-8B (4096-dim) | Jina Embeddings v4 (2048-dim) |
+| Content unit | Text chunks (512 tokens) | Full page images (PNG) |
+| DB table | `vectors.layer3` | `vectors.vl_pages` |
+| Search method | HyDE + Expansion Fusion | Simple cosine search |
+| Agent input | Text chunks with citations | Page images (multimodal) |
+| Token cost | ~100 tokens/chunk | ~1600 tokens/page image |
 
 ## Critical Constraints (DO NOT CHANGE)
 
@@ -537,6 +623,21 @@ location ~ ^/(health|docs|openapi.json|chat|models|clarify|auth|conversations|se
 3. If DeepInfra: also add to `agent_variants.deepinfra_supported_models` list
 4. Test the model works: `uv run python -c "from src.agent.providers.factory import create_provider; p = create_provider('model-name'); print(p)"`
 
+### Pre-Call Token Counting
+
+Providers support `count_tokens(messages, tools, system)` for estimating input tokens **before** an API call:
+
+| Provider | Method | Accuracy |
+|---|---|---|
+| Anthropic | `client.messages.count_tokens()` API | Exact |
+| OpenAI | tiktoken `cl100k_base` estimation | Approximate |
+| DeepInfra | tiktoken `cl100k_base` estimation | Approximate |
+| Gemini | Not implemented (returns `None`) | N/A |
+
+**Usage:** Called automatically in `_run_autonomous_tool_loop()` at DEBUG log level. Never blocks the flow — returns `None` on failure.
+
+**Future work:** Investigate native token counting APIs for OpenAI, Google, and DeepInfra as they become available to replace tiktoken approximation.
+
 ### LangSmith Observability
 
 **Configuration:**
@@ -595,5 +696,5 @@ curl -s "https://eu.api.smith.langchain.com/api/v1/runs/query" \
 
 ---
 
-**Last Updated:** 2026-01-10
-**Version:** PHASE 1-7 + Multi-Agent + Graphiti KG + Gemini Extractor + Exception Hierarchy + SSOT Refactoring + LangSmith Evaluation + Prompts SSOT
+**Last Updated:** 2026-02-06
+**Version:** PHASE 1-7 + Multi-Agent + Graphiti KG + Gemini Extractor + Exception Hierarchy + SSOT Refactoring + LangSmith Evaluation + Prompts SSOT + VL Architecture

@@ -187,6 +187,10 @@ class DeepInfraProvider(BaseProvider):
         """
         Convert Anthropic message format to OpenAI format.
 
+        Handles both text-only and multimodal (vision) content.
+        Image blocks (Anthropic base64 format) are converted to
+        OpenAI image_url format for VL models like Qwen-VL.
+
         Args:
             messages: Anthropic-format messages
             system: System prompt (string or list of dicts)
@@ -218,16 +222,69 @@ class DeepInfraProvider(BaseProvider):
             if isinstance(content, str):
                 formatted.append({"role": role, "content": content})
             elif isinstance(content, list):
-                # Extract text blocks
-                text = "".join(
-                    block.get("text", "")
+                # Check if any block is an image (multimodal content)
+                has_images = any(
+                    isinstance(block, dict) and block.get("type") == "image"
                     for block in content
-                    if isinstance(block, dict) and block.get("type") == "text"
                 )
-                if text:
-                    formatted.append({"role": role, "content": text})
+
+                if has_images:
+                    # Multimodal: convert to OpenAI vision format
+                    openai_content = self._convert_multimodal_content(content)
+                    if openai_content:
+                        formatted.append({"role": role, "content": openai_content})
+                else:
+                    # Text-only: extract text blocks
+                    text = "".join(
+                        block.get("text", "")
+                        for block in content
+                        if isinstance(block, dict) and block.get("type") == "text"
+                    )
+                    if text:
+                        formatted.append({"role": role, "content": text})
 
         return formatted
+
+    def _convert_multimodal_content(self, content_blocks: List[Dict]) -> List[Dict]:
+        """
+        Convert Anthropic multimodal content blocks to OpenAI vision format.
+
+        Anthropic format:
+            {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "..."}}
+            {"type": "text", "text": "caption"}
+
+        OpenAI format:
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}
+            {"type": "text", "text": "caption"}
+        """
+        openai_blocks = []
+        for block in content_blocks:
+            if not isinstance(block, dict):
+                continue
+
+            if block.get("type") == "image":
+                source = block.get("source", {})
+                if source.get("type") == "base64":
+                    media_type = source.get("media_type", "image/png")
+                    data = source.get("data", "")
+                    openai_blocks.append({
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{media_type};base64,{data}"},
+                    })
+            elif block.get("type") == "text":
+                openai_blocks.append({
+                    "type": "text",
+                    "text": block.get("text", ""),
+                })
+            elif block.get("type") == "tool_result":
+                # Tool results with multimodal content — extract text
+                tool_content = block.get("content", "")
+                if isinstance(tool_content, str):
+                    openai_blocks.append({"type": "text", "text": tool_content})
+                elif isinstance(tool_content, list):
+                    openai_blocks.extend(self._convert_multimodal_content(tool_content))
+
+        return openai_blocks
 
     def _convert_response(self, response) -> ProviderResponse:
         """
@@ -300,7 +357,8 @@ class DeepInfraProvider(BaseProvider):
             "streaming": True,
             "tool_use": True,
             "prompt_caching": False,  # DeepInfra doesn't support Anthropic-style caching
-            "structured_system": False
+            "structured_system": False,
+            "vision": "VL" in self.model or "vl" in self.model.lower(),
         }
         return supported_features.get(feature, False)
 
@@ -325,6 +383,15 @@ class DeepInfraProvider(BaseProvider):
             )
         self.model = model
         logger.info(f"Switched to model: {model}")
+
+    def count_tokens(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]],
+        system: List[Dict[str, Any]] | str,
+    ) -> Optional[int]:
+        """Count input tokens using tiktoken approximation."""
+        return self._tiktoken_estimate(messages, tools, system)
 
     def get_provider_name(self) -> str:
         """Get provider name."""

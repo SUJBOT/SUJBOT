@@ -135,15 +135,18 @@ class MetadataFilter:
 
     def is_empty(self) -> bool:
         """Check if filter has any conditions."""
-        return not any([
-            self.category,
-            self.categories,
-            self.keywords,
-            self.keywords_any,
-            self.entities,
-            self.entity_types,
-            self.min_confidence is not None,
-        ])
+        return not any(
+            [
+                self.category,
+                self.categories,
+                self.keywords,
+                self.keywords_any,
+                self.entities,
+                self.entity_types,
+                self.min_confidence is not None,
+            ]
+        )
+
 
 def _sanitize_tsquery(text: str) -> str:
     """
@@ -152,10 +155,11 @@ def _sanitize_tsquery(text: str) -> str:
     Removes special characters that break tsquery syntax: ()&|!:,?
     """
     import re
+
     # Remove special tsquery characters
-    sanitized = re.sub(r'[()&|!:,?]', ' ', text)
+    sanitized = re.sub(r"[()&|!:,?]", " ", text)
     # Replace multiple spaces with single space
-    sanitized = re.sub(r'\s+', ' ', sanitized).strip()
+    sanitized = re.sub(r"\s+", " ", sanitized).strip()
     # Replace spaces with & operator
     sanitized = sanitized.replace(" ", " & ")
     return sanitized
@@ -274,7 +278,9 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
 
         for attempt in range(1, max_retries + 1):
             try:
-                logger.info(f"Attempting to connect to PostgreSQL (attempt {attempt}/{max_retries})...")
+                logger.info(
+                    f"Attempting to connect to PostgreSQL (attempt {attempt}/{max_retries})..."
+                )
 
                 self.pool = await asyncpg.create_pool(
                     dsn=self.connection_string,
@@ -301,12 +307,18 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
 
             except Exception as e:
                 if attempt < max_retries:
-                    logger.warning(f"Connection attempt {attempt} failed: {e}. Retrying in {retry_delay}s...")
+                    logger.warning(
+                        f"Connection attempt {attempt} failed: {e}. Retrying in {retry_delay}s..."
+                    )
                     await asyncio.sleep(retry_delay)
                     retry_delay *= 2  # Exponential backoff
                 else:
-                    logger.error(f"Failed to initialize PostgreSQL pool after {max_retries} attempts: {e}")
-                    raise ConnectionError(f"PostgreSQL connection failed after {max_retries} attempts: {e}") from e
+                    logger.error(
+                        f"Failed to initialize PostgreSQL pool after {max_retries} attempts: {e}"
+                    )
+                    raise ConnectionError(
+                        f"PostgreSQL connection failed after {max_retries} attempts: {e}"
+                    ) from e
 
     def _normalize_vector(self, vec: np.ndarray) -> np.ndarray:
         """Normalize vector for cosine similarity (pgvector requires this)."""
@@ -333,7 +345,7 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
             # Handle nested lists (e.g., [[0.1, 0.2, ...]])
             vec = vec[0] if len(vec) == 1 else sum(vec, [])
 
-        return '[' + ','.join(map(str, vec)) + ']'
+        return "[" + ",".join(map(str, vec)) + "]"
 
     # ============================================================================
     # Core Search Methods
@@ -397,9 +409,7 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
                 logger.debug(f"Using explicit document filter: {document_filter}")
             else:
                 # Search Layer 1 to find top document
-                layer1_results = await self._search_layer(
-                    conn, layer=1, query_vec=query_vec, k=1
-                )
+                layer1_results = await self._search_layer(conn, layer=1, query_vec=query_vec, k=1)
 
                 # Get document filter from layer1 results
                 if use_doc_filtering and layer1_results:
@@ -474,17 +484,19 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
         # Layer 1 (documents) does not have section_id, section_title
         # Layers 2-3 (sections/chunks) have these columns
         # All layers have hierarchical_path
-        section_columns = (
-            "section_id, section_title,"
-            if layer > 1
-            else ""
-        )
+        section_columns = "section_id, section_title," if layer > 1 else ""
 
         if query_text:
             # Hybrid search: Dense (pgvector) + Sparse (full-text)
             return await self._hybrid_search_layer(
-                conn, layer, query_vec, query_text, k, document_filter, metadata_filter,
-                exclude_bibliography
+                conn,
+                layer,
+                query_vec,
+                query_text,
+                k,
+                document_filter,
+                metadata_filter,
+                exclude_bibliography,
             )
         else:
             # Pure vector search with optional filtering
@@ -510,7 +522,9 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
             # This prevents bibliography entries (high keyword density, low info) from
             # dominating search results over actual content chunks
             if exclude_bibliography and layer > 1:  # Only for layer2/3 which have section_path
-                where_conditions.append("(section_path IS NULL OR section_path NOT LIKE 'Literatura%')")
+                where_conditions.append(
+                    "(section_path IS NULL OR section_path NOT LIKE 'Literatura%')"
+                )
 
             # Build WHERE clause
             where_clause = ""
@@ -659,8 +673,7 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
                 # Convert query to tsquery (simple words with OR)
                 # Handle Czech characters and create search terms
                 search_terms = " | ".join(
-                    word for word in query_text.split()
-                    if len(word) > 2 and word.isalnum()
+                    word for word in query_text.split() if len(word) > 2 and word.isalnum()
                 )
                 if search_terms:
                     fts_where = "WHERE content_tsv @@ to_tsquery('simple', $1)"
@@ -702,7 +715,7 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
         chunk_dense_scores = {}  # {chunk_id: dense_score} - preserve original
         chunk_bm25_scores = {}  # {chunk_id: bm25_score} - preserve original
         chunk_dense_ranks = {}  # {chunk_id: dense_rank} - for imputation
-        chunk_bm25_ranks = {}   # {chunk_id: bm25_rank} - for imputation
+        chunk_bm25_ranks = {}  # {chunk_id: bm25_rank} - for imputation
 
         logger.debug(
             f"Hybrid search layer{layer}: {len(dense_rows)} dense + {len(bm25_results)} BM25 "
@@ -781,7 +794,7 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
                     "content": row["content"],
                     "score": float(rrf_score),  # RRF score (for compatibility)
                     "dense_score": chunk_dense_scores.get(chunk_id),  # Original dense score
-                    "bm25_score": chunk_bm25_scores.get(chunk_id),    # Original BM25 score
+                    "bm25_score": chunk_bm25_scores.get(chunk_id),  # Original BM25 score
                     "section_id": row.get("section_id"),
                     "section_title": row.get("section_title"),
                     "hierarchical_path": row.get("hierarchical_path"),
@@ -793,16 +806,9 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
 
         return results
 
-    def search_layer1(
-        self,
-        query_embedding: np.ndarray,
-        k: int = 1,
-        **kwargs
-    ) -> List[Dict]:
+    def search_layer1(self, query_embedding: np.ndarray, k: int = 1, **kwargs) -> List[Dict]:
         """Direct Layer 1 search (document-level)."""
-        return _run_async_safe(
-            self._async_search_layer1(query_embedding, k)
-        )
+        return _run_async_safe(self._async_search_layer1(query_embedding, k))
 
     async def _async_search_layer1(
         self,
@@ -813,9 +819,7 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
         query_vec = self._normalize_vector(query_embedding)
 
         async with self.pool.acquire() as conn:
-            results = await self._search_layer(
-                conn, layer=1, query_vec=query_vec, k=k
-            )
+            results = await self._search_layer(conn, layer=1, query_vec=query_vec, k=k)
             return results
 
     def search_layer2(
@@ -823,12 +827,10 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
         query_embedding: np.ndarray,
         k: int = 3,
         document_filter: Optional[str] = None,
-        **kwargs
+        **kwargs,
     ) -> List[Dict]:
         """Direct Layer 2 search (section-level)."""
-        return _run_async_safe(
-            self._async_search_layer2(query_embedding, k, document_filter)
-        )
+        return _run_async_safe(self._async_search_layer2(query_embedding, k, document_filter))
 
     async def _async_search_layer2(
         self,
@@ -870,7 +872,12 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
         """
         return _run_async_safe(
             self._async_search_layer3(
-                query_embedding, k, document_filter, similarity_threshold, metadata_filter, query_text
+                query_embedding,
+                k,
+                document_filter,
+                similarity_threshold,
+                metadata_filter,
+                query_text,
             )
         )
 
@@ -1079,10 +1086,7 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
     # ============================================================================
 
     async def create_conversation(
-        self,
-        conversation_id: str,
-        user_id: int,
-        title: Optional[str] = None
+        self, conversation_id: str, user_id: int, title: Optional[str] = None
     ) -> None:
         """
         Create new conversation owned by user.
@@ -1098,15 +1102,13 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
                 INSERT INTO auth.conversations (id, user_id, title, created_at, updated_at)
                 VALUES ($1, $2, $3, NOW(), NOW())
                 """,
-                conversation_id, user_id, title
+                conversation_id,
+                user_id,
+                title,
             )
             logger.debug(f"Created conversation {conversation_id} for user {user_id}")
 
-    async def get_user_conversations(
-        self,
-        user_id: int,
-        limit: int = 50
-    ) -> List[Dict]:
+    async def get_user_conversations(self, user_id: int, limit: int = 50) -> List[Dict]:
         """
         Get all conversations for user (ordered by most recent).
 
@@ -1128,17 +1130,14 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
                 ORDER BY c.updated_at DESC
                 LIMIT $2
                 """,
-                user_id, limit
+                user_id,
+                limit,
             )
             conversations = [dict(row) for row in rows]
             logger.debug(f"Retrieved {len(conversations)} conversations for user {user_id}")
             return conversations
 
-    async def verify_conversation_ownership(
-        self,
-        conversation_id: str,
-        user_id: int
-    ) -> bool:
+    async def verify_conversation_ownership(self, conversation_id: str, user_id: int) -> bool:
         """
         Check if user owns conversation.
 
@@ -1151,8 +1150,7 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
         """
         async with self.pool.acquire() as conn:
             owner_id = await conn.fetchval(
-                "SELECT user_id FROM auth.conversations WHERE id = $1",
-                conversation_id
+                "SELECT user_id FROM auth.conversations WHERE id = $1", conversation_id
             )
             is_owner = owner_id == user_id
             logger.debug(
@@ -1161,11 +1159,7 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
             )
             return is_owner
 
-    async def get_conversation_history(
-        self,
-        conversation_id: str,
-        limit: int = 100
-    ) -> List[Dict]:
+    async def get_conversation_history(self, conversation_id: str, limit: int = 100) -> List[Dict]:
         """
         Get message history for conversation.
 
@@ -1185,27 +1179,25 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
                 ORDER BY created_at ASC
                 LIMIT $2
                 """,
-                conversation_id, limit
+                conversation_id,
+                limit,
             )
             # Convert rows to dicts and parse metadata JSON string back to dict
             import json
+
             messages = []
             for row in rows:
                 msg = dict(row)
                 # Parse metadata from JSON string to dict (asyncpg returns JSONB as string)
-                if msg.get('metadata') and isinstance(msg['metadata'], str):
-                    msg['metadata'] = json.loads(msg['metadata'])
+                if msg.get("metadata") and isinstance(msg["metadata"], str):
+                    msg["metadata"] = json.loads(msg["metadata"])
                 messages.append(msg)
 
             logger.debug(f"Retrieved {len(messages)} messages for conversation {conversation_id}")
             return messages
 
     async def append_message(
-        self,
-        conversation_id: str,
-        role: str,
-        content: str,
-        metadata: Optional[Dict] = None
+        self, conversation_id: str, role: str, content: str, metadata: Optional[Dict] = None
     ) -> int:
         """
         Append message to conversation.
@@ -1232,13 +1224,15 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
                 VALUES ($1, $2, $3, $4::jsonb, NOW())
                 RETURNING id
                 """,
-                conversation_id, role, content, metadata_json
+                conversation_id,
+                role,
+                content,
+                metadata_json,
             )
 
             # Update conversation updated_at timestamp
             await conn.execute(
-                "UPDATE auth.conversations SET updated_at = NOW() WHERE id = $1",
-                conversation_id
+                "UPDATE auth.conversations SET updated_at = NOW() WHERE id = $1", conversation_id
             )
 
             logger.debug(
@@ -1246,11 +1240,7 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
             )
             return message_id
 
-    async def delete_conversation(
-        self,
-        conversation_id: str,
-        user_id: int
-    ) -> bool:
+    async def delete_conversation(self, conversation_id: str, user_id: int) -> bool:
         """
         Delete conversation (with ownership check).
 
@@ -1265,7 +1255,8 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
             # Verify ownership and delete in single transaction
             result = await conn.execute(
                 "DELETE FROM auth.conversations WHERE id = $1 AND user_id = $2",
-                conversation_id, user_id
+                conversation_id,
+                user_id,
             )
             # result is like "DELETE 1" or "DELETE 0"
             deleted = result.split()[-1] == "1"
@@ -1273,13 +1264,214 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
             return deleted
 
     # ============================================================================
+    # VL (Vision-Language) Page Embeddings
+    # ============================================================================
+
+    def search_vl_pages(
+        self,
+        query_embedding: np.ndarray,
+        k: int = 5,
+        document_filter: Optional[str] = None,
+    ) -> List[Dict]:
+        """
+        Search VL page embeddings (2048-dim Jina v4) by cosine similarity.
+
+        Args:
+            query_embedding: Query embedding (2048-dim, L2-normalized)
+            k: Number of results
+            document_filter: Optional document ID filter
+
+        Returns:
+            List of dicts with page_id, document_id, page_number, score, image_path, metadata
+        """
+        return _run_async_safe(
+            self._async_search_vl_pages(query_embedding, k, document_filter),
+            operation_name="search_vl_pages",
+        )
+
+    async def _async_search_vl_pages(
+        self,
+        query_embedding: np.ndarray,
+        k: int,
+        document_filter: Optional[str],
+    ) -> List[Dict]:
+        """Async VL page search."""
+        await self._ensure_pool()
+        query_vec = self._normalize_vector(query_embedding)
+        query_str = self._vector_to_pgvector_string(query_vec)
+
+        params: list = [query_str]
+        where_parts: list = []
+        param_idx = 1
+
+        if document_filter:
+            param_idx += 1
+            where_parts.append(f"document_id = ${param_idx}")
+            params.append(document_filter)
+
+        where_clause = ""
+        if where_parts:
+            where_clause = "WHERE " + " AND ".join(where_parts)
+
+        param_idx += 1
+        params.append(k)
+
+        sql = f"""
+            SELECT page_id, document_id, page_number, image_path, metadata,
+                   1 - (embedding <=> $1::vector) AS score
+            FROM vectors.vl_pages
+            {where_clause}
+            ORDER BY embedding <=> $1::vector
+            LIMIT ${param_idx}
+        """
+
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(sql, *params)
+
+        results = []
+        for row in rows:
+            result = {
+                "page_id": row["page_id"],
+                "document_id": row["document_id"],
+                "page_number": row["page_number"],
+                "score": float(row["score"]),
+                "image_path": row.get("image_path"),
+                "metadata": row.get("metadata") or {},
+            }
+            results.append(result)
+
+        return results
+
+    def get_adjacent_vl_pages(
+        self,
+        document_id: str,
+        page_number: int,
+        k: int = 3,
+    ) -> List[Dict]:
+        """
+        Get adjacent VL pages (page_number ± k) from the same document.
+
+        Args:
+            document_id: Document to search within
+            page_number: Center page number
+            k: Number of pages in each direction
+
+        Returns:
+            List of dicts with page_id, document_id, page_number, image_path, metadata
+            (excludes the center page itself, ordered by page_number)
+        """
+        return _run_async_safe(
+            self._async_get_adjacent_vl_pages(document_id, page_number, k),
+            operation_name="get_adjacent_vl_pages",
+        )
+
+    async def _async_get_adjacent_vl_pages(
+        self,
+        document_id: str,
+        page_number: int,
+        k: int,
+    ) -> List[Dict]:
+        """Async implementation of adjacent VL page retrieval."""
+        await self._ensure_pool()
+
+        sql = """
+            SELECT page_id, document_id, page_number, image_path, metadata
+            FROM vectors.vl_pages
+            WHERE document_id = $1
+              AND page_number BETWEEN $2 AND $3
+              AND page_number != $4
+            ORDER BY page_number
+        """
+        page_from = page_number - k
+        page_to = page_number + k
+
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(sql, document_id, page_from, page_to, page_number)
+
+        return [
+            {
+                "page_id": row["page_id"],
+                "document_id": row["document_id"],
+                "page_number": row["page_number"],
+                "image_path": row.get("image_path"),
+                "metadata": row.get("metadata") or {},
+            }
+            for row in rows
+        ]
+
+    def add_vl_pages(
+        self,
+        pages: List[Dict],
+        embeddings: np.ndarray,
+    ) -> int:
+        """
+        Batch insert VL page embeddings.
+
+        Args:
+            pages: List of dicts with page_id, document_id, page_number, image_path, metadata
+            embeddings: Embedding matrix (N x 2048)
+
+        Returns:
+            Number of rows inserted
+        """
+        return _run_async_safe(
+            self._async_add_vl_pages(pages, embeddings),
+            operation_name="add_vl_pages",
+        )
+
+    async def _async_add_vl_pages(
+        self,
+        pages: List[Dict],
+        embeddings: np.ndarray,
+    ) -> int:
+        """Async batch insert VL page embeddings."""
+        import json as json_mod
+
+        await self._ensure_pool()
+
+        if embeddings.dtype != np.float32:
+            embeddings = embeddings.astype(np.float32)
+        if embeddings.ndim == 1:
+            embeddings = embeddings.reshape(1, -1)
+
+        # L2 normalize
+        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+        embeddings = embeddings / np.where(norms > 0, norms, 1)
+
+        records = []
+        for i, page in enumerate(pages):
+            embedding_str = self._vector_to_pgvector_string(embeddings[i])
+            metadata_json = json_mod.dumps(page.get("metadata", {}))
+            records.append(
+                (
+                    page["page_id"],
+                    page["document_id"],
+                    page["page_number"],
+                    embedding_str,
+                    page.get("image_path"),
+                    metadata_json,
+                )
+            )
+
+        sql = """
+            INSERT INTO vectors.vl_pages
+                (page_id, document_id, page_number, embedding, image_path, metadata)
+            VALUES ($1, $2, $3, $4::vector, $5, $6::jsonb)
+            ON CONFLICT (page_id) DO NOTHING
+        """
+
+        async with self.pool.acquire() as conn:
+            await conn.executemany(sql, records)
+
+        logger.info(f"VL pages: inserted batch of {len(records)} pages")
+        return len(records)
+
+    # ============================================================================
     # Indexing: Add Chunks (for pipeline)
     # ============================================================================
 
     def add_chunks(
-        self,
-        chunks_dict: Dict[str, List["Chunk"]],
-        embeddings_dict: Dict[str, np.ndarray]
+        self, chunks_dict: Dict[str, List["Chunk"]], embeddings_dict: Dict[str, np.ndarray]
     ) -> None:
         """
         Add chunks and embeddings to PostgreSQL (batch INSERT with deduplication).
@@ -1298,9 +1490,7 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
         return _run_async_safe(self._async_add_chunks(chunks_dict, embeddings_dict))
 
     async def _async_add_chunks(
-        self,
-        chunks_dict: Dict[str, List["Chunk"]],
-        embeddings_dict: Dict[str, np.ndarray]
+        self, chunks_dict: Dict[str, List["Chunk"]], embeddings_dict: Dict[str, np.ndarray]
     ) -> None:
         """
         Async implementation of add_chunks.
@@ -1330,10 +1520,7 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
         logger.info("✓ Chunks added to PostgreSQL")
 
     async def _add_layer_batch(
-        self,
-        layer: int,
-        chunks: List["Chunk"],
-        embeddings: np.ndarray
+        self, layer: int, chunks: List["Chunk"], embeddings: np.ndarray
     ) -> None:
         """
         Add chunks to a specific layer using batch INSERT.
@@ -1369,14 +1556,16 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
             embedding_str = self._vector_to_pgvector_string(embeddings[i])
 
             # Build metadata JSONB (flexible storage)
-            metadata_json = json.dumps({
-                "layer": layer,
-                "section_path": chunk.metadata.section_path,
-                "section_level": getattr(chunk.metadata, 'section_level', None),
-                "section_depth": getattr(chunk.metadata, 'section_depth', None),
-                "char_start": getattr(chunk.metadata, 'char_start', None),
-                "char_end": getattr(chunk.metadata, 'char_end', None),
-            })
+            metadata_json = json.dumps(
+                {
+                    "layer": layer,
+                    "section_path": chunk.metadata.section_path,
+                    "section_level": getattr(chunk.metadata, "section_level", None),
+                    "section_depth": getattr(chunk.metadata, "section_depth", None),
+                    "char_start": getattr(chunk.metadata, "char_start", None),
+                    "char_end": getattr(chunk.metadata, "char_end", None),
+                }
+            )
 
             # Layer-specific record structure
             if layer == 1:
@@ -1402,8 +1591,8 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
                     chunk.metadata.section_id,
                     chunk.metadata.section_title,
                     chunk.metadata.section_path,
-                    getattr(chunk.metadata, 'section_level', None),
-                    getattr(chunk.metadata, 'section_depth', None),
+                    getattr(chunk.metadata, "section_level", None),
+                    getattr(chunk.metadata, "section_depth", None),
                     hierarchical_path,
                     chunk.metadata.page_number,
                     embedding_str,
@@ -1421,12 +1610,12 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
                     chunk.metadata.section_id,
                     chunk.metadata.section_title,
                     chunk.metadata.section_path,
-                    getattr(chunk.metadata, 'section_level', None),
-                    getattr(chunk.metadata, 'section_depth', None),
+                    getattr(chunk.metadata, "section_level", None),
+                    getattr(chunk.metadata, "section_depth", None),
                     hierarchical_path,
                     chunk.metadata.page_number,
-                    getattr(chunk.metadata, 'char_start', None),
-                    getattr(chunk.metadata, 'char_end', None),
+                    getattr(chunk.metadata, "char_start", None),
+                    getattr(chunk.metadata, "char_end", None),
                     embedding_str,
                     chunk.content,  # Use content with SAC context (embedding_text)
                     chunk.metadata.cluster_id,
@@ -1492,53 +1681,53 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
                     # Logger may also be unavailable during shutdown
                     pass
 
+
 # ====================================================================================
 # PostgreSQL Storage Adapter for Authentication & User Data
 # ====================================================================================
 
+
 class PostgreSQLStorageAdapter:
     """
     PostgreSQL connection pool for auth/user data.
-    
+
     Separate from PostgresVectorStoreAdapter (vector search).
     This adapter provides connection pooling for:
     - auth.users (user accounts)
     - auth.conversations (chat sessions)
     - auth.messages (message history)
-    
+
     Used by AuthQueries for user management and conversation storage.
     """
-    
+
     def __init__(self):
         """Initialize adapter (connection pool created in initialize())."""
         import os
+
         self.pool: Optional[asyncpg.Pool] = None
         self.db_url = os.getenv("DATABASE_URL")
-        
+
         if not self.db_url:
             raise ValueError(
                 "DATABASE_URL environment variable is required. "
                 "Set in .env file (e.g., postgresql://postgres:password@postgres:5432/sujbot)"
             )
-    
+
     async def initialize(self):
         """Create connection pool."""
         logger.info("Creating PostgreSQL connection pool for auth/user storage...")
-        
+
         self.pool = await asyncpg.create_pool(
-            self.db_url,
-            min_size=2,
-            max_size=10,
-            command_timeout=60
+            self.db_url, min_size=2, max_size=10, command_timeout=60
         )
-        
+
         # Test connection
         async with self.pool.acquire() as conn:
             version = await conn.fetchval("SELECT version()")
             logger.info(f"PostgreSQL connected: {version}")
-        
+
         logger.info("✓ Connection pool created (2-10 connections)")
-    
+
     async def close(self):
         """Close connection pool."""
         if self.pool:
@@ -1550,10 +1739,7 @@ class PostgreSQLStorageAdapter:
     # ============================================================================
 
     async def create_conversation(
-        self,
-        conversation_id: str,
-        user_id: int,
-        title: Optional[str] = None
+        self, conversation_id: str, user_id: int, title: Optional[str] = None
     ) -> None:
         """
         Create new conversation owned by user.
@@ -1569,15 +1755,13 @@ class PostgreSQLStorageAdapter:
                 INSERT INTO auth.conversations (id, user_id, title, created_at, updated_at)
                 VALUES ($1, $2, $3, NOW(), NOW())
                 """,
-                conversation_id, user_id, title
+                conversation_id,
+                user_id,
+                title,
             )
             logger.debug(f"Created conversation {conversation_id} for user {user_id}")
 
-    async def get_user_conversations(
-        self,
-        user_id: int,
-        limit: int = 50
-    ) -> List[Dict]:
+    async def get_user_conversations(self, user_id: int, limit: int = 50) -> List[Dict]:
         """
         Get all conversations for user (ordered by most recent).
 
@@ -1599,17 +1783,14 @@ class PostgreSQLStorageAdapter:
                 ORDER BY c.updated_at DESC
                 LIMIT $2
                 """,
-                user_id, limit
+                user_id,
+                limit,
             )
             conversations = [dict(row) for row in rows]
             logger.debug(f"Retrieved {len(conversations)} conversations for user {user_id}")
             return conversations
 
-    async def verify_conversation_ownership(
-        self,
-        conversation_id: str,
-        user_id: int
-    ) -> bool:
+    async def verify_conversation_ownership(self, conversation_id: str, user_id: int) -> bool:
         """
         Check if user owns conversation.
 
@@ -1622,8 +1803,7 @@ class PostgreSQLStorageAdapter:
         """
         async with self.pool.acquire() as conn:
             owner_id = await conn.fetchval(
-                "SELECT user_id FROM auth.conversations WHERE id = $1",
-                conversation_id
+                "SELECT user_id FROM auth.conversations WHERE id = $1", conversation_id
             )
             is_owner = owner_id == user_id
             logger.debug(
@@ -1632,11 +1812,7 @@ class PostgreSQLStorageAdapter:
             )
             return is_owner
 
-    async def get_conversation_history(
-        self,
-        conversation_id: str,
-        limit: int = 100
-    ) -> List[Dict]:
+    async def get_conversation_history(self, conversation_id: str, limit: int = 100) -> List[Dict]:
         """
         Get message history for conversation.
 
@@ -1656,27 +1832,25 @@ class PostgreSQLStorageAdapter:
                 ORDER BY created_at ASC
                 LIMIT $2
                 """,
-                conversation_id, limit
+                conversation_id,
+                limit,
             )
             # Convert rows to dicts and parse metadata JSON string back to dict
             import json
+
             messages = []
             for row in rows:
                 msg = dict(row)
                 # Parse metadata from JSON string to dict (asyncpg returns JSONB as string)
-                if msg.get('metadata') and isinstance(msg['metadata'], str):
-                    msg['metadata'] = json.loads(msg['metadata'])
+                if msg.get("metadata") and isinstance(msg["metadata"], str):
+                    msg["metadata"] = json.loads(msg["metadata"])
                 messages.append(msg)
 
             logger.debug(f"Retrieved {len(messages)} messages for conversation {conversation_id}")
             return messages
 
     async def append_message(
-        self,
-        conversation_id: str,
-        role: str,
-        content: str,
-        metadata: Optional[Dict] = None
+        self, conversation_id: str, role: str, content: str, metadata: Optional[Dict] = None
     ) -> int:
         """
         Append message to conversation.
@@ -1703,13 +1877,15 @@ class PostgreSQLStorageAdapter:
                 VALUES ($1, $2, $3, $4::jsonb, NOW())
                 RETURNING id
                 """,
-                conversation_id, role, content, metadata_json
+                conversation_id,
+                role,
+                content,
+                metadata_json,
             )
 
             # Update conversation updated_at timestamp
             await conn.execute(
-                "UPDATE auth.conversations SET updated_at = NOW() WHERE id = $1",
-                conversation_id
+                "UPDATE auth.conversations SET updated_at = NOW() WHERE id = $1", conversation_id
             )
 
             logger.debug(
@@ -1717,11 +1893,7 @@ class PostgreSQLStorageAdapter:
             )
             return message_id
 
-    async def delete_conversation(
-        self,
-        conversation_id: str,
-        user_id: int
-    ) -> bool:
+    async def delete_conversation(self, conversation_id: str, user_id: int) -> bool:
         """
         Delete conversation (with ownership check).
 
@@ -1736,7 +1908,8 @@ class PostgreSQLStorageAdapter:
             # Verify ownership and delete in single transaction
             result = await conn.execute(
                 "DELETE FROM auth.conversations WHERE id = $1 AND user_id = $2",
-                conversation_id, user_id
+                conversation_id,
+                user_id,
             )
             # result is like "DELETE 1" or "DELETE 0"
             deleted = result.split()[-1] == "1"

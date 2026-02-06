@@ -48,12 +48,19 @@ class TokenBudget:
     - max_tokens_per_chunk=600: Allows 2-3 paragraphs of detailed content
     - max_tokens_per_section=400: Sufficient for section metadata + summary
     - reserved_tokens=1000: Safety buffer for JSON structure, citations, metadata
+
+    VL mode adds image token tracking:
+    - max_pages=5: Default max page images per query
+    - image_tokens_per_page=1600: Anthropic's ~1600 tokens per document page image
     """
 
     max_total_tokens: int = 8000  # Max tokens for entire tool output
     max_tokens_per_chunk: int = 600  # Max per chunk (FULL detail)
     max_tokens_per_section: int = 400  # Max per section metadata
     reserved_tokens: int = 1000  # Reserved for metadata, citations, etc.
+    # VL mode
+    max_pages: int = 5  # VL mode: max page images per query
+    image_tokens_per_page: int = 1600  # Anthropic: ~1600 tokens per document page image
 
     def __post_init__(self):
         """Validate configuration consistency."""
@@ -136,6 +143,12 @@ class TokenCounter:
         else:
             # Fallback: estimate 4 chars per token (rough average for English)
             return len(text) // 4
+
+    IMAGE_TOKENS_PER_PAGE = 1600  # Anthropic: ~1600 tokens for a document page image
+
+    def count_image_tokens(self, num_images: int) -> int:
+        """Estimate token count for page images in VL mode."""
+        return num_images * self.IMAGE_TOKENS_PER_PAGE
 
     def estimate_tokens(self, obj: Any) -> int:
         """
