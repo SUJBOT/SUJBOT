@@ -241,6 +241,7 @@ class PageStore:
                 page_num = int(num_str)
                 page_ids.append(self.make_page_id(document_id, page_num))
             except ValueError:
+                logger.warning(f"Skipping malformed page filename: {img_file.name}")
                 continue
 
         return page_ids

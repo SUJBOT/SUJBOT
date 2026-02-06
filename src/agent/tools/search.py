@@ -144,6 +144,7 @@ class SearchTool(BaseTool):
             # Build text data for logging/history
             formatted = []
             page_images = []
+            failed_pages = []
 
             for r in results:
                 formatted.append(
@@ -170,6 +171,14 @@ class SearchTool(BaseTool):
                     )
                 except Exception as e:
                     logger.warning(f"Failed to load image for {r.page_id}: {e}")
+                    failed_pages.append(r.page_id)
+
+            if failed_pages and not page_images:
+                return ToolResult(
+                    success=False,
+                    data=None,
+                    error=f"All {len(failed_pages)} page images failed to load: {failed_pages}",
+                )
 
             result_metadata = {
                 "query": query,
@@ -179,6 +188,8 @@ class SearchTool(BaseTool):
                 "final_count": len(formatted),
                 "page_images": page_images,
             }
+            if failed_pages:
+                result_metadata["failed_pages"] = failed_pages
 
             return ToolResult(
                 success=True,

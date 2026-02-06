@@ -84,7 +84,8 @@ class VLRetriever:
             page_id = row["page_id"]
             try:
                 image_path = self.page_store.get_image_path(page_id)
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Could not resolve image path for page {page_id}: {e}")
                 image_path = row.get("image_path")
 
             results.append(
