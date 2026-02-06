@@ -65,7 +65,7 @@ class TestRAGConfidenceScorer:
         assert confidence.overall_confidence >= 0.75
         assert confidence.top_score == 0.95
         assert confidence.score_gap > 0.10  # Clear winner
-        assert confidence.graph_support is True
+        assert confidence.graph_support is False  # Graph boost removed
         assert confidence.document_diversity < 0.5  # Single document
 
     def test_low_confidence_scenario(self, scorer):
@@ -208,25 +208,15 @@ class TestRAGConfidenceScorer:
         confidence_multi = scorer.score_retrieval(chunks_multi_doc)
         assert confidence_multi.document_diversity == 1.0  # 3 unique docs / 3 chunks
 
-    def test_graph_support_detection(self, scorer):
-        """Test knowledge graph support detection."""
-        # With graph support
-        chunks_with_graph = [
+    def test_graph_support_always_false(self, scorer):
+        """Test graph_support is always False (graph boost removed)."""
+        chunks = [
             {"chunk_id": "c1", "graph_boost": 0.1},
-            {"chunk_id": "c2", "graph_boost": 0.0},
-        ]
-
-        confidence_with = scorer.score_retrieval(chunks_with_graph)
-        assert confidence_with.graph_support is True
-
-        # Without graph support
-        chunks_without_graph = [
-            {"chunk_id": "c1", "graph_boost": 0.0},
             {"chunk_id": "c2"},
         ]
 
-        confidence_without = scorer.score_retrieval(chunks_without_graph)
-        assert confidence_without.graph_support is False
+        confidence = scorer.score_retrieval(chunks)
+        assert confidence.graph_support is False
 
     def test_score_extraction_priority(self, scorer):
         """Test score extraction priority (rerank > boosted > rrf > score)."""
@@ -305,7 +295,6 @@ class TestRAGConfidenceScorer:
 
         assert methods["hybrid_search"] is True
         assert methods["reranking"] is True
-        assert methods["graph_boost"] is True
         assert methods["bm25_only"] is False
         assert methods["dense_only"] is False
 

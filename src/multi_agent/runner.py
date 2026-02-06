@@ -300,13 +300,10 @@ class MultiAgentRunner:
                 ),  # SSOT: config.json default
                 reranker_candidates=agent_tools_config.get("reranker_candidates", 50),
                 reranker_model=agent_tools_config.get("reranker_model", "bge-reranker-large"),
-                enable_graph_boost=agent_tools_config.get("enable_graph_boost", True),
-                graph_boost_weight=agent_tools_config.get("graph_boost_weight", 0.3),
                 max_document_compare=agent_tools_config.get("max_document_compare", 3),
                 compliance_threshold=agent_tools_config.get("compliance_threshold", 0.7),
                 context_window=agent_tools_config.get("context_window", 2),
                 lazy_load_reranker=agent_tools_config.get("lazy_load_reranker", False),
-                lazy_load_graph=agent_tools_config.get("lazy_load_graph", True),
                 cache_embeddings=agent_tools_config.get("cache_embeddings", True),
                 hyde_num_hypotheses=agent_tools_config.get("hyde_num_hypotheses", 3),
                 query_expansion_provider=agent_tools_config.get(

@@ -250,7 +250,7 @@ def run_single_document(
     print_info(f"Embedding Model: {config.embedding_config.model}")
     print_info(f"Max Tokens: {config.chunking_config.max_tokens} tokens (HybridChunker)")
     print_info(f"SAC (Contextual Retrieval): {'ON' if config.chunking_config.enable_contextual else 'OFF'}")
-    print_info(f"HyDE + Expansion Fusion: ON (w_hyde=0.6, w_exp=0.4)")
+    print_info(f"HyDE + Expansion Fusion: ON (w_orig=0.5, w_hyde=0.25, w_exp=0.25)")
     print_info(f"Storage Backend: {config.storage_backend.upper()}")
 
     # Show wrapper/entity labeling status

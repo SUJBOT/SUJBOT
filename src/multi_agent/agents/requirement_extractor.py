@@ -66,7 +66,7 @@ class RequirementExtractorAgent(BaseAgent):
 
         try:
             # Run autonomous tool calling loop
-            # LLM decides which tools to call (hierarchical_search, graph_search, definition_aligner)
+            # LLM decides which tools to call (search, expand_context, get_document_info)
             result = await self._run_autonomous_tool_loop(
                 system_prompt=self.system_prompt,
                 state=state,

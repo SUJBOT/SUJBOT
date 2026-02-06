@@ -66,7 +66,6 @@ def main():
     config = IndexingConfig.from_env()
 
     # Manually configure for benchmark
-    config.enable_knowledge_graph = False  # DISABLE for benchmark (per user request)
     config.enable_hybrid_search = True  # ENABLE for proper evaluation
     config.vector_store_path = output_dir  # Use benchmark_db instead of vector_db
 
@@ -96,7 +95,6 @@ def main():
             "batch_size": config.embedding_config.batch_size,
             "normalize": config.embedding_config.normalize,
         },
-        "enable_knowledge_graph": False,  # Disabled for benchmark
         "enable_hybrid_search": True,  # Enabled for benchmark
         "enable_reranking": config.enable_reranking,
         "speed_mode": config.speed_mode,

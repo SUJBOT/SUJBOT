@@ -745,8 +745,7 @@ class BaseAgent(ABC):
 
                         # Critical tools that must succeed for valid results
                         critical_tools = {
-                            "hierarchical_search", "similarity_search", "graph_search",
-                            "get_document_info", "bm25_search", "hybrid_search"
+                            "search", "get_document_info",
                         }
 
                         if tool_name in critical_tools:

@@ -171,11 +171,9 @@ class RAGConfidenceScorer:
         # 2. Retrieval method agreement
         bm25_dense_agreement = self._calculate_bm25_dense_agreement(chunks)
         reranker_impact = self._calculate_reranker_impact(chunks)
+        graph_support = False  # Graph boost removed
 
-        # 3. Knowledge graph support
-        graph_support = any(chunk.get("graph_boost", 0.0) > 0 for chunk in chunks)
-
-        # 4. Context quality
+        # 3. Context quality
         document_diversity = self._calculate_document_diversity(chunks)
 
         # 5. Combine into overall confidence
@@ -525,7 +523,6 @@ class RAGConfidenceScorer:
         methods = {
             "hybrid_search": any(c.get("rrf_score") is not None for c in chunks),
             "reranking": any(c.get("rerank_score") is not None for c in chunks),
-            "graph_boost": any(c.get("graph_boost", 0.0) > 0 for c in chunks),
             "bm25_only": all(
                 c.get("bm25_score") is not None and c.get("dense_score") is None for c in chunks
             ),

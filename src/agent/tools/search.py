@@ -4,7 +4,7 @@ Search Tool - HyDE + Expansion Fusion
 Unified search using:
 - HyDE (Hypothetical Document Embeddings)
 - Query Expansion (2 paraphrases)
-- Weighted Fusion (w_hyde=0.6, w_exp=0.4)
+- Weighted Fusion (w_orig=0.5, w_hyde=0.25, w_exp=0.25)
 
 All API calls via DeepInfra (Qwen models).
 """
@@ -45,7 +45,7 @@ class SearchTool(BaseTool):
     Uses:
     - HyDE: Generate hypothetical document answering the query
     - Expansions: 2 query paraphrases for vocabulary coverage
-    - Fusion: Weighted combination (0.6 * hyde + 0.4 * expansions)
+    - Fusion: Weighted combination (0.5 * original + 0.25 * hyde + 0.25 * expansions)
 
     All via DeepInfra API (Qwen3-Embedding-8B + Qwen2.5-7B-Instruct).
     """
@@ -61,7 +61,7 @@ class SearchTool(BaseTool):
     3. Embed all 3 variants (hyde, exp0, exp1)
     4. Search PostgreSQL with each embedding
     5. Min-max normalize scores
-    6. Weighted fusion: final = 0.6 * hyde + 0.4 * avg(expansions)
+    6. Weighted fusion: final = 0.5 * original + 0.25 * hyde + 0.25 * avg(expansions)
     7. Return top-k results
 
     **Models:**

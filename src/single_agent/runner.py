@@ -155,13 +155,10 @@ class SingleAgentRunner:
             enable_reranking=agent_tools_config.get("enable_reranking", False),
             reranker_candidates=agent_tools_config.get("reranker_candidates", 50),
             reranker_model=agent_tools_config.get("reranker_model", "bge-reranker-large"),
-            enable_graph_boost=agent_tools_config.get("enable_graph_boost", True),
-            graph_boost_weight=agent_tools_config.get("graph_boost_weight", 0.3),
             max_document_compare=agent_tools_config.get("max_document_compare", 3),
             compliance_threshold=agent_tools_config.get("compliance_threshold", 0.7),
             context_window=agent_tools_config.get("context_window", 2),
             lazy_load_reranker=agent_tools_config.get("lazy_load_reranker", False),
-            lazy_load_graph=agent_tools_config.get("lazy_load_graph", True),
             cache_embeddings=agent_tools_config.get("cache_embeddings", True),
             hyde_num_hypotheses=agent_tools_config.get("hyde_num_hypotheses", 3),
             query_expansion_provider=agent_tools_config.get("query_expansion_provider", "openai"),
@@ -578,7 +575,7 @@ class SingleAgentRunner:
         if len(tool_call_history) < 2:
             return False
 
-        search_tools = {"search", "similarity_search", "hierarchical_search"}
+        search_tools = {"search"}
         failed = 0
         for call in reversed(tool_call_history[-3:]):
             if call.get("tool") in search_tools and not call.get("success", True):
