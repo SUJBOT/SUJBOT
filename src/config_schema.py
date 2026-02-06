@@ -1217,6 +1217,15 @@ class AgentVariantsConfig(BaseModel):
         description="List of DeepInfra-supported models for validation"
     )
 
+    @model_validator(mode="after")
+    def validate_default_variant(self):
+        if self.default_variant not in self.variants:
+            raise ValueError(
+                f"default_variant '{self.default_variant}' not found in variants: "
+                f"{list(self.variants.keys())}"
+            )
+        return self
+
 
 # ============================================================================
 # End of SSOT Configuration
@@ -1371,6 +1380,16 @@ class RootConfig(BaseModel):
         ]
 
         return any(pattern in value.upper() for pattern in PLACEHOLDER_PATTERNS)
+
+    @model_validator(mode="after")
+    def validate_architecture_config(self) -> "RootConfig":
+        """Validate architecture-specific config is present."""
+        if self.architecture == "vl" and self.vl is None:
+            raise ValueError(
+                "architecture is set to 'vl' but 'vl' configuration section is missing. "
+                "Add a 'vl' section to config.json or set architecture='ocr'."
+            )
+        return self
 
     @model_validator(mode="after")
     def validate_api_keys(self) -> "RootConfig":

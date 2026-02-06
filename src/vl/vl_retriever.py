@@ -19,15 +19,21 @@ from .page_store import PageStore
 logger = logging.getLogger(__name__)
 
 
-@dataclass
+@dataclass(frozen=True)
 class VLPageResult:
-    """Single page result from VL retrieval."""
+    """Single page result from VL retrieval (immutable)."""
 
     page_id: str
     document_id: str
     page_number: int
     score: float
     image_path: Optional[str] = None
+
+    def __post_init__(self):
+        if self.page_number < 1:
+            raise ValueError(f"page_number must be >= 1, got {self.page_number}")
+        if not (0.0 <= self.score <= 1.0):
+            raise ValueError(f"score must be in [0.0, 1.0], got {self.score}")
 
 
 class VLRetriever:
