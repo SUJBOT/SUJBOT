@@ -67,6 +67,8 @@ uv run pytest tests/ -v                                    # All tests
 uv run pytest tests/test_phase4_indexing.py -v             # Single file
 uv run pytest tests/agent/test_tool_registry.py::test_name -v  # Single test
 uv run pytest tests/ --cov=src --cov-report=html           # With coverage
+# NOTE: pytest-asyncio is NOT installed. Use @pytest.mark.anyio for async tests.
+# Async tests need conftest.py with anyio_backend="asyncio" fixture (trio not installed).
 
 # Production tests (requires running Docker stack)
 PROD_BASE_URL="http://localhost:8200" \
@@ -161,6 +163,8 @@ Storage (PostgreSQL: vectors + graph + checkpoints)
 - `src/multi_agent/core/agent_initializer.py` - SSOT for agent initialization
 - `src/multi_agent/prompts/loader.py` - SSOT for loading system prompts from `prompts/`
 - `src/agent/providers/factory.py` - Provider creation + `detect_provider_from_model()`
+- `src/vl/__init__.py:create_vl_components()` - SSOT factory for VL initialization (used by both runners)
+- `backend/constants.py:get_variant_model()` - Falls back to default variant for unknown names (legacy DB compat)
 
 ### VL (Vision-Language) Architecture
 
