@@ -1,8 +1,8 @@
 """
 Citation Metadata REST API
 
-Resolves chunk_id to citation metadata for frontend display.
-All endpoints require JWT authentication.
+Resolves chunk_id (OCR mode) or page_id (VL mode) to citation metadata
+for frontend display. All endpoints require JWT authentication.
 """
 
 import logging
@@ -71,8 +71,8 @@ async def _fetch_chunk_metadata(
     """
     Fetch chunk metadata from database.
 
-    Searches all vector layers (3, 2, 1) to find the chunk.
-    Note: layer1 has different schema (title instead of section_title, no section_path).
+    Searches OCR layers (3, 2, 1) first, then falls back to VL pages table.
+    This supports both OCR mode (chunk_id) and VL mode (page_id) citations.
 
     Raises:
         HTTPException: If database query fails
@@ -113,6 +113,26 @@ async def _fetch_chunk_metadata(
                     content
                 FROM vectors.layer1
                 WHERE chunk_id = $1
+                LIMIT 1
+                """,
+                chunk_id
+            )
+            if row:
+                return dict(row)
+
+            # Fallback: VL pages table (page_id instead of chunk_id)
+            row = await conn.fetchrow(
+                """
+                SELECT
+                    page_id AS chunk_id,
+                    document_id,
+                    'Page ' || page_number AS section_title,
+                    NULL AS section_path,
+                    document_id || ' > Page ' || page_number AS hierarchical_path,
+                    page_number,
+                    NULL AS content
+                FROM vectors.vl_pages
+                WHERE page_id = $1
                 LIMIT 1
                 """,
                 chunk_id

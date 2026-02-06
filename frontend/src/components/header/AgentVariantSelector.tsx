@@ -2,9 +2,8 @@ import { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { DollarSign, Server } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../design-system/utils/cn';
-import { useAuth } from '../../contexts/AuthContext';
 
-type Variant = 'premium' | 'cheap' | 'local';
+type Variant = 'remote' | 'local';
 
 interface VariantInfo {
   variant: Variant;
@@ -19,16 +18,13 @@ interface IndicatorStyle {
 
 export function AgentVariantSelector() {
   const { t } = useTranslation();
-  const { user } = useAuth();
-  const isAdmin = user?.is_admin ?? false;
 
-  const [currentVariant, setCurrentVariant] = useState<Variant>('cheap');
+  const [currentVariant, setCurrentVariant] = useState<Variant>('remote');
   const [isLoading, setIsLoading] = useState(true);
   const [isSwitching, setIsSwitching] = useState(false);
   const [indicatorStyle, setIndicatorStyle] = useState<IndicatorStyle>({ left: 4, width: 80 });
 
-  const premiumRef = useRef<HTMLButtonElement>(null);
-  const cheapRef = useRef<HTMLButtonElement>(null);
+  const remoteRef = useRef<HTMLButtonElement>(null);
   const localRef = useRef<HTMLButtonElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -40,8 +36,7 @@ export function AgentVariantSelector() {
   useLayoutEffect(() => {
     const updateIndicator = () => {
       const refs: Record<Variant, React.RefObject<HTMLButtonElement | null>> = {
-        premium: premiumRef,
-        cheap: cheapRef,
+        remote: remoteRef,
         local: localRef,
       };
       const activeRef = refs[currentVariant];
@@ -132,59 +127,29 @@ export function AgentVariantSelector() {
         }}
       />
 
-      {/* Premium Button - Only visible to admins */}
-      {isAdmin && (
-        <button
-          ref={premiumRef}
-          onClick={() => switchVariant('premium')}
-          disabled={isSwitching}
-          className={cn(
-            'relative z-10 flex items-center gap-1 px-3 py-1.5 rounded-md text-sm font-medium',
-            'transition-colors duration-300',
-            currentVariant === 'premium'
-              ? 'text-accent-900'
-              : 'text-accent-500 hover:text-accent-700',
-            isSwitching && 'opacity-50 cursor-not-allowed'
-          )}
-          title={t('agentVariant.premiumTooltip')}
-        >
-          <span
-            className={cn(
-              'flex -space-x-1.5 transition-colors duration-300',
-              currentVariant === 'premium' ? 'text-yellow-500' : ''
-            )}
-          >
-            <DollarSign size={14} />
-            <DollarSign size={14} />
-            <DollarSign size={14} />
-          </span>
-          <span>{t('agentVariant.premium')}</span>
-        </button>
-      )}
-
-      {/* Cheap Button */}
+      {/* Remote Button */}
       <button
-        ref={cheapRef}
-        onClick={() => switchVariant('cheap')}
+        ref={remoteRef}
+        onClick={() => switchVariant('remote')}
         disabled={isSwitching}
         className={cn(
           'relative z-10 flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium',
           'transition-colors duration-300',
-          currentVariant === 'cheap'
+          currentVariant === 'remote'
             ? 'text-accent-900'
             : 'text-accent-500 hover:text-accent-700',
           isSwitching && 'opacity-50 cursor-not-allowed'
         )}
-        title={t('agentVariant.cheapTooltip')}
+        title={t('agentVariant.remoteTooltip')}
       >
         <DollarSign
           size={16}
           className={cn(
             'transition-colors duration-300',
-            currentVariant === 'cheap' ? 'text-green-500' : ''
+            currentVariant === 'remote' ? 'text-green-500' : ''
           )}
         />
-        <span>{t('agentVariant.cheap')}</span>
+        <span>{t('agentVariant.remote')}</span>
       </button>
 
       {/* Local Button */}

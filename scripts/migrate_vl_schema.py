@@ -41,10 +41,9 @@ async def migrate():
         ON vectors.vl_pages(document_id);
     CREATE INDEX IF NOT EXISTS idx_vl_pages_page_number
         ON vectors.vl_pages(document_id, page_number);
-    CREATE INDEX IF NOT EXISTS idx_vl_pages_embedding
-        ON vectors.vl_pages
-        USING hnsw (embedding vector_cosine_ops)
-        WITH (m = 16, ef_construction = 64);
+    -- No HNSW index on embedding column:
+    -- ~500 vectors with exact cosine scan is <50ms and gives 100% recall.
+    -- pgvector 0.8.1 HNSW limit is 2000 dims; Jina v4 uses 2048-dim.
     """
 
     await conn.execute(ddl)

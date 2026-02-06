@@ -168,7 +168,6 @@ extraction_dataset/TODO.md
 .claude/
 CODEX*
 .codex/
-CLAUDE.md
 
 # -----------------------------------------------------------------------------
 # Nginx Logs (mounted volume in Docker)

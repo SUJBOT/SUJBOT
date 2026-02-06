@@ -81,16 +81,16 @@ class ClarificationRequest(BaseModel):
 class AgentVariantRequest(BaseModel):
     """Request to update agent variant preference."""
 
-    variant: Literal["premium", "cheap", "local"] = Field(
+    variant: Literal["remote", "local"] = Field(
         ...,
-        description="Agent variant: 'premium' (Opus+Sonnet), 'cheap' (Haiku), or 'local' (Llama 3.1 70B)"
+        description="Agent variant: 'remote' (Haiku) or 'local' (Qwen3 VL 235B via DeepInfra)"
     )
 
 
 class AgentVariantResponse(BaseModel):
     """Response with agent variant information."""
 
-    variant: Literal["premium", "cheap", "local"] = Field(..., description="Current variant")
+    variant: Literal["remote", "local"] = Field(..., description="Current variant")
     display_name: str = Field(..., description="Human-readable variant name")
     model: str = Field(..., description="Default model identifier for this variant")
 
@@ -154,7 +154,7 @@ class AdminUserUpdateRequest(BaseModel):
     full_name: Optional[str] = Field(None, max_length=100, description="Display name")
     is_admin: Optional[bool] = Field(None, description="Admin privileges")
     is_active: Optional[bool] = Field(None, description="Account active status")
-    agent_variant: Optional[Literal["premium", "cheap", "local"]] = Field(
+    agent_variant: Optional[Literal["remote", "local"]] = Field(
         None, description="Model preference"
     )
     spending_limit_czk: Optional[float] = Field(

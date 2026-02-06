@@ -285,8 +285,9 @@ def create_structured_evaluator(
 class SingleAgentEvaluator:
     """Wrapper for SingleAgentRunner that runs queries and returns answers."""
 
-    def __init__(self, config: dict[str, Any]):
+    def __init__(self, config: dict[str, Any], model: str = ""):
         self.config = config
+        self.model = model
         self.runner = None
         self._initialized = False
 
@@ -308,7 +309,7 @@ class SingleAgentEvaluator:
             await self.initialize()
 
         result = None
-        async for event in self.runner.run_query(question, stream_progress=False):
+        async for event in self.runner.run_query(question, model=self.model, stream_progress=False):
             if event.get("type") == "final":
                 result = event
 
@@ -861,6 +862,12 @@ def parse_args():
         help="Prefix for experiment name in LangSmith",
     )
     parser.add_argument(
+        "--model",
+        type=str,
+        default="",
+        help="Override agent model (e.g., claude-sonnet-4-5-20250929). Uses config.json default if not set.",
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         help="Enable debug logging",
@@ -908,7 +915,7 @@ async def main():
         return
 
     # Initialize evaluator
-    evaluator = SingleAgentEvaluator(config)
+    evaluator = SingleAgentEvaluator(config, model=args.model)
     await evaluator.initialize()
 
     try:

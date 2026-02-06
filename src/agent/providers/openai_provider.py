@@ -156,14 +156,16 @@ class OpenAIProvider(BaseProvider):
         openai_messages = self._convert_messages_to_openai(messages, system)
         openai_tools = self._translator.to_openai(tools) if tools else None
 
-        # Prepare API parameters
+        # Prepare API parameters (only include tools if provided)
         api_params = {
             "model": self.model,
             "messages": openai_messages,
-            "tools": openai_tools,
             "stream": True,
             **kwargs,
         }
+
+        if openai_tools:
+            api_params["tools"] = openai_tools
 
         # O-series reasoning models only support default temperature (1.0)
         if not self._requires_default_temperature():

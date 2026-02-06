@@ -265,8 +265,7 @@ export const UserEdit = () => {
           source="agent_variant"
           label={t('admin.users.agentVariant')}
           choices={[
-            { id: 'premium', name: t('admin.users.variantPremium') },
-            { id: 'cheap', name: t('admin.users.variantCheap') },
+            { id: 'remote', name: t('admin.users.variantRemote') },
             { id: 'local', name: t('admin.users.variantLocal') },
           ]}
         />

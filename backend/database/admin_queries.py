@@ -130,7 +130,7 @@ class AdminQueries:
             full_name: New display name
             is_admin: Admin privileges
             is_active: Account active status
-            agent_variant: Model preference ('premium', 'cheap', 'local')
+            agent_variant: Model preference ('remote', 'local')
             spending_limit_czk: Spending limit in CZK
 
         Returns:

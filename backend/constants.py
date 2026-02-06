@@ -18,12 +18,12 @@ from typing import Literal
 logger = logging.getLogger(__name__)
 
 # Valid agent variants type hint
-AgentVariant = Literal["premium", "cheap", "local"]
+AgentVariant = Literal["remote", "local"]
 
 # Module-level state (lazy loaded from config)
 _config_loaded = False
 _VARIANT_CONFIG: dict[str, dict[str, str]] = {}
-_DEFAULT_VARIANT: str = "cheap"
+_DEFAULT_VARIANT: str = "remote"
 _DEEPINFRA_SUPPORTED_MODELS: frozenset[str] = frozenset()
 
 
@@ -32,12 +32,8 @@ _DEEPINFRA_SUPPORTED_MODELS: frozenset[str] = frozenset()
 # =============================================================================
 
 _BUILTIN_VARIANT_CONFIG = {
-    "premium": {
-        "display_name": "Premium (Sonnet 4.5)",
-        "model": "claude-sonnet-4-5-20250929",
-    },
-    "cheap": {
-        "display_name": "Cheap (Haiku 4.5)",
+    "remote": {
+        "display_name": "Remote (Haiku 4.5)",
         "model": "claude-haiku-4-5-20251001",
     },
     "local": {
@@ -46,7 +42,7 @@ _BUILTIN_VARIANT_CONFIG = {
     },
 }
 
-_BUILTIN_DEFAULT_VARIANT = "cheap"
+_BUILTIN_DEFAULT_VARIANT = "remote"
 
 _BUILTIN_DEEPINFRA_SUPPORTED_MODELS = frozenset({
     "Qwen/Qwen2.5-VL-32B-Instruct",
@@ -164,7 +160,7 @@ def get_variant_model(variant: str) -> str:
     Get model identifier for a variant.
 
     Args:
-        variant: Agent variant ('premium', 'cheap', or 'local')
+        variant: Agent variant ('remote' or 'local')
 
     Returns:
         Model identifier string
@@ -194,13 +190,5 @@ def get_variant_display_name(variant: str) -> str:
     return _VARIANT_CONFIG.get(variant, {}).get("display_name", variant)
 
 
-# =============================================================================
-# Backward Compatibility
-# =============================================================================
-
 # Initialize on first import
 _ensure_config_loaded()
-
-VARIANT_CONFIG = _VARIANT_CONFIG
-DEFAULT_VARIANT = _DEFAULT_VARIANT
-DEEPINFRA_SUPPORTED_MODELS = _DEEPINFRA_SUPPORTED_MODELS

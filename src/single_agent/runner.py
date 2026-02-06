@@ -198,7 +198,10 @@ class SingleAgentRunner:
                 logger.info("VL components initialized (Jina v4)")
             except Exception as e:
                 logger.error(f"Failed to init VL components: {e}", exc_info=True)
-                logger.warning("Falling back to OCR architecture")
+                raise RuntimeError(
+                    f"VL architecture was explicitly configured but initialization failed: {e}. "
+                    f"Fix VL config or switch to architecture='ocr' in config.json."
+                ) from e
 
         # Initialize registry
         registry = get_registry()
@@ -344,9 +347,13 @@ class SingleAgentRunner:
                 messages.append({"role": msg["role"], "content": msg["content"]})
         messages.append({"role": "user", "content": query})
 
-        # Prepare system prompt (with caching if supported)
+        # Prepare system prompt (with caching only for providers that support it)
         system = self.system_prompt
-        if enable_prompt_caching and isinstance(system, str):
+        if (
+            enable_prompt_caching
+            and isinstance(system, str)
+            and provider.supports_feature("prompt_caching")
+        ):
             system = [
                 {
                     "type": "text",
@@ -362,6 +369,15 @@ class SingleAgentRunner:
             for iteration in range(max_iterations):
                 logger.info(f"Iteration {iteration + 1}/{max_iterations}")
 
+                # Force tool use on first iteration for models that don't
+                # voluntarily call tools (e.g., Qwen3-VL on DeepInfra)
+                extra_kwargs = {}
+                if iteration == 0 and tool_schemas:
+                    if provider_name == "deepinfra":
+                        extra_kwargs["tool_choice"] = "required"
+                    elif provider_name == "anthropic":
+                        extra_kwargs["tool_choice"] = {"type": "any"}
+
                 # LLM call
                 llm_start = time.time()
                 try:
@@ -371,6 +387,7 @@ class SingleAgentRunner:
                         system=system,
                         max_tokens=max_tokens,
                         temperature=temperature,
+                        **extra_kwargs,
                     )
                     llm_time_ms = (time.time() - llm_start) * 1000
                 except Exception as e:
@@ -577,7 +594,8 @@ class SingleAgentRunner:
             "role": "user",
             "content": (
                 "Provide your FINAL answer now based on the information gathered. "
-                "Do NOT call any more tools. Use \\cite{chunk_id} citations for all facts."
+                "Do NOT call any more tools. Use \\cite{id} citations for all facts, "
+                "where id is the chunk_id or page_id from search results."
             ),
         })
         try:
@@ -594,8 +612,11 @@ class SingleAgentRunner:
                 else str(final_response.content)
             )
         except Exception as e:
-            logger.error(f"Final answer synthesis failed: {e}")
-            return "V dostupných dokumentech nebyla nalezena relevantní informace k tomuto dotazu."
+            logger.error(f"Final answer synthesis failed: {e}", exc_info=True)
+            return (
+                "No relevant information was found in the available documents for this query. "
+                "/ V dostupných dokumentech nebyla nalezena relevantní informace k tomuto dotazu."
+            )
 
     async def shutdown_async(self) -> None:
         """Async shutdown — close connection pools."""

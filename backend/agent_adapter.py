@@ -20,7 +20,7 @@ from src.agent.config import AgentConfig
 from src.cost_tracker import get_global_tracker, reset_global_tracker
 from src.utils.security import sanitize_error
 from backend.constants import (
-    DEFAULT_VARIANT,
+    get_default_variant,
     get_variant_model,
     get_variant_display_name,
     is_valid_variant,
@@ -189,7 +189,7 @@ class AgentAdapter:
         tracker = get_global_tracker()
 
         # Resolve variant → model
-        variant = DEFAULT_VARIANT
+        variant = get_default_variant()
         model = get_variant_model(variant)
 
         if user_id:

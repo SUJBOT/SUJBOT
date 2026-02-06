@@ -111,12 +111,10 @@
     "submit": "Submit Clarification"
   },
   "agentVariant": {
-    "premium": "Premium",
-    "premiumTooltip": "Premium - Opus 4.5 + Sonnet 4.5 (best quality)",
-    "cheap": "Cheap",
-    "cheapTooltip": "Cheap - Haiku 4.5 (fast and affordable)",
+    "remote": "Remote",
+    "remoteTooltip": "Remote - Haiku 4.5 (fast and affordable)",
     "local": "Local",
-    "localTooltip": "Local - Llama 3.1 70B (open-source via DeepInfra)"
+    "localTooltip": "Local - Qwen3 VL 235B (open-source via DeepInfra)"
   },
   "degradedMode": {
     "title": "Running in Degraded Mode",
@@ -207,9 +205,8 @@
       "statusActive": "Active",
       "statusInactive": "Inactive",
       "roleAdmin": "Admin",
-      "variantPremium": "Premium (Claude Opus/Sonnet)",
-      "variantCheap": "Cheap (Claude Haiku)",
-      "variantLocal": "Local (Llama 3.1 70B)",
+      "variantRemote": "Remote (Claude Haiku)",
+      "variantLocal": "Local (Qwen3 VL 235B)",
       "spending": "Spent",
       "spendingSection": "Spending Management",
       "spendingLimit": "Spending Limit (CZK)",

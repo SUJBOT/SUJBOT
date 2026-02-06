@@ -1209,7 +1209,7 @@ class AgentVariantsConfig(BaseModel):
         description="Variant configurations keyed by variant name"
     )
     default_variant: str = Field(
-        "cheap",
+        "remote",
         description="Default variant when lookup fails or user has no preference"
     )
     deepinfra_supported_models: list[str] = Field(

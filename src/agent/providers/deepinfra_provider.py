@@ -187,9 +187,11 @@ class DeepInfraProvider(BaseProvider):
         """
         Convert Anthropic message format to OpenAI format.
 
-        Handles both text-only and multimodal (vision) content.
-        Image blocks (Anthropic base64 format) are converted to
-        OpenAI image_url format for VL models like Qwen-VL.
+        Handles:
+        - Text-only and multimodal (vision) content
+        - Tool use blocks (assistant → OpenAI tool_calls)
+        - Tool result blocks (user → OpenAI tool messages)
+        - Image blocks (Anthropic base64 → OpenAI image_url)
 
         Args:
             messages: Anthropic-format messages
@@ -222,28 +224,96 @@ class DeepInfraProvider(BaseProvider):
             if isinstance(content, str):
                 formatted.append({"role": role, "content": content})
             elif isinstance(content, list):
-                # Check if any block is an image (multimodal content)
-                has_images = any(
-                    isinstance(block, dict) and block.get("type") == "image"
-                    for block in content
-                )
-
-                if has_images:
-                    # Multimodal: convert to OpenAI vision format
-                    openai_content = self._convert_multimodal_content(content)
-                    if openai_content:
-                        formatted.append({"role": role, "content": openai_content})
-                else:
-                    # Text-only: extract text blocks
-                    text = "".join(
-                        block.get("text", "")
-                        for block in content
-                        if isinstance(block, dict) and block.get("type") == "text"
-                    )
-                    if text:
-                        formatted.append({"role": role, "content": text})
+                if role == "assistant":
+                    self._format_assistant_message(content, formatted)
+                elif role == "user":
+                    self._format_user_message(content, formatted)
 
         return formatted
+
+    def _format_assistant_message(self, content: List[Dict], formatted: List[Dict]) -> None:
+        """Convert Anthropic assistant content blocks to OpenAI format."""
+        text_parts = []
+        tool_calls = []
+        image_blocks = []
+
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "text":
+                text_parts.append(block.get("text", ""))
+            elif block.get("type") == "tool_use":
+                tool_calls.append({
+                    "id": block["id"],
+                    "type": "function",
+                    "function": {
+                        "name": block["name"],
+                        "arguments": json.dumps(block.get("input", {})),
+                    },
+                })
+            elif block.get("type") == "image":
+                image_blocks.append(block)
+
+        if image_blocks:
+            # Multimodal assistant message (rare but handle it)
+            openai_content = self._convert_multimodal_content(content)
+            if openai_content:
+                formatted.append({"role": "assistant", "content": openai_content})
+        elif tool_calls:
+            msg = {"role": "assistant", "tool_calls": tool_calls}
+            msg["content"] = " ".join(text_parts) if text_parts else None
+            formatted.append(msg)
+        elif text_parts:
+            formatted.append({"role": "assistant", "content": " ".join(text_parts)})
+
+    def _format_user_message(self, content: List[Dict], formatted: List[Dict]) -> None:
+        """Convert Anthropic user content blocks to OpenAI format."""
+        has_images = any(
+            isinstance(block, dict) and block.get("type") == "image"
+            for block in content
+        )
+        has_tool_results = any(
+            isinstance(block, dict) and block.get("type") == "tool_result"
+            for block in content
+        )
+
+        if has_tool_results:
+            # Convert tool_result blocks to OpenAI tool messages
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "tool_result":
+                    tool_content = block.get("content", "")
+                    if isinstance(tool_content, list):
+                        # Multimodal tool result — convert images, extract text
+                        openai_parts = self._convert_multimodal_content(tool_content)
+                        formatted.append({
+                            "role": "tool",
+                            "tool_call_id": block["tool_use_id"],
+                            "content": openai_parts if openai_parts else "",
+                        })
+                    else:
+                        formatted.append({
+                            "role": "tool",
+                            "tool_call_id": block["tool_use_id"],
+                            "content": str(tool_content),
+                        })
+                elif block.get("type") == "text":
+                    formatted.append({"role": "user", "content": block.get("text", "")})
+        elif has_images:
+            # Multimodal user message
+            openai_content = self._convert_multimodal_content(content)
+            if openai_content:
+                formatted.append({"role": "user", "content": openai_content})
+        else:
+            # Text-only user message
+            text = "".join(
+                block.get("text", "")
+                for block in content
+                if isinstance(block, dict) and block.get("type") == "text"
+            )
+            if text:
+                formatted.append({"role": "user", "content": text})
 
     def _convert_multimodal_content(self, content_blocks: List[Dict]) -> List[Dict]:
         """
@@ -372,17 +442,10 @@ class DeepInfraProvider(BaseProvider):
 
         Args:
             model: Model identifier
-
-        Raises:
-            ValueError: If model is not supported
         """
-        if model not in SUPPORTED_MODELS:
-            raise ValueError(
-                f"Unsupported model: {model}. "
-                f"Supported models: {', '.join(sorted(SUPPORTED_MODELS))}"
-            )
+        old_model = self.model
         self.model = model
-        logger.info(f"Switched to model: {model}")
+        logger.info(f"Model changed: {old_model} → {model}")
 
     def count_tokens(
         self,

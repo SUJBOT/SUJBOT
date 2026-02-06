@@ -111,6 +111,18 @@ class JinaClient:
                 cause=e,
             )
 
+        # Validate response structure
+        if "data" not in data or not data["data"]:
+            raise JinaAPIError(
+                "Jina API returned unexpected response: missing 'data' field",
+                details={"response_keys": list(data.keys())},
+            )
+        if "embedding" not in data["data"][0]:
+            raise JinaAPIError(
+                "Jina API returned unexpected response: missing 'embedding' in data[0]",
+                details={"data_keys": list(data["data"][0].keys())},
+            )
+
         embedding = np.array(data["data"][0]["embedding"], dtype=np.float32)
         embedding = self._l2_normalize(embedding)
 
@@ -172,7 +184,19 @@ class JinaClient:
                     cause=e,
                 )
 
+            # Validate response structure
+            if "data" not in data or not data["data"]:
+                raise JinaAPIError(
+                    "Jina API returned unexpected response for image batch: missing 'data'",
+                    details={"batch_start": batch_start, "response_keys": list(data.keys())},
+                )
+
             for item in data["data"]:
+                if "embedding" not in item:
+                    raise JinaAPIError(
+                        "Jina API response item missing 'embedding' field",
+                        details={"item_keys": list(item.keys()), "batch_start": batch_start},
+                    )
                 vec = np.array(item["embedding"], dtype=np.float32)
                 all_embeddings.append(self._l2_normalize(vec))
 
