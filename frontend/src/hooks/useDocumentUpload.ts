@@ -44,8 +44,12 @@ export function useDocumentUpload() {
           setIsUploading(false);
         }
       }
-    } catch {
-      // Stream ended (possibly abort)
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return; // User cancelled — not an error
+      }
+      console.error('Upload stream error:', err);
+      setError(err instanceof Error ? err.message : 'Upload failed unexpectedly');
     } finally {
       setIsUploading(false);
       abortRef.current = null;

@@ -27,6 +27,7 @@ export function DocumentBrowser({ isOpen, onClose }: DocumentBrowserProps) {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { isUploading, progress, error: uploadError, result: uploadResult, startUpload, reset: resetUpload } = useDocumentUpload();
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   // Load documents when opening
   useEffect(() => {
@@ -87,6 +88,14 @@ export function DocumentBrowser({ isOpen, onClose }: DocumentBrowserProps) {
     }
   }, [uploadError]);
 
+  // Auto-dismiss validation error after 5s
+  useEffect(() => {
+    if (validationError) {
+      const timer = setTimeout(() => setValidationError(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [validationError]);
+
   const handleSelectDocument = useCallback((doc: DocumentInfo) => {
     openPdf(doc.document_id, doc.display_name, 1);
     onClose();
@@ -98,17 +107,20 @@ export function DocumentBrowser({ isOpen, onClose }: DocumentBrowserProps) {
 
     // Reset file input so same file can be re-selected
     e.target.value = '';
+    setValidationError(null);
 
     if (!file.name.toLowerCase().endsWith('.pdf')) {
+      setValidationError(t('documentBrowser.pdfOnly'));
       return;
     }
     if (file.size > 100 * 1024 * 1024) {
+      setValidationError(t('documentBrowser.fileTooLarge'));
       return;
     }
 
     resetUpload();
     startUpload(file);
-  }, [startUpload, resetUpload]);
+  }, [startUpload, resetUpload, t]);
 
   const formatSize = (bytes: number): string => {
     if (bytes < 1024 * 1024) {
@@ -200,7 +212,7 @@ export function DocumentBrowser({ isOpen, onClose }: DocumentBrowserProps) {
       </div>
 
       {/* Upload progress */}
-      {(isUploading || uploadResult || uploadError) && (
+      {(isUploading || uploadResult || uploadError || validationError) && (
         <div className={cn(
           'px-4 py-3',
           'border-b border-accent-200 dark:border-accent-700'
@@ -229,6 +241,12 @@ export function DocumentBrowser({ isOpen, onClose }: DocumentBrowserProps) {
             <div className="flex items-center gap-2 text-sm text-red-500 dark:text-red-400">
               <AlertCircle size={16} />
               <span>{uploadError}</span>
+            </div>
+          )}
+          {validationError && (
+            <div className="flex items-center gap-2 text-sm text-red-500 dark:text-red-400">
+              <AlertCircle size={16} />
+              <span>{validationError}</span>
             </div>
           )}
         </div>

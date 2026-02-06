@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import re
+import shutil
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -386,10 +387,19 @@ async def upload_document(
             )
 
         except Exception as e:
-            logger.error(f"Upload indexing failed: {e}", exc_info=True)
+            logger.error(
+                "Upload indexing failed for %s (user %s): %s",
+                safe_filename,
+                user.get("id", "unknown"),
+                e,
+                exc_info=True,
+            )
             # Clean up partial files on failure
             if pdf_path.exists():
                 pdf_path.unlink()
+            doc_dir = page_store.store_dir / document_id
+            if doc_dir.exists():
+                shutil.rmtree(doc_dir, ignore_errors=True)
             yield {
                 "event": "error",
                 "data": json.dumps({
