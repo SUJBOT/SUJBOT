@@ -163,9 +163,7 @@ class UsageEntry:
     operation: str  # "summary", "context", "embedding", "agent", etc.
     cache_creation_tokens: int = 0  # Tokens written to cache
     cache_read_tokens: int = 0  # Tokens read from cache
-    response_time_ms: float = (
-        0.0  # LLM response time in milliseconds (measured via time.time()). Accumulates per agent in get_agent_breakdown(). Always 0.0 for embedding operations.
-    )
+    response_time_ms: float = 0.0  # LLM response time in ms (0.0 for embeddings)
 
 
 class CostTracker:
@@ -300,10 +298,12 @@ class CostTracker:
             response_time_ms=response_time_ms,
         )
 
-        # Debug log response time tracking (always log to debug the issue)
-        logger.info(
-            f"💫 track_llm: operation={operation}, response_time={response_time_ms:.2f}ms, "
-            f"input={input_tokens}, output={output_tokens}"
+        logger.debug(
+            "track_llm: operation=%s, response_time=%.2fms, input=%d, output=%d",
+            operation,
+            response_time_ms,
+            input_tokens,
+            output_tokens,
         )
 
         self._entries.append(entry)
@@ -608,11 +608,13 @@ class CostTracker:
             stats["call_count"] += 1
             stats["response_time_ms"] += entry.response_time_ms
 
-        # Debug log final breakdown
         for agent_name, stats in agent_stats.items():
-            logger.info(
-                f"💫 Agent breakdown: {agent_name} - response_time={stats['response_time_ms']:.2f}ms, "
-                f"cost=${stats['cost']:.6f}, calls={stats['call_count']}"
+            logger.debug(
+                "Agent breakdown: %s - response_time=%.2fms, cost=$%.6f, calls=%d",
+                agent_name,
+                stats["response_time_ms"],
+                stats["cost"],
+                stats["call_count"],
             )
 
         return agent_stats

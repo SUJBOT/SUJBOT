@@ -887,15 +887,8 @@ class MultiAgentRunner:
             if not final_result:
                 raise RuntimeError("Workflow produced no output")
 
-            # Extract result - astream() returns dict where keys are node names
-            # The final state is in the last yielded chunk
-            # Get the actual state from within the node dict
-            if final_result:
-                # Extract state from node dict (astream returns {"node_name": {state}})
-                # Get the first (and should be only) value from the dict
-                result = next(iter(final_result.values())) if final_result else {}
-            else:
-                result = {}
+            # Extract state from node dict (astream returns {"node_name": {state}})
+            result = next(iter(final_result.values()))
 
             # Debug: Log what we got from astream
             logger.info(f"Final result node keys: {list(final_result.keys())}")
