@@ -708,7 +708,7 @@
       "jina-v4": {
         "id": "jina-embeddings-v4",
         "provider": "jina",
-        "pricing": {"input": 0.00, "output": 0.00},
+        "pricing": {"input": 0.02, "output": 0.00},
         "dimensions": 2048
       }
     },

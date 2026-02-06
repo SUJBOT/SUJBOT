@@ -14,6 +14,8 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from dotenv import load_dotenv
 
+from ..exceptions import AgentInitializationError
+
 logger = logging.getLogger(__name__)
 
 
@@ -50,6 +52,7 @@ class SingleAgentRunner:
 
             # 3. Initialize tool adapter (bridge to tool schemas + execution)
             from ..multi_agent.tools.adapter import ToolAdapter
+
             self.tool_adapter = ToolAdapter()
 
             # 4. Load system prompt
@@ -62,7 +65,9 @@ class SingleAgentRunner:
 
         except Exception as e:
             logger.error(f"Failed to initialize single-agent system: {e}", exc_info=True)
-            raise RuntimeError(f"Single-agent initialization failed: {e}") from e
+            raise AgentInitializationError(
+                f"Single-agent initialization failed: {e}", cause=e
+            ) from e
 
     def _setup_langsmith(self) -> None:
         """Setup LangSmith tracing if configured."""
@@ -71,6 +76,7 @@ class SingleAgentRunner:
             return
         try:
             from ..multi_agent.observability import setup_langsmith
+
             self.langsmith = setup_langsmith(langsmith_config)
             logger.info("LangSmith tracing enabled")
         except Exception as e:
@@ -95,7 +101,13 @@ class SingleAgentRunner:
             self.llm_provider = create_provider(model=tool_model)
             logger.info(f"Tool LLM provider: {tool_model}")
         except Exception as e:
-            logger.warning(f"Tool LLM provider failed: {e}. HyDE disabled.")
+            logger.error(
+                "Tool LLM provider failed for %s: %s. HyDE search disabled — "
+                "expect degraded retrieval quality.",
+                tool_model,
+                e,
+                exc_info=True,
+            )
             self.llm_provider = None
 
         # Vector store
@@ -116,7 +128,9 @@ class SingleAgentRunner:
             vector_store_path = Path(self.config.get("vector_store_path", "vector_db"))
             if not vector_store_path.exists():
                 raise ValueError(f"Vector store not found at {vector_store_path}")
-            vector_store = await load_vector_store_adapter(backend="faiss", path=str(vector_store_path))
+            vector_store = await load_vector_store_adapter(
+                backend="faiss", path=str(vector_store_path)
+            )
 
         self.vector_store = vector_store
 
@@ -144,6 +158,7 @@ class SingleAgentRunner:
                     kg_path = Path("output/knowledge_graph.json")
                 if kg_path.exists():
                     from ..graph.models import KnowledgeGraph
+
                     knowledge_graph = KnowledgeGraph.load_json(str(kg_path))
                     logger.info(f"KG loaded: {len(knowledge_graph.entities)} entities")
             except Exception as e:
@@ -198,9 +213,10 @@ class SingleAgentRunner:
                 logger.info("VL components initialized (Jina v4)")
             except Exception as e:
                 logger.error(f"Failed to init VL components: {e}", exc_info=True)
-                raise RuntimeError(
+                raise AgentInitializationError(
                     f"VL architecture was explicitly configured but initialization failed: {e}. "
-                    f"Fix VL config or switch to architecture='ocr' in config.json."
+                    f"Fix VL config or switch to architecture='ocr' in config.json.",
+                    cause=e,
                 ) from e
 
         # Initialize registry
@@ -223,9 +239,7 @@ class SingleAgentRunner:
 
     def _load_system_prompt(self) -> None:
         """Load unified system prompt from file."""
-        prompt_file = self.single_agent_config.get(
-            "prompt_file", "prompts/agents/unified.txt"
-        )
+        prompt_file = self.single_agent_config.get("prompt_file", "prompts/agents/unified.txt")
         prompt_path = Path(prompt_file)
         if not prompt_path.exists():
             # Try relative to project root
@@ -239,6 +253,7 @@ class SingleAgentRunner:
     def _create_provider(self, model: str):
         """Create LLM provider for the given model."""
         from ..agent.providers.factory import create_provider
+
         return create_provider(model=model)
 
     def get_tool_health(self) -> Dict[str, Any]:
@@ -302,6 +317,15 @@ class SingleAgentRunner:
         Yields:
             Dict events. Final event has type='final'.
         """
+        if not self._initialized:
+            yield {
+                "type": "final",
+                "success": False,
+                "final_answer": "SingleAgentRunner not initialized. Call initialize() first.",
+                "errors": ["Runner not initialized"],
+            }
+            return
+
         from ..cost_tracker import get_global_tracker, reset_global_tracker
 
         reset_global_tracker()
@@ -330,12 +354,11 @@ class SingleAgentRunner:
             return
 
         # Get all tool schemas
-        all_tools = self.tool_adapter.get_available_tools()
-        tool_schemas = []
-        for tool_name in all_tools:
-            schema = self.tool_adapter.get_tool_schema(tool_name)
-            if schema:
-                tool_schemas.append(schema)
+        tool_schemas = [
+            schema
+            for tool_name in self.tool_adapter.get_available_tools()
+            if (schema := self.tool_adapter.get_tool_schema(tool_name))
+        ]
 
         logger.info(f"Running query with model={model_name}, tools={len(tool_schemas)}")
 
@@ -349,11 +372,7 @@ class SingleAgentRunner:
 
         # Prepare system prompt (with caching only for providers that support it)
         system = self.system_prompt
-        if (
-            enable_prompt_caching
-            and isinstance(system, str)
-            and provider.supports_feature("prompt_caching")
-        ):
+        if enable_prompt_caching and provider.supports_feature("prompt_caching"):
             system = [
                 {
                     "type": "text",
@@ -364,6 +383,8 @@ class SingleAgentRunner:
 
         tool_call_history = []
         total_tool_cost = 0.0
+        final_text = ""
+        iteration = 0
 
         try:
             for iteration in range(max_iterations):
@@ -416,7 +437,8 @@ class SingleAgentRunner:
                 # Check if LLM wants to use tools
                 if hasattr(response, "stop_reason") and response.stop_reason == "tool_use":
                     tool_uses = [
-                        b for b in response.content
+                        b
+                        for b in response.content
                         if isinstance(b, dict) and b.get("type") == "tool_use"
                     ]
 
@@ -446,7 +468,8 @@ class SingleAgentRunner:
 
                         tool_cost = (
                             result.get("metadata", {}).get("api_cost_usd", 0.0)
-                            if isinstance(result, dict) else 0.0
+                            if isinstance(result, dict)
+                            else 0.0
                         )
                         total_tool_cost += tool_cost
 
@@ -460,33 +483,40 @@ class SingleAgentRunner:
                         # Handle VL multimodal page images
                         page_images = (
                             result.get("metadata", {}).get("page_images")
-                            if result.get("success") else None
+                            if result.get("success")
+                            else None
                         )
 
                         if page_images:
                             content_blocks = []
                             for page in page_images:
-                                content_blocks.append({
-                                    "type": "image",
-                                    "source": {
-                                        "type": "base64",
-                                        "media_type": page.get("media_type", "image/png"),
-                                        "data": page["base64_data"],
-                                    },
-                                })
-                                content_blocks.append({
-                                    "type": "text",
-                                    "text": (
-                                        f"[Page {page.get('page_number', '?')} from "
-                                        f"{page.get('document_id', 'unknown')}, "
-                                        f"score: {page.get('score', 0):.3f}]"
-                                    ),
-                                })
-                            tool_results.append({
-                                "type": "tool_result",
-                                "tool_use_id": tool_use_id,
-                                "content": content_blocks,
-                            })
+                                content_blocks.append(
+                                    {
+                                        "type": "image",
+                                        "source": {
+                                            "type": "base64",
+                                            "media_type": page.get("media_type", "image/png"),
+                                            "data": page["base64_data"],
+                                        },
+                                    }
+                                )
+                                content_blocks.append(
+                                    {
+                                        "type": "text",
+                                        "text": (
+                                            f"[Page {page.get('page_number', '?')} from "
+                                            f"{page.get('document_id', 'unknown')}, "
+                                            f"score: {page.get('score', 0):.3f}]"
+                                        ),
+                                    }
+                                )
+                            tool_results.append(
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": tool_use_id,
+                                    "content": content_blocks,
+                                }
+                            )
                         else:
                             raw_content = (
                                 str(result.get("data", ""))
@@ -499,20 +529,24 @@ class SingleAgentRunner:
                                 tail = raw_content[-500:]
                                 raw_content = f"{head}\n\n[...truncated...]\n\n{tail}"
 
-                            tool_results.append({
-                                "type": "tool_result",
-                                "tool_use_id": tool_use_id,
-                                "content": raw_content,
-                                "is_error": not result.get("success", False),
-                            })
+                            tool_results.append(
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": tool_use_id,
+                                    "content": raw_content,
+                                    "is_error": not result.get("success", False),
+                                }
+                            )
 
-                        tool_call_history.append({
-                            "tool": tool_name,
-                            "input": tool_input,
-                            "success": result.get("success", False),
-                            "duration_ms": tool_duration_ms,
-                            "api_cost_usd": tool_cost,
-                        })
+                        tool_call_history.append(
+                            {
+                                "tool": tool_name,
+                                "input": tool_input,
+                                "success": result.get("success", False),
+                                "duration_ms": tool_duration_ms,
+                                "api_cost_usd": tool_cost,
+                            }
+                        )
 
                     # Add to conversation
                     messages.append({"role": "assistant", "content": response.content})
@@ -534,9 +568,7 @@ class SingleAgentRunner:
                 else:
                     # LLM provided final answer
                     final_text = (
-                        response.text
-                        if hasattr(response, "text")
-                        else str(response.content)
+                        response.text if hasattr(response, "text") else str(response.content)
                     )
                     break
             else:
@@ -586,21 +618,21 @@ class SingleAgentRunner:
                 break
         return failed >= 2
 
-    async def _force_final_answer(
-        self, provider, messages, system, max_tokens, temperature
-    ) -> str:
+    async def _force_final_answer(self, provider, messages, system, max_tokens, temperature) -> str:
         """Force LLM to produce final text answer (no tools)."""
-        messages.append({
-            "role": "user",
-            "content": (
-                "Provide your FINAL answer now based on the information gathered. "
-                "Do NOT call any more tools. Use \\cite{id} citations for all facts, "
-                "where id is the chunk_id or page_id from search results."
-            ),
-        })
+        final_messages = messages + [
+            {
+                "role": "user",
+                "content": (
+                    "Provide your FINAL answer now based on the information gathered. "
+                    "Do NOT call any more tools. Use \\cite{id} citations for all facts, "
+                    "where id is the chunk_id or page_id from search results."
+                ),
+            }
+        ]
         try:
             final_response = provider.create_message(
-                messages=messages,
+                messages=final_messages,
                 tools=[],
                 system=system,
                 max_tokens=max_tokens,
@@ -614,8 +646,12 @@ class SingleAgentRunner:
         except Exception as e:
             logger.error(f"Final answer synthesis failed: {e}", exc_info=True)
             return (
-                "No relevant information was found in the available documents for this query. "
-                "/ V dostupných dokumentech nebyla nalezena relevantní informace k tomuto dotazu."
+                "System could not generate a final answer due to an internal error. "
+                "Search results were retrieved but could not be synthesized. "
+                "Please try again. / "
+                "Systém nemohl vygenerovat odpověď kvůli interní chybě. "
+                "Výsledky vyhledávání byly nalezeny, ale nebyly zpracovány. "
+                "Zkuste to prosím znovu."
             )
 
     async def shutdown_async(self) -> None:

@@ -18,6 +18,7 @@ from typing import List, Dict, Optional, Any, TYPE_CHECKING
 import logging
 
 from .vector_store_adapter import VectorStoreAdapter
+from ..exceptions import DatabaseConnectionError
 
 if TYPE_CHECKING:
     from src.multi_layer_chunker import Chunk
@@ -316,8 +317,9 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
                     logger.error(
                         f"Failed to initialize PostgreSQL pool after {max_retries} attempts: {e}"
                     )
-                    raise ConnectionError(
-                        f"PostgreSQL connection failed after {max_retries} attempts: {e}"
+                    raise DatabaseConnectionError(
+                        f"PostgreSQL connection failed after {max_retries} attempts: {e}",
+                        cause=e,
                     ) from e
 
     def _normalize_vector(self, vec: np.ndarray) -> np.ndarray:

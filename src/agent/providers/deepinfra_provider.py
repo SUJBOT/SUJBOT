@@ -14,6 +14,7 @@ from openai import OpenAI
 from langsmith.wrappers import wrap_openai
 
 from .base import BaseProvider, ProviderResponse
+from ...exceptions import APIKeyError
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,11 @@ class DeepInfraProvider(BaseProvider):
     - Qwen/Qwen2.5-7B-Instruct
     """
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "meta-llama/Llama-4-Scout-17B-16E-Instruct"):
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model: str = "meta-llama/Llama-4-Scout-17B-16E-Instruct",
+    ):
         """
         Initialize DeepInfra provider.
 
@@ -47,32 +52,54 @@ class DeepInfraProvider(BaseProvider):
         """
         self.api_key = api_key or os.getenv("DEEPINFRA_API_KEY")
         if not self.api_key:
-            raise ValueError(
-                "DEEPINFRA_API_KEY required. "
-                "Set in .env file or pass to constructor."
+            raise APIKeyError(
+                "DEEPINFRA_API_KEY required. Set in .env file or pass to constructor.",
+                details={"provider": "deepinfra"},
             )
 
         # Model validation is handled by config.json (SSOT)
         # Log warning if model not in config, but don't reject (API will validate)
         try:
             from ...utils.model_registry import ModelRegistry
+
             config = ModelRegistry.get_model_config(model, "llm")
             if config.provider != "deepinfra":
-                logger.warning(f"Model {model} is configured with provider '{config.provider}', not 'deepinfra'")
+                logger.warning(
+                    f"Model {model} is configured with provider '{config.provider}', not 'deepinfra'"
+                )
         except (ImportError, KeyError):
             logger.debug(f"Model {model} not found in config.json model_registry, using as-is")
 
         self.model = model
 
         # Initialize OpenAI client with DeepInfra base URL (wrapped for LangSmith tracing)
-        self.client = wrap_openai(OpenAI(
-            api_key=self.api_key,
-            base_url="https://api.deepinfra.com/v1/openai",
-            timeout=60.0,
-            max_retries=3
-        ))
+        self.client = wrap_openai(
+            OpenAI(
+                api_key=self.api_key,
+                base_url="https://api.deepinfra.com/v1/openai",
+                timeout=60.0,
+                max_retries=3,
+            )
+        )
 
         logger.info(f"DeepInfraProvider initialized: {model}")
+
+    @staticmethod
+    def _convert_tools_to_openai(tools: Optional[List[Dict[str, Any]]]) -> Optional[List[Dict]]:
+        """Convert Anthropic tool definitions to OpenAI function calling format."""
+        if not tools:
+            return None
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": tool["name"],
+                    "description": tool.get("description", ""),
+                    "parameters": tool.get("input_schema", {}),
+                },
+            }
+            for tool in tools
+        ]
 
     def create_message(
         self,
@@ -81,7 +108,7 @@ class DeepInfraProvider(BaseProvider):
         system: Optional[Any] = None,
         max_tokens: int = 2048,
         temperature: float = 0.3,
-        **kwargs
+        **kwargs,
     ) -> ProviderResponse:
         """
         Create chat completion (non-streaming).
@@ -97,25 +124,9 @@ class DeepInfraProvider(BaseProvider):
         Returns:
             ProviderResponse with content, usage, etc.
         """
-        # Format messages for OpenAI API
         formatted_messages = self._format_messages(messages, system)
+        openai_tools = self._convert_tools_to_openai(tools)
 
-        # Convert tools to OpenAI format
-        openai_tools = None
-        if tools:
-            openai_tools = [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": tool["name"],
-                        "description": tool.get("description", ""),
-                        "parameters": tool.get("input_schema", {})
-                    }
-                }
-                for tool in tools
-            ]
-
-        # Call API
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -123,13 +134,12 @@ class DeepInfraProvider(BaseProvider):
                 tools=openai_tools,
                 max_tokens=max_tokens,
                 temperature=temperature,
-                **kwargs
+                **kwargs,
             )
         except Exception as e:
             logger.error(f"DeepInfra API error: {e}")
             raise
 
-        # Convert to Anthropic-compatible format
         return self._convert_response(response)
 
     def stream_message(
@@ -139,7 +149,7 @@ class DeepInfraProvider(BaseProvider):
         system: Optional[Any] = None,
         max_tokens: int = 2048,
         temperature: float = 0.3,
-        **kwargs
+        **kwargs,
     ) -> Iterator:
         """
         Stream chat completion.
@@ -156,32 +166,17 @@ class DeepInfraProvider(BaseProvider):
             Iterator of streaming response chunks
         """
         formatted_messages = self._format_messages(messages, system)
+        openai_tools = self._convert_tools_to_openai(tools)
 
-        openai_tools = None
-        if tools:
-            openai_tools = [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": tool["name"],
-                        "description": tool.get("description", ""),
-                        "parameters": tool.get("input_schema", {})
-                    }
-                }
-                for tool in tools
-            ]
-
-        stream = self.client.chat.completions.create(
+        return self.client.chat.completions.create(
             model=self.model,
             messages=formatted_messages,
             tools=openai_tools,
             max_tokens=max_tokens,
             temperature=temperature,
             stream=True,
-            **kwargs
+            **kwargs,
         )
-
-        return stream
 
     def _format_messages(self, messages: List[Dict], system: Any) -> List[Dict]:
         """
@@ -243,14 +238,16 @@ class DeepInfraProvider(BaseProvider):
             if block.get("type") == "text":
                 text_parts.append(block.get("text", ""))
             elif block.get("type") == "tool_use":
-                tool_calls.append({
-                    "id": block["id"],
-                    "type": "function",
-                    "function": {
-                        "name": block["name"],
-                        "arguments": json.dumps(block.get("input", {})),
-                    },
-                })
+                tool_calls.append(
+                    {
+                        "id": block["id"],
+                        "type": "function",
+                        "function": {
+                            "name": block["name"],
+                            "arguments": json.dumps(block.get("input", {})),
+                        },
+                    }
+                )
             elif block.get("type") == "image":
                 image_blocks.append(block)
 
@@ -269,12 +266,10 @@ class DeepInfraProvider(BaseProvider):
     def _format_user_message(self, content: List[Dict], formatted: List[Dict]) -> None:
         """Convert Anthropic user content blocks to OpenAI format."""
         has_images = any(
-            isinstance(block, dict) and block.get("type") == "image"
-            for block in content
+            isinstance(block, dict) and block.get("type") == "image" for block in content
         )
         has_tool_results = any(
-            isinstance(block, dict) and block.get("type") == "tool_result"
-            for block in content
+            isinstance(block, dict) and block.get("type") == "tool_result" for block in content
         )
 
         if has_tool_results:
@@ -287,17 +282,21 @@ class DeepInfraProvider(BaseProvider):
                     if isinstance(tool_content, list):
                         # Multimodal tool result — convert images, extract text
                         openai_parts = self._convert_multimodal_content(tool_content)
-                        formatted.append({
-                            "role": "tool",
-                            "tool_call_id": block["tool_use_id"],
-                            "content": openai_parts if openai_parts else "",
-                        })
+                        formatted.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": block["tool_use_id"],
+                                "content": openai_parts if openai_parts else "",
+                            }
+                        )
                     else:
-                        formatted.append({
-                            "role": "tool",
-                            "tool_call_id": block["tool_use_id"],
-                            "content": str(tool_content),
-                        })
+                        formatted.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": block["tool_use_id"],
+                                "content": str(tool_content),
+                            }
+                        )
                 elif block.get("type") == "text":
                     formatted.append({"role": "user", "content": block.get("text", "")})
         elif has_images:
@@ -337,15 +336,19 @@ class DeepInfraProvider(BaseProvider):
                 if source.get("type") == "base64":
                     media_type = source.get("media_type", "image/png")
                     data = source.get("data", "")
-                    openai_blocks.append({
-                        "type": "image_url",
-                        "image_url": {"url": f"data:{media_type};base64,{data}"},
-                    })
+                    openai_blocks.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{media_type};base64,{data}"},
+                        }
+                    )
             elif block.get("type") == "text":
-                openai_blocks.append({
-                    "type": "text",
-                    "text": block.get("text", ""),
-                })
+                openai_blocks.append(
+                    {
+                        "type": "text",
+                        "text": block.get("text", ""),
+                    }
+                )
             elif block.get("type") == "tool_result":
                 # Tool results with multimodal content — extract text
                 tool_content = block.get("content", "")
@@ -379,38 +382,51 @@ class DeepInfraProvider(BaseProvider):
         content_blocks = []
 
         if message.content:
-            content_blocks.append({
-                "type": "text",
-                "text": message.content
-            })
+            content_blocks.append({"type": "text", "text": message.content})
 
         # Convert tool calls
         if hasattr(message, "tool_calls") and message.tool_calls:
             for tool_call in message.tool_calls:
-                content_blocks.append({
-                    "type": "tool_use",
-                    "id": tool_call.id,
-                    "name": tool_call.function.name,
-                    "input": json.loads(tool_call.function.arguments)
-                })
+                try:
+                    parsed_args = json.loads(tool_call.function.arguments)
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.error(
+                        "Failed to parse tool arguments from DeepInfra: %s. " "Tool: %s, Args: %s",
+                        e,
+                        tool_call.function.name,
+                        (
+                            tool_call.function.arguments[:200]
+                            if tool_call.function.arguments
+                            else "None"
+                        ),
+                    )
+                    continue
+                content_blocks.append(
+                    {
+                        "type": "tool_use",
+                        "id": tool_call.id,
+                        "name": tool_call.function.name,
+                        "input": parsed_args,
+                    }
+                )
 
         # Map finish reason
-        stop_reason_map = {
-            "stop": "end_turn",
-            "tool_calls": "tool_use",
-            "length": "max_tokens"
+        stop_reason_map = {"stop": "end_turn", "tool_calls": "tool_use", "length": "max_tokens"}
+
+        usage = {
+            "input_tokens": getattr(response.usage, "prompt_tokens", 0) if response.usage else 0,
+            "output_tokens": (
+                getattr(response.usage, "completion_tokens", 0) if response.usage else 0
+            ),
+            "cache_read_tokens": 0,  # DeepInfra doesn't support caching
+            "cache_creation_tokens": 0,
         }
 
         return ProviderResponse(
             content=content_blocks,
             stop_reason=stop_reason_map.get(choice.finish_reason, "end_turn"),
-            usage={
-                "input_tokens": response.usage.prompt_tokens,
-                "output_tokens": response.usage.completion_tokens,
-                "cache_read_tokens": 0,  # DeepInfra doesn't support caching
-                "cache_creation_tokens": 0
-            },
-            model=self.model
+            usage=usage,
+            model=self.model,
         )
 
     def supports_feature(self, feature: str) -> bool:

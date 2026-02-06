@@ -44,15 +44,18 @@ _BUILTIN_VARIANT_CONFIG = {
 
 _BUILTIN_DEFAULT_VARIANT = "remote"
 
-_BUILTIN_DEEPINFRA_SUPPORTED_MODELS = frozenset({
-    "Qwen/Qwen2.5-VL-32B-Instruct",
-    "Qwen/Qwen3-VL-235B-A22B-Instruct",
-})
+_BUILTIN_DEEPINFRA_SUPPORTED_MODELS = frozenset(
+    {
+        "Qwen/Qwen2.5-VL-32B-Instruct",
+        "Qwen/Qwen3-VL-235B-A22B-Instruct",
+    }
+)
 
 
 # =============================================================================
 # Config Loading Functions
 # =============================================================================
+
 
 def _load_builtin_defaults() -> None:
     """Load built-in fallback defaults."""
@@ -75,6 +78,7 @@ def _ensure_config_loaded() -> None:
 
     try:
         from src.config import get_config
+
         config = get_config()
 
         if config.agent_variants is not None:
@@ -101,7 +105,9 @@ def _ensure_config_loaded() -> None:
 
         # Load DeepInfra supported models
         if hasattr(config.agent_variants, "deepinfra_supported_models"):
-            _DEEPINFRA_SUPPORTED_MODELS = frozenset(config.agent_variants.deepinfra_supported_models)
+            _DEEPINFRA_SUPPORTED_MODELS = frozenset(
+                config.agent_variants.deepinfra_supported_models
+            )
         else:
             _DEEPINFRA_SUPPORTED_MODELS = _BUILTIN_DEEPINFRA_SUPPORTED_MODELS
 
@@ -133,6 +139,7 @@ def reload_constants() -> None:
 # Public Getter Functions
 # =============================================================================
 
+
 def get_variant_config() -> dict[str, dict[str, str]]:
     """Get the variant configuration dictionary."""
     _ensure_config_loaded()
@@ -155,20 +162,28 @@ def get_deepinfra_supported_models() -> frozenset[str]:
 # Public Functions (main API)
 # =============================================================================
 
+
 def get_variant_model(variant: str) -> str:
     """
     Get model identifier for a variant.
+
+    Falls back to default variant if the given variant is unknown
+    (e.g., legacy 'premium'/'cheap' values still in the database).
 
     Args:
         variant: Agent variant ('remote' or 'local')
 
     Returns:
         Model identifier string
-
-    Raises:
-        KeyError: If variant is not found
     """
     _ensure_config_loaded()
+    if variant not in _VARIANT_CONFIG:
+        logger.warning(
+            "Unknown variant '%s', falling back to default '%s'",
+            variant,
+            _DEFAULT_VARIANT,
+        )
+        variant = _DEFAULT_VARIANT
     return _VARIANT_CONFIG[variant]["model"]
 
 

@@ -153,6 +153,18 @@ class TestBackendConstantsSSoT:
         model = get_variant_model("local")
         assert "Qwen" in model or "qwen" in model.lower()
 
+    def test_get_variant_model_unknown_falls_back(self):
+        """Unknown variants (e.g., legacy 'premium') fall back to default."""
+        from backend.constants import get_variant_model, get_default_variant, reload_constants
+
+        reload_constants()
+        default_model = get_variant_model(get_default_variant())
+
+        # Legacy variant names should fallback, not raise
+        assert get_variant_model("premium") == default_model
+        assert get_variant_model("cheap") == default_model
+        assert get_variant_model("nonexistent") == default_model
+
 
 class TestNoDuplicatePricing:
     """Verify MODEL_PRICING is not duplicated."""

@@ -13,6 +13,7 @@ import logging
 from dataclasses import dataclass
 from typing import List, Optional
 
+from ..exceptions import PageRenderError
 from .jina_client import JinaClient
 from .page_store import PageStore
 
@@ -90,8 +91,16 @@ class VLRetriever:
             page_id = row["page_id"]
             try:
                 image_path = self.page_store.get_image_path(page_id)
-            except Exception as e:
+            except (PageRenderError, ValueError, OSError) as e:
                 logger.warning(f"Could not resolve image path for page {page_id}: {e}")
+                image_path = row.get("image_path")
+            except Exception as e:
+                logger.error(
+                    "Unexpected error resolving image for page %s: %s",
+                    page_id,
+                    e,
+                    exc_info=True,
+                )
                 image_path = row.get("image_path")
 
             results.append(
@@ -106,8 +115,9 @@ class VLRetriever:
 
         logger.info(
             f"VL search: '{query[:50]}...' → {len(results)} pages "
-            f"(top score: {results[0].score:.3f})" if results else
-            f"VL search: '{query[:50]}...' → 0 pages"
+            f"(top score: {results[0].score:.3f})"
+            if results
+            else f"VL search: '{query[:50]}...' → 0 pages"
         )
 
         return results

@@ -13,12 +13,13 @@ import base64
 import hashlib
 import logging
 import os
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 import httpx
 import numpy as np
 
 from ..exceptions import JinaAPIError
+from ..utils.cache import LRUCache
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +55,9 @@ class JinaClient:
         self.model = model
         self.dimensions = dimensions
         self.batch_size = batch_size
-        self._query_cache: Dict[str, np.ndarray] = {}
-        self._cache_max_size = cache_max_size
+        self._query_cache: LRUCache[np.ndarray] = LRUCache(
+            max_size=cache_max_size, name="jina_query_cache"
+        )
 
     def _headers(self) -> dict:
         return {
@@ -82,8 +84,9 @@ class JinaClient:
             L2-normalized embedding array of shape (dimensions,)
         """
         cache_key = self._cache_key(text)
-        if cache_key in self._query_cache:
-            return self._query_cache[cache_key]
+        cached = self._query_cache.get(cache_key)
+        if cached is not None:
+            return cached
 
         payload = {
             "model": self.model,
@@ -94,9 +97,7 @@ class JinaClient:
 
         try:
             with httpx.Client(timeout=30.0) as client:
-                response = client.post(
-                    JINA_API_URL, json=payload, headers=self._headers()
-                )
+                response = client.post(JINA_API_URL, json=payload, headers=self._headers())
                 response.raise_for_status()
                 data = response.json()
         except httpx.HTTPStatusError as e:
@@ -126,11 +127,7 @@ class JinaClient:
         embedding = np.array(data["data"][0]["embedding"], dtype=np.float32)
         embedding = self._l2_normalize(embedding)
 
-        # Cache (evict oldest if full)
-        if len(self._query_cache) >= self._cache_max_size:
-            oldest_key = next(iter(self._query_cache))
-            del self._query_cache[oldest_key]
-        self._query_cache[cache_key] = embedding
+        self._query_cache.set(cache_key, embedding)
 
         return embedding
 
@@ -163,9 +160,7 @@ class JinaClient:
 
             try:
                 with httpx.Client(timeout=120.0) as client:
-                    response = client.post(
-                        JINA_API_URL, json=payload, headers=self._headers()
-                    )
+                    response = client.post(JINA_API_URL, json=payload, headers=self._headers())
                     response.raise_for_status()
                     data = response.json()
             except httpx.HTTPStatusError as e:

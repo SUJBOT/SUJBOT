@@ -79,8 +79,16 @@ class AgentAdapter:
             try:
                 with open(config_path) as f:
                     full_config = json.load(f)
+            except json.JSONDecodeError as e:
+                raise RuntimeError(
+                    f"config.json at {config_path} contains invalid JSON: {e}. "
+                    f"Fix the file before starting."
+                ) from e
             except Exception as e:
-                logger.warning(f"Could not load config.json: {e}")
+                logger.error(f"Failed to read config.json: {e}", exc_info=True)
+                raise RuntimeError(f"Cannot read config.json at {config_path}: {e}") from e
+        else:
+            logger.warning(f"config.json not found at {config_path}, using defaults")
 
         # Build runner configuration
         runner_config = {
@@ -130,12 +138,14 @@ class AgentAdapter:
             success = await self.runner.initialize()
             if not success:
                 logger.error("Single-agent system initialization failed")
-                self.degraded_components.append({
-                    "component": "single_agent_system",
-                    "error": "Initialization failed",
-                    "severity": "critical",
-                    "user_message": "Agent system failed to start",
-                })
+                self.degraded_components.append(
+                    {
+                        "component": "single_agent_system",
+                        "error": "Initialization failed",
+                        "severity": "critical",
+                        "user_message": "Agent system failed to start",
+                    }
+                )
                 return False
 
             logger.info("Single-agent system initialized successfully")
@@ -144,12 +154,14 @@ class AgentAdapter:
         except Exception as e:
             safe_error = sanitize_error(e)
             logger.error(f"Failed to initialize single-agent system: {safe_error}")
-            self.degraded_components.append({
-                "component": "single_agent_system",
-                "error": safe_error,
-                "severity": "critical",
-                "user_message": f"System initialization error: {safe_error}",
-            })
+            self.degraded_components.append(
+                {
+                    "component": "single_agent_system",
+                    "error": safe_error,
+                    "severity": "critical",
+                    "user_message": f"System initialization error: {safe_error}",
+                }
+            )
             return False
 
     def get_tool_health(self) -> Dict[str, Any]:
@@ -161,7 +173,7 @@ class AgentAdapter:
         query: str,
         conversation_id: Optional[str] = None,
         user_id: Optional[int] = None,
-        messages: Optional[List[Dict[str, str]]] = None
+        messages: Optional[List[Dict[str, str]]] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Stream agent response as SSE-compatible events.
@@ -195,6 +207,7 @@ class AgentAdapter:
         if user_id:
             try:
                 from backend.routes.auth import get_auth_queries
+
                 queries = get_auth_queries()
                 variant = await queries.get_agent_variant(user_id)
                 model = get_variant_model(variant)
@@ -202,7 +215,9 @@ class AgentAdapter:
             except (json.JSONDecodeError, FileNotFoundError, KeyError) as e:
                 logger.warning(f"Config error loading variant for user {user_id}: {e}")
             except Exception as e:
-                logger.error(f"Unexpected error loading variant for user {user_id}: {sanitize_error(e)}")
+                logger.error(
+                    f"Unexpected error loading variant for user {user_id}: {sanitize_error(e)}"
+                )
 
         try:
             # Run tool health check
@@ -216,8 +231,8 @@ class AgentAdapter:
                     "unavailable_count": tool_health["total_unavailable"],
                     "unavailable_tools": tool_health["unavailable_tools"],
                     "degraded_tools": tool_health["degraded_tools"],
-                    "summary": tool_health["summary"]
-                }
+                    "summary": tool_health["summary"],
+                },
             }
             await asyncio.sleep(0)
 
@@ -230,10 +245,7 @@ class AgentAdapter:
             display_name = get_variant_display_name(variant)
             yield {
                 "event": "progress",
-                "data": {
-                    "message": f"Processing query ({display_name})...",
-                    "stage": "init"
-                }
+                "data": {"message": f"Processing query ({display_name})...", "stage": "init"},
             }
             await asyncio.sleep(0)
 
@@ -244,10 +256,7 @@ class AgentAdapter:
 
             result = None
             async for event in self.runner.run_query(
-                query,
-                model=model,
-                stream_progress=True,
-                conversation_history=messages or []
+                query, model=model, stream_progress=True, conversation_history=messages or []
             ):
                 if event.get("type") == "tool_call":
                     yield {
@@ -255,7 +264,7 @@ class AgentAdapter:
                         "data": {
                             "tool": event.get("tool"),
                             "status": event.get("status"),
-                        }
+                        },
                     }
                     await asyncio.sleep(0)
 
@@ -274,22 +283,19 @@ class AgentAdapter:
                     "data": {
                         "error": error_msg,
                         "type": "ExecutionError",
-                        "errors": result.get("errors", [])
-                    }
+                        "errors": result.get("errors", []),
+                    },
                 }
                 return
 
             # Stream final answer as text chunks
             final_answer = result.get("final_answer") or "No answer generated"
-            paragraphs = final_answer.split('\n\n')
+            paragraphs = final_answer.split("\n\n")
 
             for i, paragraph in enumerate(paragraphs):
                 if paragraph.strip():
-                    chunk = paragraph + ('\n\n' if i < len(paragraphs) - 1 else '')
-                    yield {
-                        "event": "text_delta",
-                        "data": {"content": chunk}
-                    }
+                    chunk = paragraph + ("\n\n" if i < len(paragraphs) - 1 else "")
+                    yield {"event": "text_delta", "data": {"content": chunk}}
                     await asyncio.sleep(0.05)
 
             # Cost summary
@@ -297,22 +303,19 @@ class AgentAdapter:
             total_cost_usd = tracker.get_total_cost()
             agent_breakdown = tracker.get_agent_breakdown()
 
-            agent_costs = []
-            for agent_name, stats in agent_breakdown.items():
-                try:
-                    agent_costs.append({
-                        "agent": agent_name,
-                        "cost": stats.get("cost", 0.0),
-                        "input_tokens": stats.get("input_tokens", 0),
-                        "output_tokens": stats.get("output_tokens", 0),
-                        "cache_read_tokens": stats.get("cache_read_tokens", 0),
-                        "cache_creation_tokens": stats.get("cache_creation_tokens", 0),
-                        "call_count": stats.get("call_count", 0),
-                        "response_time_ms": stats.get("response_time_ms", 0.0)
-                    })
-                except Exception as e:
-                    logger.error(f"Failed to format cost for agent {agent_name}: {e}", exc_info=True)
-
+            agent_costs = [
+                {
+                    "agent": agent_name,
+                    "cost": stats.get("cost", 0.0),
+                    "input_tokens": stats.get("input_tokens", 0),
+                    "output_tokens": stats.get("output_tokens", 0),
+                    "cache_read_tokens": stats.get("cache_read_tokens", 0),
+                    "cache_creation_tokens": stats.get("cache_creation_tokens", 0),
+                    "call_count": stats.get("call_count", 0),
+                    "response_time_ms": stats.get("response_time_ms", 0.0),
+                }
+                for agent_name, stats in agent_breakdown.items()
+            ]
             agent_costs.sort(key=lambda x: x["cost"], reverse=True)
 
             yield {
@@ -322,8 +325,8 @@ class AgentAdapter:
                     "agent_breakdown": agent_costs,
                     "total_input_tokens": tracker.total_input_tokens,
                     "total_output_tokens": tracker.total_output_tokens,
-                    "cache_stats": tracker.get_cache_stats()
-                }
+                    "cache_stats": tracker.get_cache_stats(),
+                },
             }
             await asyncio.sleep(0)
 
@@ -336,7 +339,7 @@ class AgentAdapter:
                     "tools_used": result.get("tools_used", []),
                     "tool_call_count": result.get("tool_call_count", 0),
                     "iterations": result.get("iterations", 0),
-                }
+                },
             }
 
         except Exception as e:
@@ -345,22 +348,18 @@ class AgentAdapter:
                 "conversation_id": conversation_id,
                 "variant": variant,
                 "model": model,
-                "error_phase": "single_agent_execution"
+                "error_phase": "single_agent_execution",
             }
 
             logger.error(
                 f"Error during query execution: {type(e).__name__}: {e}",
                 exc_info=True,
-                extra=context
+                extra=context,
             )
 
             yield {
                 "event": "error",
-                "data": {
-                    "error": str(e),
-                    "type": type(e).__name__,
-                    "context": context
-                }
+                "data": {"error": str(e), "type": type(e).__name__, "context": context},
             }
 
     def get_available_models(self) -> list[Dict[str, Any]]:
@@ -370,19 +369,19 @@ class AgentAdapter:
                 "id": "claude-haiku-4-5-20251001",
                 "name": "Claude Haiku 4.5",
                 "provider": "anthropic",
-                "description": "Fast & cost-effective"
+                "description": "Fast & cost-effective",
             },
             {
                 "id": "claude-sonnet-4-5-20250929",
                 "name": "Claude Sonnet 4.5",
                 "provider": "anthropic",
-                "description": "Balanced performance"
+                "description": "Balanced performance",
             },
             {
                 "id": "Qwen/Qwen3-VL-235B-A22B-Instruct",
                 "name": "Qwen3 VL 235B",
                 "provider": "deepinfra",
-                "description": "Open-source VL model"
+                "description": "Open-source VL model",
             },
         ]
 
@@ -404,7 +403,7 @@ class AgentAdapter:
                     "status": "error",
                     "message": "Agent runner not initialized",
                     "details": {},
-                    "degraded_components": []
+                    "degraded_components": [],
                 }
 
             # Check vector store (skip for PostgreSQL backend)
@@ -416,10 +415,8 @@ class AgentAdapter:
                     return {
                         "status": "error",
                         "message": "Vector store not found",
-                        "details": {
-                            "vector_store_path": str(self.config.vector_store_path)
-                        },
-                        "degraded_components": []
+                        "details": {"vector_store_path": str(self.config.vector_store_path)},
+                        "degraded_components": [],
                     }
 
             # Check API keys
@@ -432,11 +429,15 @@ class AgentAdapter:
                     "status": "error",
                     "message": "No API keys configured",
                     "details": {},
-                    "degraded_components": []
+                    "degraded_components": [],
                 }
 
             status = "degraded" if self.degraded_components else "healthy"
-            message = "Agent system ready" if status == "healthy" else "Agent system running in degraded mode"
+            message = (
+                "Agent system ready"
+                if status == "healthy"
+                else "Agent system running in degraded mode"
+            )
 
             return {
                 "status": status,
@@ -448,7 +449,7 @@ class AgentAdapter:
                     "has_openai_key": has_openai_key,
                     "has_google_key": has_google_key,
                 },
-                "degraded_components": self.degraded_components
+                "degraded_components": self.degraded_components,
             }
 
         except Exception as e:
@@ -458,5 +459,5 @@ class AgentAdapter:
                 "status": "error",
                 "message": safe_error,
                 "details": {},
-                "degraded_components": []
+                "degraded_components": [],
             }
