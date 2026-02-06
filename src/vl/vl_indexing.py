@@ -16,6 +16,7 @@ from typing import Optional
 
 import numpy as np
 
+from ..exceptions import JinaAPIError, PageRenderError, StorageError
 from .jina_client import JinaClient
 from .page_store import PageStore
 
@@ -74,13 +75,15 @@ class VLIndexingPipeline:
         pages = []
         for page_id in page_ids:
             doc_id, page_num = PageStore.page_id_to_components(page_id)
-            pages.append({
-                "page_id": page_id,
-                "document_id": doc_id,
-                "page_number": page_num,
-                "image_path": None,  # Will be set when images are rendered
-                "metadata": {},
-            })
+            pages.append(
+                {
+                    "page_id": page_id,
+                    "document_id": doc_id,
+                    "page_number": page_num,
+                    "image_path": None,  # Will be set when images are rendered
+                    "metadata": {},
+                }
+            )
 
         inserted = self.vector_store.add_vl_pages(pages, embeddings)
         logger.info(f"Inserted {inserted} page embeddings into PostgreSQL")
@@ -121,20 +124,37 @@ class VLIndexingPipeline:
 
         # 3. Embed via Jina
         logger.info(f"Embedding {len(page_images)} page images via Jina...")
-        embeddings = self.jina_client.embed_pages(page_images)
+        try:
+            embeddings = self.jina_client.embed_pages(page_images)
+        except JinaAPIError as e:
+            raise PageRenderError(
+                f"Pages rendered ({len(page_ids)}) but Jina embedding failed: {e}",
+                details={"pdf_path": str(pdf_path), "pages_rendered": len(page_ids)},
+                cause=e,
+            ) from e
 
         # 4. Store in PostgreSQL
         pages = []
         for page_id in page_ids:
             doc_id, page_num = PageStore.page_id_to_components(page_id)
-            pages.append({
-                "page_id": page_id,
-                "document_id": doc_id,
-                "page_number": page_num,
-                "image_path": self.page_store.get_image_path(page_id),
-                "metadata": {},
-            })
+            pages.append(
+                {
+                    "page_id": page_id,
+                    "document_id": doc_id,
+                    "page_number": page_num,
+                    "image_path": self.page_store.get_image_path(page_id),
+                    "metadata": {},
+                }
+            )
 
-        inserted = self.vector_store.add_vl_pages(pages, embeddings)
+        try:
+            inserted = self.vector_store.add_vl_pages(pages, embeddings)
+        except Exception as e:
+            raise StorageError(
+                f"Embeddings computed ({len(page_ids)} pages) but database insert failed: {e}",
+                details={"pdf_path": str(pdf_path), "pages_embedded": len(page_ids)},
+                cause=e,
+            ) from e
+
         logger.info(f"Indexed {inserted} pages from {pdf_path.name}")
         return inserted

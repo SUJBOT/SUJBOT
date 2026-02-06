@@ -283,7 +283,7 @@ class ExpandContextTool(BaseTool):
 
             return [format_chunk_result(chunk) for chunk in same_section[:k]]
 
-        except Exception as e:
+        except (KeyError, TypeError, AttributeError) as e:
             logger.error(f"Section-based expansion failed: {e}", exc_info=True)
             return []
 

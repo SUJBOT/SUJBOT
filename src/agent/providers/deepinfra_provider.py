@@ -168,15 +168,19 @@ class DeepInfraProvider(BaseProvider):
         formatted_messages = self._format_messages(messages, system)
         openai_tools = self._convert_tools_to_openai(tools)
 
-        return self.client.chat.completions.create(
-            model=self.model,
-            messages=formatted_messages,
-            tools=openai_tools,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            stream=True,
-            **kwargs,
-        )
+        try:
+            return self.client.chat.completions.create(
+                model=self.model,
+                messages=formatted_messages,
+                tools=openai_tools,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                stream=True,
+                **kwargs,
+            )
+        except Exception as e:
+            logger.error(f"DeepInfra streaming API error: {e}")
+            raise
 
     def _format_messages(self, messages: List[Dict], system: Any) -> List[Dict]:
         """
@@ -458,7 +462,12 @@ class DeepInfraProvider(BaseProvider):
 
         Args:
             model: Model identifier
+
+        Raises:
+            ValueError: If model string is empty
         """
+        if not model or not model.strip():
+            raise ValueError("Model identifier cannot be empty")
         old_model = self.model
         self.model = model
         logger.info(f"Model changed: {old_model} → {model}")

@@ -64,6 +64,53 @@ def _check_pdf_available(document_id: str) -> bool:
     return _find_pdf_for_document(document_id) is not None
 
 
+# Pattern to extract document_id and page_number from malformed page IDs.
+# Matches: "BZ_VR1_105", "BZ_VR1_p105", "BZ_VR1_p005"
+# Groups: (document_id, page_number)
+_FUZZY_PAGE_ID_RE = re.compile(r"^(.+?)_(?:p)?(\d+)$")
+
+
+async def _try_fuzzy_page_match(conn, chunk_id: str) -> Optional[Dict]:
+    """
+    Attempt to resolve a malformed VL page_id by extracting document_id
+    and page_number components.
+
+    LLMs sometimes hallucinate page IDs (e.g. "BZ_VR1_105" instead of
+    "BZ_VR1_p105"). This parses the intent and queries by composite key.
+    """
+    m = _FUZZY_PAGE_ID_RE.match(chunk_id)
+    if not m:
+        return None
+
+    document_id = m.group(1)
+    page_number = int(m.group(2))
+
+    row = await conn.fetchrow(
+        """
+        SELECT
+            page_id AS chunk_id,
+            document_id,
+            'Page ' || page_number AS section_title,
+            NULL AS section_path,
+            document_id || ' > Page ' || page_number AS hierarchical_path,
+            page_number,
+            NULL AS content
+        FROM vectors.vl_pages
+        WHERE document_id = $1 AND page_number = $2
+        LIMIT 1
+        """,
+        document_id,
+        page_number,
+    )
+    if row:
+        logger.info(
+            f"Fuzzy page_id match: '{chunk_id}' resolved to '{row['chunk_id']}'"
+        )
+        return dict(row)
+
+    return None
+
+
 async def _fetch_chunk_metadata(
     adapter: PostgreSQLStorageAdapter,
     chunk_id: str
@@ -139,6 +186,12 @@ async def _fetch_chunk_metadata(
             )
             if row:
                 return dict(row)
+
+            # Fuzzy fallback: LLM may hallucinate page_id format
+            # e.g. "BZ_VR1_105" instead of "BZ_VR1_p105"
+            fuzzy_row = await _try_fuzzy_page_match(conn, chunk_id)
+            if fuzzy_row:
+                return fuzzy_row
 
         return None
     except Exception as e:
@@ -254,5 +307,8 @@ async def get_citations_batch(
                 content=row.get("content"),
             ))
 
-    logger.info(f"Batch citation lookup: {len(request.chunk_ids)} requested, {len(results)} found")
+    logger.info(
+        f"Batch citation lookup: {len(request.chunk_ids)} requested, {len(results)} found. "
+        f"IDs: {request.chunk_ids}"
+    )
     return results

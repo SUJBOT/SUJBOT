@@ -91,6 +91,8 @@ export function PDFSidePanel({
   const containerRef = useRef<HTMLDivElement>(null);
   const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const observerRef = useRef<IntersectionObserver | null>(null);
+  const scrolledToInitialRef = useRef(false);
+  const renderedPagesRef = useRef(new Set<number>());
 
   // Highlight phrases for chunk matching
   const highlightPhrases = useMemo(() => {
@@ -149,6 +151,8 @@ export function PDFSidePanel({
     setPdfData(null);
     setCurrentVisiblePage(initialPage);
     setLoadedPages(new Set());
+    scrolledToInitialRef.current = false;
+    renderedPagesRef.current = new Set();
   }, [documentId, initialPage]);
 
   // Handle document load success
@@ -216,17 +220,41 @@ export function PDFSidePanel({
     };
   }, [numPages]);
 
-  // Scroll to initial page after PDF loads
-  useEffect(() => {
-    if (!numPages || !containerRef.current || initialPage <= 1) return;
+  // Scroll compensation: when a page above the viewport renders, its height changes
+  // from placeholder (800px) to actual size. Compensate scrollTop to prevent viewport shift.
+  const handlePageRenderSuccess = useCallback((pageNum: number) => {
+    if (renderedPagesRef.current.has(pageNum)) return;
 
-    const pageRef = pageRefs.current.get(initialPage);
-    if (pageRef) {
-      setTimeout(() => {
-        pageRef.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 100);
+    const el = pageRefs.current.get(pageNum);
+    if (!el) return;
+
+    const actualHeight = el.getBoundingClientRect().height;
+    renderedPagesRef.current.add(pageNum);
+
+    // Scroll to initial page when it first renders
+    if (pageNum === initialPage && !scrolledToInitialRef.current) {
+      scrolledToInitialRef.current = true;
+      requestAnimationFrame(() => {
+        el.scrollIntoView({ behavior: 'instant', block: 'start' });
+      });
+      return;
     }
-  }, [numPages, initialPage]);
+
+    // Compensate scroll for pages that rendered above the viewport
+    if (containerRef.current && scrolledToInitialRef.current) {
+      const container = containerRef.current;
+      const pageRect = el.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
+
+      if (pageRect.bottom < containerRect.top) {
+        // Page is above viewport — compensate for height change from placeholder
+        const heightDiff = actualHeight - 800;
+        if (Math.abs(heightDiff) > 5) {
+          container.scrollTop += heightDiff;
+        }
+      }
+    }
+  }, [initialPage]);
 
   // Text selection handler
   const handleSelectionChange = useCallback(() => {
@@ -445,6 +473,7 @@ export function PDFSidePanel({
                     scale={scale}
                     renderTextLayer={true}
                     renderAnnotationLayer={true}
+                    onRenderSuccess={() => handlePageRenderSuccess(pageNum)}
                     customTextRenderer={
                       pageNum === initialPage && highlightPhrases.length > 0
                         ? customTextRenderer

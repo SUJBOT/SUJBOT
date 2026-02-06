@@ -28,6 +28,7 @@ from .core.agent_registry import AgentRegistry
 from .core.event_bus import Event, EventBus, EventType
 from .core.state import ExecutionPhase, MultiAgentState
 from .observability import setup_langsmith
+from ..exceptions import AgentInitializationError
 from .routing.workflow_builder import WorkflowBuilder
 
 logger = logging.getLogger(__name__)
@@ -111,7 +112,10 @@ class MultiAgentRunner:
             error_id = track_error(
                 error=e,
                 severity=ErrorSeverity.CRITICAL,
-                context={"phase": "initialization", "config_keys": list(self.multi_agent_config.keys())}
+                context={
+                    "phase": "initialization",
+                    "config_keys": list(self.multi_agent_config.keys()),
+                },
             )
 
             error_msg = (
@@ -127,7 +131,7 @@ class MultiAgentRunner:
                 "error_id": error_id,
                 "error": str(e),
                 "type": type(e).__name__,
-                "message": f"Multi-agent system failed to initialize [{error_id}]. Check logs for details."
+                "message": f"Multi-agent system failed to initialize [{error_id}]. Check logs for details.",
             }
 
             # CRITICAL: Raise instead of returning False
@@ -154,9 +158,7 @@ class MultiAgentRunner:
         # Register orchestrator (special - used for initial analysis)
         orchestrator_cfg = self._build_agent_config("orchestrator", orchestrator_config)
         orchestrator = OrchestratorAgent(
-            orchestrator_cfg,
-            vector_store=self.vector_store,
-            agent_registry=self.agent_registry
+            orchestrator_cfg, vector_store=self.vector_store, agent_registry=self.agent_registry
         )
         self.agent_registry.register(orchestrator)
 
@@ -181,6 +183,7 @@ class MultiAgentRunner:
     async def _initialize_tools(self) -> None:
         """Initialize tool registry with RAG components."""
         from ..agent.tools import get_registry
+
         # Tool modules are auto-imported via tools/__init__.py
         from ..storage import load_vector_store_adapter
         from ..embedding_generator import EmbeddingGenerator
@@ -196,14 +199,18 @@ class MultiAgentRunner:
 
         # Initialize LLM provider for tools (HyDE, Synthesis)
         # Use same model as orchestrator or default to Claude
-        tool_model = self.multi_agent_config.get("orchestrator", {}).get("model", "claude-3-5-sonnet-20241022")
+        tool_model = self.multi_agent_config.get("orchestrator", {}).get(
+            "model", "claude-3-5-sonnet-20241022"
+        )
         api_key = self.config.get("api_keys", {}).get("anthropic_api_key")
 
         try:
             self.llm_provider = create_provider(model=tool_model, api_key=api_key)
             logger.info(f"Initialized LLM provider for tools: {tool_model}")
         except Exception as e:
-            logger.warning(f"Failed to initialize LLM provider for tools: {e}. HyDE and Synthesis will be disabled.")
+            logger.warning(
+                f"Failed to initialize LLM provider for tools: {e}. HyDE and Synthesis will be disabled."
+            )
             self.llm_provider = None
 
         try:
@@ -211,7 +218,9 @@ class MultiAgentRunner:
             if backend == "postgresql":
                 # PostgreSQL backend - load from database
                 connection_string = os.getenv(
-                    storage_config.get("postgresql", {}).get("connection_string_env", "DATABASE_URL")
+                    storage_config.get("postgresql", {}).get(
+                        "connection_string_env", "DATABASE_URL"
+                    )
                 )
                 if not connection_string:
                     logger.error(
@@ -229,7 +238,7 @@ class MultiAgentRunner:
                     backend="postgresql",
                     connection_string=connection_string,
                     pool_size=storage_config.get("postgresql", {}).get("pool_size", 20),
-                    dimensions=storage_config.get("postgresql", {}).get("dimensions", 4096)
+                    dimensions=storage_config.get("postgresql", {}).get("dimensions", 4096),
                 )
                 logger.info("PostgreSQL adapter loaded successfully")
 
@@ -249,8 +258,7 @@ class MultiAgentRunner:
 
                 logger.info(f"Loading FAISS vector store adapter from {vector_store_path}")
                 vector_store = await load_vector_store_adapter(
-                    backend="faiss",
-                    path=str(vector_store_path)
+                    backend="faiss", path=str(vector_store_path)
                 )
                 logger.info("FAISS adapter loaded successfully")
 
@@ -274,7 +282,7 @@ class MultiAgentRunner:
                 normalize=True,
                 enable_multi_layer=True,
                 cache_enabled=True,
-                cache_max_size=1000
+                cache_max_size=1000,
             )
             embedder = EmbeddingGenerator(embedding_config)
             logger.info(f"Embedder initialized: {model_provider}/{model_name}")
@@ -301,8 +309,12 @@ class MultiAgentRunner:
                         # SSOT: Environment variables take precedence over config.json
                         # (passwords should be in .env, not config.json)
                         neo4j_config = Neo4jConfig(
-                            uri=os.getenv("NEO4J_URI", neo4j_cfg.get("uri", "bolt://localhost:7687")),
-                            username=os.getenv("NEO4J_USERNAME", neo4j_cfg.get("username", "neo4j")),
+                            uri=os.getenv(
+                                "NEO4J_URI", neo4j_cfg.get("uri", "bolt://localhost:7687")
+                            ),
+                            username=os.getenv(
+                                "NEO4J_USERNAME", neo4j_cfg.get("username", "neo4j")
+                            ),
                             password=os.getenv("NEO4J_PASSWORD", neo4j_cfg.get("password", "")),
                             database=neo4j_cfg.get("database", "neo4j"),
                         )
@@ -343,27 +355,36 @@ class MultiAgentRunner:
                                 # FIX: Convert string type to EntityType enum (was causing AttributeError)
                                 try:
                                     from src.graph.models import EntityType
+
                                     entity_type = EntityType(entity_type_str)
                                 except (ValueError, KeyError):
-                                    logger.warning(f"Unknown entity type '{entity_type_str}', using UNKNOWN")
+                                    logger.warning(
+                                        f"Unknown entity type '{entity_type_str}', using UNKNOWN"
+                                    )
                                     entity_type = EntityType.UNKNOWN
 
                                 # FIX: source_chunk_ids should be List[str], not set (type annotation mismatch)
                                 source_chunk_ids = node.get("source_chunk_ids", [])
                                 if not isinstance(source_chunk_ids, list):
-                                    source_chunk_ids = [] if source_chunk_ids is None else list(source_chunk_ids)
+                                    source_chunk_ids = (
+                                        [] if source_chunk_ids is None else list(source_chunk_ids)
+                                    )
 
-                                entities.append(Entity(
-                                    id=entity_id,
-                                    type=entity_type,  # ✓ Now EntityType enum
-                                    value=node.get("value", ""),
-                                    normalized_value=node.get("normalized_value", node.get("value", "")),
-                                    confidence=node.get("confidence", 1.0),
-                                    source_chunk_ids=source_chunk_ids,  # ✓ Now List[str]
-                                    document_id=node.get("document_id", ""),
-                                    first_mention_chunk_id=node.get("first_mention_chunk_id"),
-                                    extraction_method=node.get("extraction_method"),
-                                ))
+                                entities.append(
+                                    Entity(
+                                        id=entity_id,
+                                        type=entity_type,  # ✓ Now EntityType enum
+                                        value=node.get("value", ""),
+                                        normalized_value=node.get(
+                                            "normalized_value", node.get("value", "")
+                                        ),
+                                        confidence=node.get("confidence", 1.0),
+                                        source_chunk_ids=source_chunk_ids,  # ✓ Now List[str]
+                                        document_id=node.get("document_id", ""),
+                                        first_mention_chunk_id=node.get("first_mention_chunk_id"),
+                                        extraction_method=node.get("extraction_method"),
+                                    )
+                                )
 
                             # Create KnowledgeGraph from Neo4j entities
                             knowledge_graph = KnowledgeGraph(
@@ -385,8 +406,11 @@ class MultiAgentRunner:
 
                         if kg_path.exists():
                             from ..graph.models import KnowledgeGraph
+
                             knowledge_graph = KnowledgeGraph.load_json(str(kg_path))
-                            logger.info(f"✓ KG loaded from {kg_path.name}: {len(knowledge_graph.entities)} entities")
+                            logger.info(
+                                f"✓ KG loaded from {kg_path.name}: {len(knowledge_graph.entities)} entities"
+                            )
 
                 except Exception as e:
                     logger.warning(f"Failed to load knowledge graph from {kg_backend}: {e}")
@@ -395,7 +419,9 @@ class MultiAgentRunner:
             agent_tools_config = self.config.get("agent_tools", {})
             tool_config = ToolConfig(
                 default_k=agent_tools_config.get("default_k", 6),
-                enable_reranking=agent_tools_config.get("enable_reranking", False),  # SSOT: config.json default
+                enable_reranking=agent_tools_config.get(
+                    "enable_reranking", False
+                ),  # SSOT: config.json default
                 reranker_candidates=agent_tools_config.get("reranker_candidates", 50),
                 reranker_model=agent_tools_config.get("reranker_model", "bge-reranker-large"),
                 enable_graph_boost=agent_tools_config.get("enable_graph_boost", True),
@@ -407,8 +433,12 @@ class MultiAgentRunner:
                 lazy_load_graph=agent_tools_config.get("lazy_load_graph", True),
                 cache_embeddings=agent_tools_config.get("cache_embeddings", True),
                 hyde_num_hypotheses=agent_tools_config.get("hyde_num_hypotheses", 3),
-                query_expansion_provider=agent_tools_config.get("query_expansion_provider", "openai"),
-                query_expansion_model=agent_tools_config.get("query_expansion_model", "gpt-4o-mini"),
+                query_expansion_provider=agent_tools_config.get(
+                    "query_expansion_provider", "openai"
+                ),
+                query_expansion_model=agent_tools_config.get(
+                    "query_expansion_model", "gpt-4o-mini"
+                ),
             )
 
             # Initialize graph-enhanced retriever (optional)
@@ -421,7 +451,9 @@ class MultiAgentRunner:
                     gr_config = GraphRetrievalConfig(
                         enable_graph_boost=graph_retrieval_config.get("enable_graph_boost", True),
                         graph_boost_weight=graph_retrieval_config.get("graph_boost_weight", 0.3),
-                        enable_entity_extraction=graph_retrieval_config.get("enable_entity_extraction", True),
+                        enable_entity_extraction=graph_retrieval_config.get(
+                            "enable_entity_extraction", True
+                        ),
                         enable_multi_hop=graph_retrieval_config.get("enable_multi_hop", False),
                         max_hop_depth=graph_retrieval_config.get("max_hop_depth", 2),
                         fusion_mode=graph_retrieval_config.get("fusion_mode", "weighted"),
@@ -447,32 +479,17 @@ class MultiAgentRunner:
 
             if architecture == "vl":
                 try:
-                    from ..vl import JinaClient, PageStore, VLRetriever
+                    from ..vl import create_vl_components
 
                     vl_config = self.config.get("vl", {})
-                    jina_client = JinaClient(
-                        model=vl_config.get("jina_model", "jina-embeddings-v4"),
-                        dimensions=vl_config.get("dimensions", 2048),
-                    )
-                    page_store = PageStore(
-                        store_dir=vl_config.get("page_store_dir", "data/vl_pages"),
-                        source_pdf_dir=vl_config.get("source_pdf_dir", "data"),
-                        dpi=vl_config.get("page_image_dpi", 150),
-                        image_format=vl_config.get("page_image_format", "png"),
-                    )
-                    vl_retriever = VLRetriever(
-                        jina_client=jina_client,
-                        vector_store=vector_store,
-                        page_store=page_store,
-                        default_k=vl_config.get("default_k", 5),
-                    )
-                    logger.info(
-                        f"VL components initialized: Jina v4 ({vl_config.get('dimensions', 2048)}-dim), "
-                        f"page store at {vl_config.get('page_store_dir', 'data/vl_pages')}"
-                    )
+                    vl_retriever, page_store = create_vl_components(vl_config, vector_store)
                 except Exception as e:
                     logger.error(f"Failed to initialize VL components: {e}", exc_info=True)
-                    logger.warning("Falling back to OCR architecture")
+                    raise AgentInitializationError(
+                        f"VL architecture was explicitly configured but initialization failed: {e}. "
+                        f"Fix VL config or switch to architecture='ocr' in config.json.",
+                        cause=e,
+                    ) from e
 
             # Initialize tools in registry
             registry = get_registry()
@@ -492,7 +509,11 @@ class MultiAgentRunner:
 
             # Log results
             total_tools = len(registry)
-            unavailable = registry.get_unavailable_tools() if hasattr(registry, 'get_unavailable_tools') else []
+            unavailable = (
+                registry.get_unavailable_tools()
+                if hasattr(registry, "get_unavailable_tools")
+                else []
+            )
             available = total_tools - len(unavailable)
 
             if unavailable:
@@ -610,7 +631,7 @@ class MultiAgentRunner:
         self,
         query: str,
         stream_progress: bool = False,
-        conversation_history: Optional[List[Dict[str, str]]] = None
+        conversation_history: Optional[List[Dict[str, str]]] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Run query through multi-agent system.
@@ -630,6 +651,7 @@ class MultiAgentRunner:
         # Reset global cost tracker for this query (prevents cumulative costs across queries)
         # This ensures each query gets its own cost measurement, not cumulative total
         from src.cost_tracker import reset_global_tracker
+
         reset_global_tracker()
 
         # Create thread ID
@@ -676,7 +698,7 @@ class MultiAgentRunner:
                 for event in events:
                     if stream_progress:
                         yield self._convert_event_to_sse(event)
-                
+
                 # Small sleep to prevent busy loop if no events
                 if not events:
                     await asyncio.sleep(0.1)
@@ -696,7 +718,9 @@ class MultiAgentRunner:
             state = MultiAgentState(**state_dict)
 
             # DEBUG: Verify query after state reconstruction
-            logger.info(f"Query after reconstruction: {state.query if state.query else 'EMPTY STRING'}")
+            logger.info(
+                f"Query after reconstruction: {state.query if state.query else 'EMPTY STRING'}"
+            )
 
             # Restore EventBus for later use (will be re-injected before workflow execution)
             # CRITICAL: Always ensure event_bus is valid (never None) to prevent AttributeError
@@ -709,10 +733,11 @@ class MultiAgentRunner:
 
             # Step 2: Check if orchestrator provided direct answer (for greetings/simple queries)
             # When no agents are needed, orchestrator returns final_answer directly
-            if hasattr(state, 'final_answer') and state.final_answer and not state.agent_sequence:
+            if hasattr(state, "final_answer") and state.final_answer and not state.agent_sequence:
                 logger.info("Orchestrator provided direct answer without agents")
                 # Get accurate cost from CostTracker (model-specific pricing)
                 from src.cost_tracker import get_global_tracker
+
                 tracker = get_global_tracker()
                 total_cost_usd = tracker.get_total_cost()
                 total_cost_cents = total_cost_usd * 100.0
@@ -721,7 +746,11 @@ class MultiAgentRunner:
                     "success": True,
                     "final_answer": state.final_answer,
                     "complexity_score": state.complexity_score or 0,
-                    "query_type": state.query_type.value if hasattr(state.query_type, "value") else str(state.query_type or "direct"),
+                    "query_type": (
+                        state.query_type.value
+                        if hasattr(state.query_type, "value")
+                        else str(state.query_type or "direct")
+                    ),
                     "agent_sequence": [],
                     "documents": [],
                     "citations": [],
@@ -741,6 +770,7 @@ class MultiAgentRunner:
 
                 # Get accurate cost from CostTracker (model-specific pricing)
                 from src.cost_tracker import get_global_tracker
+
                 tracker = get_global_tracker()
                 total_cost_usd = tracker.get_total_cost()
                 total_cost_cents = total_cost_usd * 100.0
@@ -812,15 +842,19 @@ class MultiAgentRunner:
 
                             # Extract current agent from actual state and emit AGENT_START event
                             current_agent = actual_state.get("current_agent")
-                            if current_agent and event_bus:  # Defensive check to prevent AttributeError
+                            if (
+                                current_agent and event_bus
+                            ):  # Defensive check to prevent AttributeError
                                 await event_bus.emit(
                                     event_type=EventType.AGENT_START,
                                     data={"agent": current_agent},
-                                    agent_name=current_agent
+                                    agent_name=current_agent,
                                 )
 
                             # Yield pending events from EventBus
-                            events = await event_bus.get_pending_events(timeout=0.0) if event_bus else []
+                            events = (
+                                await event_bus.get_pending_events(timeout=0.0) if event_bus else []
+                            )
                             for event in events:
                                 yield self._convert_event_to_sse(event)
             else:
@@ -840,11 +874,13 @@ class MultiAgentRunner:
                             await event_bus.emit(
                                 event_type=EventType.AGENT_START,
                                 data={"agent": current_agent},
-                                agent_name=current_agent
+                                agent_name=current_agent,
                             )
 
                         # Yield pending events from EventBus
-                        events = await event_bus.get_pending_events(timeout=0.0) if event_bus else []
+                        events = (
+                            await event_bus.get_pending_events(timeout=0.0) if event_bus else []
+                        )
                         for event in events:
                             yield self._convert_event_to_sse(event)
 
@@ -863,8 +899,12 @@ class MultiAgentRunner:
 
             # Debug: Log what we got from astream
             logger.info(f"Final result node keys: {list(final_result.keys())}")
-            logger.info(f"Extracted state keys: {list(result.keys()) if isinstance(result, dict) else 'not a dict'}")
-            logger.info(f"Final answer in result: {result.get('final_answer', 'NOT FOUND')[:100] if result.get('final_answer') else 'NOT FOUND'}")
+            logger.info(
+                f"Extracted state keys: {list(result.keys()) if isinstance(result, dict) else 'not a dict'}"
+            )
+            logger.info(
+                f"Final answer in result: {result.get('final_answer', 'NOT FOUND')[:100] if result.get('final_answer') else 'NOT FOUND'}"
+            )
 
             # Step 4: Extract final answer
             final_answer = result.get("final_answer", "No answer generated")
@@ -872,12 +912,15 @@ class MultiAgentRunner:
             # Log synthesis mode (lightweight vs full)
             synthesis_mode = result.get("synthesis_mode", "full")
             if synthesis_mode == "lightweight":
-                logger.info("Query execution completed with LIGHTWEIGHT synthesis (single-agent bypass)")
+                logger.info(
+                    "Query execution completed with LIGHTWEIGHT synthesis (single-agent bypass)"
+                )
             else:
                 logger.info("Query execution completed with full orchestrator synthesis")
 
             # Get accurate cost from CostTracker (model-specific pricing)
             from src.cost_tracker import get_global_tracker
+
             tracker = get_global_tracker()
             total_cost_usd = tracker.get_total_cost()
             total_cost_cents = total_cost_usd * 100.0
@@ -886,8 +929,14 @@ class MultiAgentRunner:
             tool_executions_raw = result.get("tool_executions", [])
             tool_executions_serialized = [
                 {
-                    "tool_name": te.tool_name if hasattr(te, "tool_name") else te.get("tool_name", "unknown"),
-                    "agent_name": te.agent_name if hasattr(te, "agent_name") else te.get("agent_name", "unknown"),
+                    "tool_name": (
+                        te.tool_name if hasattr(te, "tool_name") else te.get("tool_name", "unknown")
+                    ),
+                    "agent_name": (
+                        te.agent_name
+                        if hasattr(te, "agent_name")
+                        else te.get("agent_name", "unknown")
+                    ),
                     "success": te.success if hasattr(te, "success") else te.get("success", True),
                 }
                 for te in tool_executions_raw
@@ -937,7 +986,11 @@ class MultiAgentRunner:
                         "quality_metrics": interrupt_value.get("quality_metrics", {}),
                         "original_query": query,
                         "complexity_score": state.complexity_score,
-                        "query_type": state.query_type.value if hasattr(state.query_type, "value") else str(state.query_type),
+                        "query_type": (
+                            state.query_type.value
+                            if hasattr(state.query_type, "value")
+                            else str(state.query_type)
+                        ),
                         "agent_sequence": state.agent_sequence,  # Needed for resume
                     }
                     return
@@ -951,14 +1004,17 @@ class MultiAgentRunner:
                 severity=ErrorSeverity.HIGH,
                 context={
                     "query": query[:200] if query else "",
-                    "complexity_score": state.complexity_score if hasattr(state, 'complexity_score') else None,
-                    "agent_sequence": state.agent_sequence if hasattr(state, 'agent_sequence') else [],
-                }
+                    "complexity_score": (
+                        state.complexity_score if hasattr(state, "complexity_score") else None
+                    ),
+                    "agent_sequence": (
+                        state.agent_sequence if hasattr(state, "agent_sequence") else []
+                    ),
+                },
             )
 
             logger.error(
-                f"[{error_id}] Query execution failed: {type(e).__name__}: {e}",
-                exc_info=True
+                f"[{error_id}] Query execution failed: {type(e).__name__}: {e}", exc_info=True
             )
 
             # Build actionable error message
@@ -968,7 +1024,9 @@ class MultiAgentRunner:
             if isinstance(e, (TimeoutError, asyncio.TimeoutError)):
                 error_message += "The query is taking too long. Try simplifying your question or breaking it into smaller parts."
             elif "API" in str(e) or "rate limit" in str(e).lower():
-                error_message += "API service is temporarily unavailable. Please try again in a few moments."
+                error_message += (
+                    "API service is temporarily unavailable. Please try again in a few moments."
+                )
             elif isinstance(e, MemoryError):
                 error_message += "The query requires too much memory. Please contact support."
             else:
@@ -1029,6 +1087,7 @@ class MultiAgentRunner:
 
             # Get accurate cost from CostTracker (model-specific pricing)
             from src.cost_tracker import get_global_tracker
+
             tracker = get_global_tracker()
             total_cost_usd = tracker.get_total_cost()
             total_cost_cents = total_cost_usd * 100.0
@@ -1069,13 +1128,13 @@ class MultiAgentRunner:
             return {
                 "type": "agent_start",
                 "agent": event.agent_name,
-                "timestamp": event.timestamp.isoformat()
+                "timestamp": event.timestamp.isoformat(),
             }
         elif event.event_type == EventType.AGENT_COMPLETE:
             return {
                 "type": "agent_complete",
                 "agent": event.agent_name,
-                "timestamp": event.timestamp.isoformat()
+                "timestamp": event.timestamp.isoformat(),
             }
         elif event.event_type == EventType.TOOL_CALL_START:
             return {
@@ -1083,7 +1142,7 @@ class MultiAgentRunner:
                 "agent": event.agent_name,
                 "tool": event.tool_name,
                 "status": "running",
-                "timestamp": event.timestamp.isoformat()
+                "timestamp": event.timestamp.isoformat(),
             }
         elif event.event_type == EventType.TOOL_CALL_COMPLETE:
             return {
@@ -1091,14 +1150,14 @@ class MultiAgentRunner:
                 "agent": event.agent_name,
                 "tool": event.tool_name,
                 "status": "completed" if event.data.get("success") else "failed",
-                "timestamp": event.timestamp.isoformat()
+                "timestamp": event.timestamp.isoformat(),
             }
         else:
             # Unknown event type - pass through with basic formatting
             return {
                 "type": event.event_type.value,
                 "data": event.data,
-                "timestamp": event.timestamp.isoformat()
+                "timestamp": event.timestamp.isoformat(),
             }
 
     def shutdown(self) -> None:

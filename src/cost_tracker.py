@@ -163,7 +163,9 @@ class UsageEntry:
     operation: str  # "summary", "context", "embedding", "agent", etc.
     cache_creation_tokens: int = 0  # Tokens written to cache
     cache_read_tokens: int = 0  # Tokens read from cache
-    response_time_ms: float = 0.0  # LLM response time in milliseconds (measured via time.time()). Accumulates per agent in get_agent_breakdown(). Always 0.0 for embedding operations.
+    response_time_ms: float = (
+        0.0  # LLM response time in milliseconds (measured via time.time()). Accumulates per agent in get_agent_breakdown(). Always 0.0 for embedding operations.
+    )
 
 
 class CostTracker:
@@ -276,7 +278,12 @@ class CostTracker:
 
         # Get pricing (includes cache cost calculation)
         cost = self._calculate_llm_cost(
-            provider, model, input_tokens, output_tokens, cache_read_tokens
+            provider,
+            model,
+            input_tokens,
+            output_tokens,
+            cache_read_tokens,
+            cache_creation_tokens,
         )
 
         # Store entry
@@ -373,7 +380,9 @@ class CostTracker:
 
         return cost
 
-    def _get_pricing_from_config(self, model: str, model_type: str = "llm") -> Optional[Dict[str, float]]:
+    def _get_pricing_from_config(
+        self, model: str, model_type: str = "llm"
+    ) -> Optional[Dict[str, float]]:
         """
         Get pricing from config.json via ModelRegistry.
 
@@ -388,6 +397,7 @@ class CostTracker:
         """
         try:
             from src.utils.model_registry import ModelRegistry
+
             pricing = ModelRegistry.get_pricing(model, model_type)
             # Only return if pricing is non-zero (configured in config.json)
             if pricing["input"] > 0 or pricing["output"] > 0:
@@ -408,15 +418,19 @@ class CostTracker:
         input_tokens: int,
         output_tokens: int,
         cache_read_tokens: int = 0,
+        cache_creation_tokens: int = 0,
     ) -> float:
         """
-        Calculate cost for LLM usage, including cache discount.
+        Calculate cost for LLM usage, including Anthropic prompt caching.
 
         Pricing lookup order:
         1. ModelRegistry (config.json) - SSOT
         2. PRICING dict (fallback for unmigrated models)
 
-        Cache reads are billed at 10% of the regular input price (Anthropic prompt caching).
+        Anthropic cache pricing (relative to base input price):
+        - Regular input: 100%
+        - Cache creation: 125% (25% surcharge for writing to cache)
+        - Cache read: 10% (90% discount for cache hits)
 
         Args:
             provider: Provider name
@@ -424,6 +438,7 @@ class CostTracker:
             input_tokens: Regular input tokens (100% price)
             output_tokens: Output tokens (100% price)
             cache_read_tokens: Cache hit tokens (10% price, Anthropic only)
+            cache_creation_tokens: Cache write tokens (125% price, Anthropic only)
 
         Returns:
             Total cost in USD
@@ -447,9 +462,12 @@ class CostTracker:
         output_cost = (output_tokens / 1_000_000) * pricing["output"]
 
         # Cache reads are billed at 10% of input price
-        cache_cost = (cache_read_tokens / 1_000_000) * pricing["input"] * 0.1
+        cache_read_cost = (cache_read_tokens / 1_000_000) * pricing["input"] * 0.1
 
-        return input_cost + output_cost + cache_cost
+        # Cache creation is billed at 125% of input price (25% surcharge)
+        cache_creation_cost = (cache_creation_tokens / 1_000_000) * pricing["input"] * 1.25
+
+        return input_cost + output_cost + cache_read_cost + cache_creation_cost
 
     def _calculate_embedding_cost(self, provider: str, model: str, tokens: int) -> float:
         """
@@ -756,7 +774,9 @@ class CostTracker:
                 model_pricing = PRICING[entry.provider].get(entry.model, {})
                 if model_pricing:
                     # Full price - discounted price = savings
-                    full_price = (entry.cache_read_tokens / 1_000_000) * model_pricing.get("input", 0)
+                    full_price = (entry.cache_read_tokens / 1_000_000) * model_pricing.get(
+                        "input", 0
+                    )
                     discounted = full_price * 0.1
                     cache_savings_usd += full_price - discounted
 
@@ -868,6 +888,7 @@ def validate_pricing_coverage(config: Any) -> List[str]:
         # Check SSOT first (ModelRegistry -> config.json)
         try:
             from src.utils.model_registry import ModelRegistry
+
             if ModelRegistry.has_pricing(model, "llm"):
                 return True
         except (ImportError, KeyError, ValueError):
@@ -883,7 +904,11 @@ def validate_pricing_coverage(config: Any) -> List[str]:
     # Check variant models
     for variant_name, variant in (variants.items() if isinstance(variants, dict) else []):
         # Handle both dict and Pydantic object
-        variant_dict = variant if isinstance(variant, dict) else variant.model_dump() if hasattr(variant, "model_dump") else {}
+        variant_dict = (
+            variant
+            if isinstance(variant, dict)
+            else variant.model_dump() if hasattr(variant, "model_dump") else {}
+        )
         model = variant_dict.get("model", "")
         # Skip Anthropic/OpenAI models (handled by their providers)
         if not model or model.startswith("claude-") or model.startswith("gpt-"):

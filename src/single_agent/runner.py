@@ -6,6 +6,7 @@ LLM that decides which tools to call and when to stop.
 """
 
 import asyncio
+import json
 import logging
 import os
 import time
@@ -152,17 +153,23 @@ class SingleAgentRunner:
         knowledge_graph = None
         kg_config = self.config.get("knowledge_graph", {})
         if kg_config.get("enable", False):
-            try:
-                kg_path = Path("vector_db/unified_kg.json")
-                if not kg_path.exists():
-                    kg_path = Path("output/knowledge_graph.json")
-                if kg_path.exists():
+            kg_path = Path("vector_db/unified_kg.json")
+            if not kg_path.exists():
+                kg_path = Path("output/knowledge_graph.json")
+            if kg_path.exists():
+                try:
                     from ..graph.models import KnowledgeGraph
 
                     knowledge_graph = KnowledgeGraph.load_json(str(kg_path))
                     logger.info(f"KG loaded: {len(knowledge_graph.entities)} entities")
-            except Exception as e:
-                logger.warning(f"Failed to load knowledge graph: {e}")
+                except (json.JSONDecodeError, KeyError, ValueError) as e:
+                    logger.error(
+                        "Knowledge graph file is corrupt at %s: %s", kg_path, e, exc_info=True
+                    )
+                except ImportError as e:
+                    logger.warning(f"Knowledge graph module unavailable: {e}")
+            else:
+                logger.info("Knowledge graph enabled but no file found, skipping")
 
         # Tool config
         agent_tools_config = self.config.get("agent_tools", {})
@@ -191,31 +198,16 @@ class SingleAgentRunner:
 
         if architecture == "vl":
             try:
-                from ..vl import JinaClient, PageStore, VLRetriever
+                from ..vl import create_vl_components
 
                 vl_config = self.config.get("vl", {})
-                jina_client = JinaClient(
-                    model=vl_config.get("jina_model", "jina-embeddings-v4"),
-                    dimensions=vl_config.get("dimensions", 2048),
-                )
-                page_store = PageStore(
-                    store_dir=vl_config.get("page_store_dir", "data/vl_pages"),
-                    source_pdf_dir=vl_config.get("source_pdf_dir", "data"),
-                    dpi=vl_config.get("page_image_dpi", 150),
-                    image_format=vl_config.get("page_image_format", "png"),
-                )
-                vl_retriever = VLRetriever(
-                    jina_client=jina_client,
-                    vector_store=vector_store,
-                    page_store=page_store,
-                    default_k=vl_config.get("default_k", 5),
-                )
-                logger.info("VL components initialized (Jina v4)")
+                vl_retriever, page_store = create_vl_components(vl_config, vector_store)
             except Exception as e:
                 logger.error(f"Failed to init VL components: {e}", exc_info=True)
                 raise AgentInitializationError(
                     f"VL architecture was explicitly configured but initialization failed: {e}. "
                     f"Fix VL config or switch to architecture='ocr' in config.json.",
+                    details={"phase": "vl_initialization", "architecture": "vl"},
                     cause=e,
                 ) from e
 
@@ -504,8 +496,10 @@ class SingleAgentRunner:
                                     {
                                         "type": "text",
                                         "text": (
-                                            f"[Page {page.get('page_number', '?')} from "
-                                            f"{page.get('document_id', 'unknown')}, "
+                                            f"[USE THIS EXACT page_id IN \\cite{{}}: "
+                                            f"{page.get('page_id', 'unknown')} | "
+                                            f"Page {page.get('page_number', '?')} from "
+                                            f"{page.get('document_id', 'unknown')} | "
                                             f"score: {page.get('score', 0):.3f}]"
                                         ),
                                     }
@@ -626,7 +620,8 @@ class SingleAgentRunner:
                 "content": (
                     "Provide your FINAL answer now based on the information gathered. "
                     "Do NOT call any more tools. Use \\cite{id} citations for all facts, "
-                    "where id is the chunk_id or page_id from search results."
+                    "where id is the exact chunk_id or page_id from search results "
+                    "(e.g., \\cite{BZ_VR1_p003} for VL page results, \\cite{BZ_VR1_L3_5} for text chunks)."
                 ),
             }
         ]

@@ -8,7 +8,7 @@
  * Citation marker regex pattern.
  * Matches: \cite{chunk_id} where chunk_id is alphanumeric with underscores/hyphens
  */
-export const CITATION_REGEX = /\\cite\{([a-zA-Z0-9_-]+)\}/g;
+export const CITATION_REGEX = /\\cite\{([a-zA-Z0-9_\-\s/.]+)\}/g;
 
 /**
  * Extract all unique chunk_ids from content.
