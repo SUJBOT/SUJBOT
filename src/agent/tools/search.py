@@ -49,13 +49,13 @@ class SearchTool(BaseTool):
     detailed_help = """
     Semantic search with automatic mode dispatch.
 
-    **VL mode (current):**
+    **VL mode:**
     - Embeds query with Jina v4 (2048-dim)
     - Cosine similarity against page embeddings in PostgreSQL
     - Returns page images (base64 PNG) for multimodal LLM
     - Default k=5 (each page ~1600 tokens)
 
-    **OCR mode (alternative):**
+    **OCR mode:**
     - HyDE + Expansion Fusion with Qwen3-Embedding-8B (4096-dim)
     - Returns text chunks (512 tokens each)
     - Default k=10

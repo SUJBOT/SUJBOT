@@ -45,18 +45,17 @@ CRITICAL: ALWAYS use the search_documents tool to find relevant information. You
 
 ## AVAILABLE TOOLS:
 
-### search_documents
-Performs hybrid semantic search across the document corpus using HyDE and query expansion techniques.
+### search
+Performs semantic search across the document corpus. In VL mode returns page images; in OCR mode uses HyDE + Expansion Fusion and returns text chunks.
 
 **Parameters:**
-- `query` (string, REQUIRED): Natural language search query. Can be a question, keywords, or hypothetical answer passage.
-- `top_k` (integer, OPTIONAL, default=5): Number of document chunks to retrieve (1-20). Use higher values (10-15) for broad exploration, lower (3-5) for focused retrieval.
+- `query` (string, REQUIRED): Natural language search query.
+- `k` (integer, OPTIONAL, default=10): Number of results to retrieve. VL mode auto-limits to 5.
 
 **Usage Guidelines:**
-- Formulate queries as if writing the expected answer (HyDE technique)
 - Use natural language, include context and domain terminology
 - For Czech documents, query in Czech when possible for best results
-- Adjust top_k based on query specificity and information density needs
+- Adjust k based on query specificity and information density needs
 
 **Example calls:**
 ```json

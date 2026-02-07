@@ -26,7 +26,7 @@ class SingleAgentRunner:
     Replaces MultiAgentRunner by:
     - Using one LLM call loop instead of orchestrator + specialist routing
     - Exposing ALL tools (search, expand_context, etc.) to one agent
-    - Loading a unified system prompt from prompts/agents/unified.txt
+    - Loading system prompt: unified.txt (VL) or unified_ocr.txt (OCR)
     """
 
     def __init__(self, config: Dict[str, Any]):
@@ -170,7 +170,7 @@ class SingleAgentRunner:
         # VL components (optional)
         vl_retriever = None
         page_store = None
-        architecture = self.config.get("architecture", "ocr")
+        architecture = self.config.get("architecture", "vl")
 
         if architecture == "vl":
             try:
@@ -217,7 +217,9 @@ class SingleAgentRunner:
             # Try relative to project root
             prompt_path = Path(__file__).parent.parent.parent / prompt_file
         if not prompt_path.exists():
-            raise FileNotFoundError(f"Unified prompt not found: {prompt_file}")
+            raise FileNotFoundError(
+                f"System prompt not found: {prompt_file} (architecture={architecture})"
+            )
 
         self.system_prompt = prompt_path.read_text(encoding="utf-8")
         logger.info(f"Loaded system prompt from {prompt_path} ({len(self.system_prompt)} chars)")

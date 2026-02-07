@@ -439,8 +439,7 @@
     "max_tokens": 4096,
     "temperature": 0.3,
     "max_iterations": 10,
-    "enable_prompt_caching": true,
-    "prompt_file": "prompts/agents/unified.txt"
+    "enable_prompt_caching": true
   },
   "model_registry": {
     "llm_models": {
