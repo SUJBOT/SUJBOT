@@ -95,7 +95,7 @@ class SingleAgentRunner:
         storage_config = self.config.get("storage", {})
         backend = storage_config.get("backend", "postgresql")
 
-        # LLM provider for tools (HyDE, synthesis) — use cheap model
+        # LLM provider for tools (OCR mode: HyDE/synthesis) — use cheap model
         tool_model = self.config.get("models", {}).get("llm_model", "gpt-4o-mini")
         try:
             self.llm_provider = create_provider(model=tool_model)
@@ -204,8 +204,14 @@ class SingleAgentRunner:
         logger.info(f"Tool registry initialized: {total_tools} tools")
 
     def _load_system_prompt(self) -> None:
-        """Load unified system prompt from file."""
-        prompt_file = self.single_agent_config.get("prompt_file", "prompts/agents/unified.txt")
+        """Load system prompt based on architecture mode (VL or OCR)."""
+        architecture = self.config.get("architecture", "vl")
+        default_prompt = (
+            "prompts/agents/unified.txt"
+            if architecture == "vl"
+            else "prompts/agents/unified_ocr.txt"
+        )
+        prompt_file = self.single_agent_config.get("prompt_file", default_prompt)
         prompt_path = Path(prompt_file)
         if not prompt_path.exists():
             # Try relative to project root
