@@ -8,7 +8,7 @@ How it works:
 - The query is processed through HyDE (Hypothetical Document Embeddings) and query expansion to generate multiple search variants.
 - Results are fused with weighted scoring: 0.5 × original query + 0.25 × HyDE + 0.25 × expansions.
 - Embeddings use Qwen3-Embedding-8B (4096-dim) with cosine similarity in PostgreSQL.
-- Default: 10 chunks per search (~100 tokens each). Adjust with `k` parameter.
+- Default: 10 chunks per search (up to 512 tokens each). Adjust with `k` parameter.
 - Documents are indexed in 3 layers: document summaries (L1), section summaries (L2), text chunks (L3). Search operates on L3.
 
 ## Available tools
