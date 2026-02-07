@@ -26,7 +26,7 @@ class SingleAgentRunner:
     Replaces MultiAgentRunner by:
     - Using one LLM call loop instead of orchestrator + specialist routing
     - Exposing ALL tools (search, expand_context, etc.) to one agent
-    - Loading a unified system prompt from prompts/agents/unified.txt
+    - Loading system prompt: unified.txt (VL) or unified_ocr.txt (OCR)
     """
 
     def __init__(self, config: Dict[str, Any]):
@@ -95,7 +95,7 @@ class SingleAgentRunner:
         storage_config = self.config.get("storage", {})
         backend = storage_config.get("backend", "postgresql")
 
-        # LLM provider for tools (HyDE, synthesis) — use cheap model
+        # LLM provider for tools (OCR mode: HyDE/synthesis) — use cheap model
         tool_model = self.config.get("models", {}).get("llm_model", "gpt-4o-mini")
         try:
             self.llm_provider = create_provider(model=tool_model)
@@ -170,7 +170,7 @@ class SingleAgentRunner:
         # VL components (optional)
         vl_retriever = None
         page_store = None
-        architecture = self.config.get("architecture", "ocr")
+        architecture = self.config.get("architecture", "vl")
 
         if architecture == "vl":
             try:
@@ -204,14 +204,22 @@ class SingleAgentRunner:
         logger.info(f"Tool registry initialized: {total_tools} tools")
 
     def _load_system_prompt(self) -> None:
-        """Load unified system prompt from file."""
-        prompt_file = self.single_agent_config.get("prompt_file", "prompts/agents/unified.txt")
+        """Load system prompt based on architecture mode (VL or OCR)."""
+        architecture = self.config.get("architecture", "vl")
+        default_prompt = (
+            "prompts/agents/unified.txt"
+            if architecture == "vl"
+            else "prompts/agents/unified_ocr.txt"
+        )
+        prompt_file = self.single_agent_config.get("prompt_file", default_prompt)
         prompt_path = Path(prompt_file)
         if not prompt_path.exists():
             # Try relative to project root
             prompt_path = Path(__file__).parent.parent.parent / prompt_file
         if not prompt_path.exists():
-            raise FileNotFoundError(f"Unified prompt not found: {prompt_file}")
+            raise FileNotFoundError(
+                f"System prompt not found: {prompt_file} (architecture={architecture})"
+            )
 
         self.system_prompt = prompt_path.read_text(encoding="utf-8")
         logger.info(f"Loaded system prompt from {prompt_path} ({len(self.system_prompt)} chars)")

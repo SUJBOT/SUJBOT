@@ -46,7 +46,7 @@ class ExpandContextTool(BaseTool):
     """Expand chunk context."""
 
     name = "expand_context"
-    description = "Expand chunk context"
+    description = "Expand context — get adjacent pages (VL) or neighboring chunks (OCR)"
     detailed_help = """
     Expand chunks/pages with additional surrounding or related context.
 

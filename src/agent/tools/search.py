@@ -1,12 +1,10 @@
 """
-Search Tool - HyDE + Expansion Fusion
+Search Tool — dual-mode (VL / OCR).
 
-Unified search using:
-- HyDE (Hypothetical Document Embeddings)
-- Query Expansion (2 paraphrases)
-- Weighted Fusion (w_orig=0.5, w_hyde=0.25, w_exp=0.25)
+VL mode: Jina v4 cosine similarity → page images (base64 PNG).
+OCR mode: HyDE + Expansion Fusion → text chunks.
 
-All API calls via DeepInfra (Qwen models).
+Active mode determined by config.json → "architecture".
 """
 
 import logging
@@ -40,41 +38,31 @@ class SearchInput(ToolInput):
 @register_tool
 class SearchTool(BaseTool):
     """
-    HyDE + Expansion Fusion Search.
+    Semantic search over document corpus (VL or OCR mode).
 
-    Uses:
-    - HyDE: Generate hypothetical document answering the query
-    - Expansions: 2 query paraphrases for vocabulary coverage
-    - Fusion: Weighted combination (0.5 * original + 0.25 * hyde + 0.25 * expansions)
-
-    All via DeepInfra API (Qwen3-Embedding-8B + Qwen2.5-7B-Instruct).
+    VL mode:  Jina v4 cosine similarity → returns page images (base64 PNG).
+    OCR mode: HyDE + Expansion Fusion → returns text chunks.
     """
 
     name = "search"
-    description = "Search using HyDE + Expansion fusion (DeepInfra/Qwen)"
+    description = "Search documents — returns page images (VL mode) or text chunks (OCR mode)"
     detailed_help = """
-    HyDE + Expansion Fusion Search Tool
+    Semantic search with automatic mode dispatch.
 
-    **Algorithm:**
-    1. Generate HyDE document (hypothetical answer) via LLM
-    2. Generate 2 query expansions (paraphrases) via LLM
-    3. Embed all 3 variants (hyde, exp0, exp1)
-    4. Search PostgreSQL with each embedding
-    5. Min-max normalize scores
-    6. Weighted fusion: final = 0.5 * original + 0.25 * hyde + 0.25 * avg(expansions)
-    7. Return top-k results
+    **VL mode:**
+    - Embeds query with Jina v4 (2048-dim)
+    - Cosine similarity against page embeddings in PostgreSQL
+    - Returns page images (base64 PNG) for multimodal LLM
+    - Default k=5 (each page ~1600 tokens)
 
-    **Models:**
-    - Embedding: Qwen3-Embedding-8B (4096 dims)
-    - LLM: Qwen2.5-7B-Instruct
+    **OCR mode:**
+    - HyDE + Expansion Fusion with Qwen3-Embedding-8B (4096-dim)
+    - Returns text chunks (512 tokens each)
+    - Default k=10
 
     **Usage:**
-    - search(query="What is safety margin?", k=10)
+    - search(query="What is safety margin?", k=5)
     - search(query="...", filter_document="doc_id")
-
-    **Research basis:**
-    - HyDE: Gao et al. (2022) - +15-30% recall for zero-shot
-    - Fusion weights empirically optimized
     """
 
     input_schema = SearchInput

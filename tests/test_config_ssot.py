@@ -307,14 +307,15 @@ class TestSingleAgentConfig:
     def test_single_agent_required_fields(self, config_data):
         """Verify single_agent has all required fields."""
         sa = config_data["single_agent"]
-        required = ["model", "max_tokens", "temperature", "max_iterations", "prompt_file"]
+        required = ["model", "max_tokens", "temperature", "max_iterations"]
         for field in required:
             assert field in sa, f"Missing single_agent field: {field}"
 
-    def test_single_agent_prompt_file_exists(self, config_data):
-        """Verify prompt file referenced in single_agent config exists."""
-        prompt_path = Path(__file__).parent.parent / config_data["single_agent"]["prompt_file"]
-        assert prompt_path.exists(), f"Prompt file not found: {prompt_path}"
+    def test_single_agent_prompt_files_exist(self, config_data):
+        """Verify both VL and OCR prompt files exist."""
+        root = Path(__file__).parent.parent
+        assert (root / "prompts/agents/unified.txt").exists(), "VL prompt missing"
+        assert (root / "prompts/agents/unified_ocr.txt").exists(), "OCR prompt missing"
 
     def test_single_agent_model_is_valid(self, config_data):
         """Model should reference a known model ID."""
