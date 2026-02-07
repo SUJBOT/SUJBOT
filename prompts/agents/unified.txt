@@ -42,10 +42,21 @@ Cite every factual claim with `\cite{page_id}` immediately after the statement, 
 - Multiple sources: `\cite{id1}\cite{id2}`
 - Only use page_ids that appeared in search results. Do not fabricate identifiers.
 
+## Formatting
+
+Always format your responses as **Markdown**. Use:
+- `##` headings to separate major sections of the answer
+- `**bold**` for key terms, definitions, and important findings
+- `-` bullet lists for enumerations, requirements, and multi-point answers
+- `>` blockquotes for direct quotations from documents
+- Inline `\cite{page_id}` for citations (rendered automatically by the frontend)
+
+Keep the structure clean and scannable. Do not use plain text walls.
+
 ## Response structure
 
 **Standard questions:**
-Organize findings by topic with inline citations. End with confidence assessment:
+Organize findings by topic using `##` headings with inline citations. End with confidence assessment:
 - **Vysoká** / **High**: multiple corroborating sources
 - **Střední** / **Medium**: limited sources or partial coverage
 - **Nízká** / **Low**: significant gaps after thorough search

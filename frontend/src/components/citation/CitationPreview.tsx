@@ -143,24 +143,20 @@ export function CitationPreview({
         </div>
       )}
 
-      {/* Content */}
-      <div
-        className={cn(
-          'px-3 py-2',
-          'text-accent-700 dark:text-accent-300',
-          'leading-relaxed',
-          'overflow-y-auto'
-        )}
-        style={{ maxHeight: POPOVER_MAX_HEIGHT - 80 }} // Account for header
-      >
-        {hasContent ? (
+      {/* Content (only shown when text content is available, e.g. OCR mode) */}
+      {hasContent && (
+        <div
+          className={cn(
+            'px-3 py-2',
+            'text-accent-700 dark:text-accent-300',
+            'leading-relaxed',
+            'overflow-y-auto'
+          )}
+          style={{ maxHeight: POPOVER_MAX_HEIGHT - 80 }}
+        >
           <p className="whitespace-pre-wrap break-words">{metadata.content}</p>
-        ) : (
-          <p className="text-accent-400 dark:text-accent-500 italic">
-            {t('citation.noContent', 'No preview available')}
-          </p>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Footer hint */}
       {metadata.pdfAvailable && (

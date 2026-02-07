@@ -69,8 +69,59 @@ export default {
         '400': '400ms',
         '600': '600ms',
       },
+
+      // Typography plugin customization (grayscale palette)
+      typography: (theme) => ({
+        DEFAULT: {
+          css: {
+            '--tw-prose-body': theme('colors.accent.800'),
+            '--tw-prose-headings': theme('colors.accent.900'),
+            '--tw-prose-links': theme('colors.accent.900'),
+            '--tw-prose-bold': theme('colors.accent.900'),
+            '--tw-prose-counters': theme('colors.accent.500'),
+            '--tw-prose-bullets': theme('colors.accent.400'),
+            '--tw-prose-hr': theme('colors.accent.200'),
+            '--tw-prose-quotes': theme('colors.accent.700'),
+            '--tw-prose-quote-borders': theme('colors.accent.300'),
+            '--tw-prose-code': theme('colors.accent.800'),
+            '--tw-prose-th-borders': theme('colors.accent.300'),
+            '--tw-prose-td-borders': theme('colors.accent.200'),
+            // Invert (dark mode / user bubble)
+            '--tw-prose-invert-body': theme('colors.accent.200'),
+            '--tw-prose-invert-headings': theme('colors.accent.50'),
+            '--tw-prose-invert-links': theme('colors.accent.50'),
+            '--tw-prose-invert-bold': theme('colors.accent.50'),
+            '--tw-prose-invert-counters': theme('colors.accent.400'),
+            '--tw-prose-invert-bullets': theme('colors.accent.500'),
+            '--tw-prose-invert-hr': theme('colors.accent.700'),
+            '--tw-prose-invert-quotes': theme('colors.accent.300'),
+            '--tw-prose-invert-quote-borders': theme('colors.accent.600'),
+            '--tw-prose-invert-code': theme('colors.accent.200'),
+            '--tw-prose-invert-th-borders': theme('colors.accent.600'),
+            '--tw-prose-invert-td-borders': theme('colors.accent.700'),
+            // Remove link underline, add on hover
+            a: {
+              textDecoration: 'none',
+              '&:hover': {
+                textDecoration: 'underline',
+              },
+            },
+            // Tighter heading spacing for chat context
+            h2: {
+              marginTop: '1em',
+              marginBottom: '0.5em',
+            },
+            h3: {
+              marginTop: '0.75em',
+              marginBottom: '0.4em',
+            },
+          },
+        },
+      }),
     },
   },
-  plugins: [],
+  plugins: [
+    require('@tailwindcss/typography'),
+  ],
   darkMode: 'class',
 }
