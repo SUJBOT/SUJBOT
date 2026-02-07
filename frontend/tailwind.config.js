@@ -86,7 +86,7 @@ export default {
             '--tw-prose-code': theme('colors.accent.800'),
             '--tw-prose-th-borders': theme('colors.accent.300'),
             '--tw-prose-td-borders': theme('colors.accent.200'),
-            // Invert (dark mode / user bubble)
+            // Invert (text on dark backgrounds: user bubbles in light mode, assistant bubbles in dark mode)
             '--tw-prose-invert-body': theme('colors.accent.200'),
             '--tw-prose-invert-headings': theme('colors.accent.50'),
             '--tw-prose-invert-links': theme('colors.accent.50'),

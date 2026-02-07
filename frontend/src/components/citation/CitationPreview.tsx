@@ -143,7 +143,7 @@ export function CitationPreview({
         </div>
       )}
 
-      {/* Content (only shown when text content is available, e.g. OCR mode) */}
+      {/* Content text preview (populated by backend when available; OCR chunks have text, VL page citations typically do not) */}
       {hasContent && (
         <div
           className={cn(

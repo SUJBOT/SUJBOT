@@ -51,7 +51,7 @@ Always format your responses as **Markdown**. Use:
 - `**bold**` for key terms, definitions, and important findings
 - `-` bullet lists for enumerations, requirements, and multi-point answers
 - `>` blockquotes for direct quotations from documents
-- Inline `\cite{chunk_id}` for citations (rendered automatically by the frontend)
+- Inline `\cite{chunk_id}` for citations (converted to clickable reference links by the frontend)
 
 Keep the structure clean and scannable. Do not use plain text walls.
 
