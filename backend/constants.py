@@ -33,8 +33,8 @@ _DEEPINFRA_SUPPORTED_MODELS: frozenset[str] = frozenset()
 
 _BUILTIN_VARIANT_CONFIG = {
     "remote": {
-        "display_name": "Remote (Haiku 4.5)",
-        "model": "claude-haiku-4-5-20251001",
+        "display_name": "Remote (Sonnet 4.5)",
+        "model": "claude-sonnet-4-5-20250929",
     },
     "local": {
         "display_name": "Local (Qwen3 VL 235B)",

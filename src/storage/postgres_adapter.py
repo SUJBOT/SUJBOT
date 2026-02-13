@@ -11,6 +11,7 @@ Supports metadata filtering for:
 """
 
 import asyncio
+import json
 import asyncpg
 import numpy as np
 from dataclasses import dataclass
@@ -1205,8 +1206,6 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
                 limit,
             )
             # Convert rows to dicts and parse metadata JSON string back to dict
-            import json
-
             messages = []
             for row in rows:
                 msg = dict(row)
@@ -1233,8 +1232,6 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
         Returns:
             Message ID
         """
-        import json
-
         async with self.pool.acquire() as conn:
             # Convert metadata dict to JSON string for JSONB column
             metadata_json = json.dumps(metadata) if metadata else None
@@ -1421,6 +1418,89 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
             for row in rows
         ]
 
+    def update_vl_page_metadata(self, page_id: str, metadata_patch: Dict[str, Any]) -> None:
+        """
+        Merge a metadata patch into an existing VL page's metadata JSONB.
+
+        Uses PostgreSQL's || operator for shallow top-level merge —
+        adds/overwrites keys without deleting existing ones.
+
+        Args:
+            page_id: Page identifier (e.g., "BZ_VR1_p001")
+            metadata_patch: Dict of keys to merge (e.g., {"page_summary": "...", "summary_model": "..."})
+        """
+        _run_async_safe(
+            self._async_update_vl_page_metadata(page_id, metadata_patch),
+            operation_name="update_vl_page_metadata",
+        )
+
+    async def _async_update_vl_page_metadata(
+        self, page_id: str, metadata_patch: Dict[str, Any]
+    ) -> None:
+        """Async implementation of update_vl_page_metadata."""
+
+        await self._ensure_pool()
+        patch_json = json.dumps(metadata_patch)
+
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE vectors.vl_pages
+                SET metadata = metadata || $2::jsonb
+                WHERE page_id = $1
+                """,
+                page_id,
+                patch_json,
+            )
+
+    def get_vl_pages_without_summary(
+        self, document_id: Optional[str] = None
+    ) -> List[Dict]:
+        """
+        Get VL pages that don't have a page_summary in their metadata.
+
+        Args:
+            document_id: Optional filter to a single document
+
+        Returns:
+            List of dicts with page_id, document_id, page_number
+        """
+        return _run_async_safe(
+            self._async_get_vl_pages_without_summary(document_id),
+            operation_name="get_vl_pages_without_summary",
+        )
+
+    async def _async_get_vl_pages_without_summary(
+        self, document_id: Optional[str] = None
+    ) -> List[Dict]:
+        """Async implementation of get_vl_pages_without_summary."""
+        await self._ensure_pool()
+
+        sql = """
+            SELECT page_id, document_id, page_number
+            FROM vectors.vl_pages
+            WHERE metadata->>'page_summary' IS NULL
+        """
+        params: list = []
+
+        if document_id:
+            sql += " AND document_id = $1"
+            params.append(document_id)
+
+        sql += " ORDER BY document_id, page_number"
+
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(sql, *params)
+
+        return [
+            {
+                "page_id": row["page_id"],
+                "document_id": row["document_id"],
+                "page_number": row["page_number"],
+            }
+            for row in rows
+        ]
+
     def add_vl_pages(
         self,
         pages: List[Dict],
@@ -1447,7 +1527,6 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
         embeddings: np.ndarray,
     ) -> int:
         """Async batch insert VL page embeddings."""
-        import json as json_mod
 
         await self._ensure_pool()
 
@@ -1463,7 +1542,7 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
         records = []
         for i, page in enumerate(pages):
             embedding_str = self._vector_to_pgvector_string(embeddings[i])
-            metadata_json = json_mod.dumps(page.get("metadata", {}))
+            metadata_json = json.dumps(page.get("metadata", {}))
             records.append(
                 (
                     page["page_id"],
@@ -1552,8 +1631,6 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
             chunks: List of Chunk objects
             embeddings: Embedding matrix (N x dimensions)
         """
-        import json
-
         # Ensure embeddings are float32
         if embeddings.dtype != np.float32:
             embeddings = embeddings.astype(np.float32)
@@ -1858,8 +1935,6 @@ class PostgreSQLStorageAdapter:
                 limit,
             )
             # Convert rows to dicts and parse metadata JSON string back to dict
-            import json
-
             messages = []
             for row in rows:
                 msg = dict(row)
@@ -1886,8 +1961,6 @@ class PostgreSQLStorageAdapter:
         Returns:
             Message ID
         """
-        import json
-
         async with self.pool.acquire() as conn:
             # Convert metadata dict to JSON string for JSONB column
             metadata_json = json.dumps(metadata) if metadata else None

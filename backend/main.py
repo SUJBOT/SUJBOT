@@ -60,7 +60,7 @@ from backend.routes.feedback import router as feedback_router, set_postgres_adap
 from backend.routes.citations import router as citations_router
 from backend.routes.documents import router as documents_router, set_vl_components
 from backend.routes.settings import router as settings_router
-from backend.routes.admin import router as admin_router, set_admin_dependencies
+from backend.routes.admin import router as admin_router, set_admin_dependencies, set_admin_vl_components
 
 # Import PostgreSQL adapter for user/conversation storage
 from src.storage.postgres_adapter import PostgreSQLStorageAdapter
@@ -211,7 +211,19 @@ async def lifespan(app: FastAPI):
                     pool_size=5,
                     dimensions=vl_cfg.dimensions,
                 )
-                set_vl_components(jina_client, page_store, vl_vector_store)
+                # Create summary provider for page summarization during upload
+                summary_provider = None
+                try:
+                    from backend.constants import get_variant_model
+                    from src.agent.providers.factory import create_provider
+                    summary_model = get_variant_model("remote")
+                    summary_provider = create_provider(summary_model)
+                    logger.info(f"✓ Summary provider initialized: {summary_model}")
+                except Exception as e:
+                    logger.warning(f"Summary provider not available (summaries disabled): {e}")
+
+                set_vl_components(jina_client, page_store, vl_vector_store, summary_provider)
+                set_admin_vl_components(jina_client, page_store, vl_vector_store, summary_provider)
                 logger.info("✓ VL components initialized for document upload")
             else:
                 logger.info("VL config not set, upload indexing disabled")

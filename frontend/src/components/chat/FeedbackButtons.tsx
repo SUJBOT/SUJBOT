@@ -2,14 +2,13 @@
  * FeedbackButtons Component - User feedback for assistant messages
  *
  * Features:
- * - Thumbs up/down rating
- * - Optional comment with modal
+ * - Thumbs up (direct submit) / thumbs down (requires comment)
  * - Sends to PostgreSQL + LangSmith
  * - Disabled during streaming
  */
 
 import { useState } from 'react';
-import { ThumbsUp, ThumbsDown, MessageSquare, X, Send, Loader2 } from 'lucide-react';
+import { ThumbsUp, ThumbsDown, X, Send, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../design-system/utils/cn';
 import { apiService } from '../../services/api';
@@ -98,21 +97,16 @@ export function FeedbackButtons({
     }
   };
 
-  const handleCommentClick = (score: 1 | -1) => {
-    setPendingScore(score);
-    setShowCommentModal(true);
-  };
-
   const handleCommentSubmit = async () => {
-    if (!pendingScore || isSubmitting) return;
+    if (!pendingScore || isSubmitting || !comment.trim()) return;
 
     setIsSubmitting(true);
     setError(null);
     try {
-      await apiService.submitFeedback(dbMessageId, pendingScore, runId, comment.trim() || undefined);
+      await apiService.submitFeedback(dbMessageId, pendingScore, runId, comment.trim());
       const newFeedback: MessageFeedback = {
         score: pendingScore,
-        comment: comment.trim() || undefined,
+        comment: comment.trim(),
       };
       setFeedback(newFeedback);
       onFeedbackSubmit?.(newFeedback);
@@ -161,9 +155,13 @@ export function FeedbackButtons({
           <ThumbsUp className="w-4 h-4" />
         </button>
 
-        {/* Thumbs down */}
+        {/* Thumbs down — opens comment modal */}
         <button
-          onClick={() => handleScore(-1)}
+          onClick={() => {
+            if (isSubmitting || disabled) return;
+            setPendingScore(-1);
+            setShowCommentModal(true);
+          }}
           disabled={isSubmitting || disabled}
           className={cn(
             'p-1.5 rounded-lg transition-colors',
@@ -176,21 +174,6 @@ export function FeedbackButtons({
         >
           <ThumbsDown className="w-4 h-4" />
         </button>
-
-        {/* Comment button */}
-        <button
-          onClick={() => handleCommentClick(1)}
-          disabled={isSubmitting || disabled}
-          className={cn(
-            'p-1.5 rounded-lg transition-colors',
-            'text-gray-400 hover:text-blue-600 hover:bg-blue-50',
-            'dark:text-gray-500 dark:hover:text-blue-400 dark:hover:bg-blue-900/20',
-            'disabled:opacity-50 disabled:cursor-not-allowed'
-          )}
-          title={t('feedback.addComment')}
-        >
-          <MessageSquare className="w-4 h-4" />
-        </button>
       </div>
 
       {/* Comment Modal */}
@@ -199,7 +182,7 @@ export function FeedbackButtons({
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-4 w-full max-w-md mx-4">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                {t('feedback.addComment')}
+                {t('feedback.negativeTitle')}
               </h3>
               <button
                 onClick={handleCommentCancel}
@@ -209,36 +192,8 @@ export function FeedbackButtons({
               </button>
             </div>
 
-            {/* Score selection */}
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-sm text-gray-600 dark:text-gray-400">
-                {t('feedback.rating')}:
-              </span>
-              <button
-                onClick={() => setPendingScore(1)}
-                className={cn(
-                  'p-2 rounded-lg transition-colors',
-                  pendingScore === 1
-                    ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                    : 'text-gray-400 hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20'
-                )}
-              >
-                <ThumbsUp className="w-5 h-5" />
-              </button>
-              <button
-                onClick={() => setPendingScore(-1)}
-                className={cn(
-                  'p-2 rounded-lg transition-colors',
-                  pendingScore === -1
-                    ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-                    : 'text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20'
-                )}
-              >
-                <ThumbsDown className="w-5 h-5" />
-              </button>
-            </div>
-
             <textarea
+              autoFocus
               value={comment}
               onChange={(e) => setComment(e.target.value)}
               placeholder={t('feedback.commentPlaceholder')}
@@ -270,7 +225,7 @@ export function FeedbackButtons({
                 </button>
                 <button
                   onClick={handleCommentSubmit}
-                  disabled={!pendingScore || isSubmitting}
+                  disabled={!pendingScore || isSubmitting || !comment.trim()}
                   className={cn(
                     'px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2',
                     'bg-blue-600 text-white hover:bg-blue-700',
