@@ -84,15 +84,17 @@ async function consumeSSE(
         if (!part.trim()) continue;
 
         let eventType = 'message';
-        let data = '';
+        const dataLines: string[] = [];
 
         for (const line of part.split('\n')) {
           if (line.startsWith('event:')) {
             eventType = line.slice(6).trim();
           } else if (line.startsWith('data:')) {
-            data = line.slice(5).trim();
+            dataLines.push(line.slice(5).trim());
           }
         }
+
+        const data = dataLines.join('\n');
 
         if (data) {
           onEvent(eventType, data);
@@ -215,16 +217,21 @@ export const DocumentsPage = () => {
       await consumeSSE(
         response,
         (eventType, data) => {
-          const parsed = JSON.parse(data);
+          let parsed: Record<string, unknown>;
+          try {
+            parsed = JSON.parse(data);
+          } catch {
+            return;
+          }
           if (eventType === 'progress') {
-            setProgressStage(parsed.stage);
-            setProgressPercent(parsed.percent);
-            setProgressMessage(parsed.message);
+            setProgressStage(parsed.stage as string);
+            setProgressPercent(parsed.percent as number);
+            setProgressMessage(parsed.message as string);
           } else if (eventType === 'complete') {
             setProgressDone(true);
             setProgressMessage(t('admin.documents.reindexSuccess'));
           } else if (eventType === 'error') {
-            setProgressError(parsed.message);
+            setProgressError(parsed.message as string);
           }
         },
         () => {
@@ -287,16 +294,21 @@ export const DocumentsPage = () => {
       await consumeSSE(
         response,
         (eventType, data) => {
-          const parsed = JSON.parse(data);
+          let parsed: Record<string, unknown>;
+          try {
+            parsed = JSON.parse(data);
+          } catch {
+            return;
+          }
           if (eventType === 'progress') {
-            setProgressStage(parsed.stage);
-            setProgressPercent(parsed.percent);
-            setProgressMessage(parsed.message);
+            setProgressStage(parsed.stage as string);
+            setProgressPercent(parsed.percent as number);
+            setProgressMessage(parsed.message as string);
           } else if (eventType === 'complete') {
             setProgressDone(true);
             setProgressMessage(t('admin.documents.uploadSuccess'));
           } else if (eventType === 'error') {
-            setProgressError(parsed.message);
+            setProgressError(parsed.message as string);
           }
         },
         () => {
