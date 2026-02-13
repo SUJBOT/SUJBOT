@@ -5,6 +5,8 @@ Two modes:
 1. load_precomputed_embeddings(pkl_path) — load page_embeddings.pkl into PostgreSQL
 2. index_pdf(pdf_path, document_id) — render pages → Jina API → PostgreSQL
 
+Optionally summarizes each page image via a multimodal LLM provider.
+
 Uses PageStore for rendering, JinaClient for embedding,
 PostgresVectorStoreAdapter for storage.
 """
@@ -12,7 +14,7 @@ PostgresVectorStoreAdapter for storage.
 import logging
 import pickle
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 
@@ -20,12 +22,19 @@ from ..exceptions import JinaAPIError, PageRenderError, StorageError
 from .jina_client import JinaClient
 from .page_store import PageStore
 
+if TYPE_CHECKING:
+    from ..agent.providers.base import BaseProvider
+
 logger = logging.getLogger(__name__)
+
+_SUMMARY_PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "prompts" / "vl_page_summary.txt"
 
 
 class VLIndexingPipeline:
     """
     Indexes PDF pages as image embeddings for VL retrieval.
+
+    Optionally generates page summaries when a summary_provider is given.
     """
 
     def __init__(
@@ -33,10 +42,54 @@ class VLIndexingPipeline:
         jina_client: JinaClient,
         vector_store,  # PostgresVectorStoreAdapter
         page_store: PageStore,
+        summary_provider: Optional["BaseProvider"] = None,
     ):
         self.jina_client = jina_client
         self.vector_store = vector_store
         self.page_store = page_store
+        self.summary_provider = summary_provider
+
+    def _summarize_page(self, page_id: str) -> Optional[str]:
+        """
+        Generate a text summary for a single page image.
+
+        Args:
+            page_id: Page identifier (e.g., "BZ_VR1_p001")
+
+        Returns:
+            Summary text, or None if summarization fails
+        """
+        if not self.summary_provider:
+            return None
+
+        image_b64 = self.page_store.get_image_base64(page_id)
+        prompt_text = _SUMMARY_PROMPT_PATH.read_text(encoding="utf-8")
+
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": f"image/{self.page_store.image_format}",
+                            "data": image_b64,
+                        },
+                    },
+                    {"type": "text", "text": prompt_text},
+                ],
+            }
+        ]
+
+        response = self.summary_provider.create_message(
+            messages=messages,
+            tools=[],
+            system="",
+            max_tokens=500,
+            temperature=0.0,
+        )
+        return response.text.strip() if response.text else None
 
     def load_precomputed_embeddings(self, pkl_path: str) -> int:
         """
@@ -133,17 +186,36 @@ class VLIndexingPipeline:
                 cause=e,
             ) from e
 
-        # 4. Store in PostgreSQL
+        # 4. Summarize pages (optional, if summary_provider is set)
+        summaries: dict[str, Optional[str]] = {}
+        if self.summary_provider:
+            model_name = self.summary_provider.get_model_name()
+            logger.info(f"Summarizing {len(page_ids)} pages via {model_name}...")
+            for i, page_id in enumerate(page_ids):
+                try:
+                    summaries[page_id] = self._summarize_page(page_id)
+                    logger.debug(f"Summarized page {i + 1}/{len(page_ids)}: {page_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to summarize {page_id}: {e}")
+                    summaries[page_id] = None
+            summarized = sum(1 for v in summaries.values() if v)
+            logger.info(f"Summarized {summarized}/{len(page_ids)} pages")
+
+        # 5. Store in PostgreSQL
         pages = []
         for page_id in page_ids:
             doc_id, page_num = PageStore.page_id_to_components(page_id)
+            metadata: dict = {}
+            if summaries.get(page_id):
+                metadata["page_summary"] = summaries[page_id]
+                metadata["summary_model"] = self.summary_provider.get_model_name()
             pages.append(
                 {
                     "page_id": page_id,
                     "document_id": doc_id,
                     "page_number": page_num,
                     "image_path": self.page_store.get_image_path(page_id),
-                    "metadata": {},
+                    "metadata": metadata,
                 }
             )
 
@@ -158,3 +230,53 @@ class VLIndexingPipeline:
 
         logger.info(f"Indexed {inserted} pages from {pdf_path.name}")
         return inserted
+
+    def summarize_existing_pages(self, document_id: Optional[str] = None) -> int:
+        """
+        Backfill summaries for existing pages that lack one.
+
+        Queries unsummarized pages, generates summaries via the summary_provider,
+        and patches metadata in-place.
+
+        Args:
+            document_id: Optional filter to a single document
+
+        Returns:
+            Number of pages successfully summarized
+        """
+        if not self.summary_provider:
+            logger.warning("No summary_provider configured — cannot summarize.")
+            return 0
+
+        pages = self.vector_store.get_vl_pages_without_summary(document_id)
+        if not pages:
+            logger.info("All pages already have summaries.")
+            return 0
+
+        model_name = self.summary_provider.get_model_name()
+        logger.info(
+            f"Summarizing {len(pages)} pages via {model_name}..."
+        )
+
+        success = 0
+        for i, page in enumerate(pages):
+            page_id = page["page_id"]
+            try:
+                summary = self._summarize_page(page_id)
+                if summary:
+                    self.vector_store.update_vl_page_metadata(
+                        page_id,
+                        {"page_summary": summary, "summary_model": model_name},
+                    )
+                    success += 1
+                    logger.info(
+                        f"[{i + 1}/{len(pages)}] {page_id}: "
+                        f"{summary[:80]}..."
+                    )
+                else:
+                    logger.warning(f"[{i + 1}/{len(pages)}] {page_id}: empty summary")
+            except Exception as e:
+                logger.warning(f"[{i + 1}/{len(pages)}] {page_id}: failed — {e}")
+
+        logger.info(f"Summarization complete: {success}/{len(pages)} pages.")
+        return success

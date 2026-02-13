@@ -63,6 +63,15 @@ uv run python -m src.agent.cli             # Interactive mode
 uv run python -m src.agent.cli --debug     # Debug mode
 ```
 
+### Scripts using PostgresVectorStoreAdapter
+Scripts that use `PostgresVectorStoreAdapter` must apply `nest_asyncio` before any DB calls:
+```python
+import nest_asyncio; nest_asyncio.apply()
+```
+The adapter's sync wrappers (`_run_async_safe`) call `loop.run_until_complete()` which fails
+without `nest_asyncio` when already inside `asyncio.run()`. Also: `.env` DATABASE_URL points
+to port 5433 (dev, often down) — override with port 5432 for production DB.
+
 ## Production Deployment
 
 **CRITICAL: Frontend must be built with empty `VITE_API_BASE_URL` for production!**
@@ -84,6 +93,26 @@ docker run -d --name sujbot_frontend \
 
 - `--network-alias frontend` is REQUIRED for Docker DNS resolution
 - 404 on `/admin` → missing SPA fallback; 502 → missing `--network-alias`; `localhost:8000` in browser → wrong `VITE_API_BASE_URL`
+
+### Backend Deploy (full recreation)
+```bash
+docker stop sujbot_backend && docker rm sujbot_backend
+docker run -d --name sujbot_backend \
+  --network sujbot_sujbot_prod_net --network-alias backend \
+  --env-file /home/prusemic/SUJBOT/.env \
+  -e DATABASE_URL=postgresql://postgres:sujbot_secure_password@sujbot_postgres:5432/sujbot \
+  -v $(pwd)/config.json:/app/config.json:ro \
+  -v $(pwd)/prompts:/app/prompts:ro \
+  -v $(pwd)/data:/app/data \
+  -v $(pwd)/data/vl_pages:/app/data/vl_pages \
+  -v $(pwd)/vector_db:/app/vector_db:ro \
+  --restart unless-stopped sujbot-backend
+docker network connect sujbot_sujbot_db_net sujbot_backend
+```
+- MUST connect to BOTH networks: `sujbot_prod_net` (nginx) + `sujbot_db_net` (postgres)
+- `--env-file .env` required (API keys); `-e DATABASE_URL=...@sujbot_postgres:5432/...` overrides dev port
+- `/app/data` must be writable (no `:ro`) for document uploads
+- `/app/vector_db:ro` required even if empty (validation check)
 
 ## Architecture Overview
 

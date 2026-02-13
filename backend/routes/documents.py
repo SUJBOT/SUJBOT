@@ -31,11 +31,14 @@ _vl_components: Dict[str, Any] = {}
 MAX_UPLOAD_SIZE = 100 * 1024 * 1024  # 100 MB
 
 
-def set_vl_components(jina_client: Any, page_store: Any, vector_store: Any) -> None:
+def set_vl_components(
+    jina_client: Any, page_store: Any, vector_store: Any, summary_provider: Any = None
+) -> None:
     """Set VL components for upload endpoint (called from main.py lifespan)."""
     _vl_components["jina_client"] = jina_client
     _vl_components["page_store"] = page_store
     _vl_components["vector_store"] = vector_store
+    _vl_components["summary_provider"] = summary_provider
 
 
 class DocumentInfo(BaseModel):
@@ -44,6 +47,171 @@ class DocumentInfo(BaseModel):
     display_name: str
     filename: str
     size_bytes: int
+
+
+async def index_document_pipeline(
+    pdf_path: Path,
+    document_id: str,
+    jina_client: Any,
+    page_store: Any,
+    vector_store: Any,
+    summary_provider: Any = None,
+):
+    """
+    Async generator that renders, embeds, and stores a PDF document.
+
+    Yields SSE-formatted dicts with 'event' and 'data' keys for progress/complete/error.
+    Shared by upload_document and admin reindex endpoints.
+    """
+    import fitz
+    import numpy as np
+
+    doc = fitz.open(str(pdf_path))
+    total_pages = len(doc)
+    zoom = page_store.dpi / 72.0
+    matrix = fitz.Matrix(zoom, zoom)
+
+    doc_dir = page_store.store_dir / document_id
+    doc_dir.mkdir(parents=True, exist_ok=True)
+
+    page_ids = []
+    for page_num in range(total_pages):
+        page = doc[page_num]
+        pix = page.get_pixmap(matrix=matrix)
+        page_number = page_num + 1
+        img_path = page_store._image_path(document_id, page_number)
+        pix.save(str(img_path))
+        page_id = page_store.make_page_id(document_id, page_number)
+        page_ids.append(page_id)
+
+        percent = int((page_number / total_pages) * 100)
+        yield {
+            "event": "progress",
+            "data": json.dumps({
+                "stage": "rendering",
+                "percent": percent,
+                "message": f"Rendering page {page_number}/{total_pages}",
+            }),
+        }
+        await asyncio.sleep(0)
+
+    doc.close()
+
+    # Embed via Jina in batches
+    batch_size = jina_client.batch_size
+    total_batches = (len(page_ids) + batch_size - 1) // batch_size
+    all_embeddings = []
+
+    for batch_idx in range(total_batches):
+        start = batch_idx * batch_size
+        end = min(start + batch_size, len(page_ids))
+        batch_page_ids = page_ids[start:end]
+
+        page_images = [page_store.get_image_bytes(pid) for pid in batch_page_ids]
+
+        batch_embeddings = await asyncio.to_thread(
+            jina_client.embed_pages, page_images
+        )
+        all_embeddings.append(batch_embeddings)
+
+        percent = int(((batch_idx + 1) / total_batches) * 100)
+        yield {
+            "event": "progress",
+            "data": json.dumps({
+                "stage": "embedding",
+                "percent": percent,
+                "message": f"Embedding batch {batch_idx + 1}/{total_batches}",
+            }),
+        }
+
+        if batch_idx + 1 < total_batches:
+            await asyncio.sleep(3)
+
+    embeddings = np.vstack(all_embeddings)
+
+    # Summarize pages (if summary_provider available)
+    summaries: dict = {}
+    if summary_provider:
+        prompt_path = Path(__file__).resolve().parent.parent.parent / "prompts" / "vl_page_summary.txt"
+        prompt_text = prompt_path.read_text(encoding="utf-8")
+        model_name = summary_provider.get_model_name()
+
+        for i, page_id in enumerate(page_ids):
+            try:
+                image_b64 = page_store.get_image_base64(page_id)
+                messages = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": f"image/{page_store.image_format}",
+                                    "data": image_b64,
+                                },
+                            },
+                            {"type": "text", "text": prompt_text},
+                        ],
+                    }
+                ]
+                response = await asyncio.to_thread(
+                    summary_provider.create_message,
+                    messages=messages, tools=[], system="",
+                    max_tokens=500, temperature=0.0,
+                )
+                text = response.text.strip() if response.text else None
+                if text:
+                    summaries[page_id] = text
+            except Exception as e:
+                logger.warning(f"Failed to summarize {page_id}: {e}")
+
+            percent = int(((i + 1) / len(page_ids)) * 100)
+            yield {
+                "event": "progress",
+                "data": json.dumps({
+                    "stage": "summarizing",
+                    "percent": percent,
+                    "message": f"Summarizing page {i + 1}/{len(page_ids)}",
+                }),
+            }
+            await asyncio.sleep(0)
+
+    # Store in PostgreSQL
+    yield {
+        "event": "progress",
+        "data": json.dumps({
+            "stage": "storing",
+            "percent": 50,
+            "message": "Storing embeddings",
+        }),
+    }
+
+    pages = []
+    for page_id in page_ids:
+        doc_id, page_num_val = page_store.page_id_to_components(page_id)
+        metadata: dict = {}
+        if summaries.get(page_id):
+            metadata["page_summary"] = summaries[page_id]
+            metadata["summary_model"] = model_name
+        pages.append({
+            "page_id": page_id,
+            "document_id": doc_id,
+            "page_number": page_num_val,
+            "image_path": page_store.get_image_path(page_id),
+            "metadata": metadata,
+        })
+
+    vector_store.add_vl_pages(pages, embeddings)
+
+    yield {
+        "event": "complete",
+        "data": json.dumps({
+            "document_id": document_id,
+            "pages": total_pages,
+            "display_name": _format_display_name(pdf_path.name),
+        }),
+    }
 
 # Valid document_id patterns
 # Direct format: alphanumeric, underscore, hyphen (e.g., "BZ_VR1")
@@ -263,6 +431,7 @@ async def upload_document(
         jina_client = _vl_components["jina_client"]
         page_store = _vl_components["page_store"]
         vector_store = _vl_components["vector_store"]
+        summary_provider = _vl_components.get("summary_provider")
         document_id = pdf_path.stem
 
         try:
@@ -277,113 +446,16 @@ async def upload_document(
                 }),
             }
 
-            # 2. Render pages
-            import fitz
-            doc = fitz.open(str(pdf_path))
-            total_pages = len(doc)
-            zoom = page_store.dpi / 72.0
-            matrix = fitz.Matrix(zoom, zoom)
-
-            doc_dir = page_store.store_dir / document_id
-            doc_dir.mkdir(parents=True, exist_ok=True)
-
-            page_ids = []
-            for page_num in range(total_pages):
-                page = doc[page_num]
-                pix = page.get_pixmap(matrix=matrix)
-                page_number = page_num + 1
-                img_path = page_store._image_path(document_id, page_number)
-                pix.save(str(img_path))
-                page_id = page_store.make_page_id(document_id, page_number)
-                page_ids.append(page_id)
-
-                percent = int((page_number / total_pages) * 100)
-                yield {
-                    "event": "progress",
-                    "data": json.dumps({
-                        "stage": "rendering",
-                        "percent": percent,
-                        "message": f"Rendering page {page_number}/{total_pages}",
-                    }),
-                }
-                await asyncio.sleep(0)  # Yield control for SSE flush
-
-            doc.close()
-
-            # 3. Embed via Jina in batches
-            batch_size = jina_client.batch_size
-            total_batches = (len(page_ids) + batch_size - 1) // batch_size
-            all_embeddings = []
-
-            for batch_idx in range(total_batches):
-                start = batch_idx * batch_size
-                end = min(start + batch_size, len(page_ids))
-                batch_page_ids = page_ids[start:end]
-
-                page_images = []
-                for pid in batch_page_ids:
-                    page_images.append(page_store.get_image_bytes(pid))
-
-                # Run synchronous Jina embedding in thread pool
-                import numpy as np
-                batch_embeddings = await asyncio.to_thread(
-                    jina_client.embed_pages, page_images
-                )
-                all_embeddings.append(batch_embeddings)
-
-                percent = int(((batch_idx + 1) / total_batches) * 100)
-                yield {
-                    "event": "progress",
-                    "data": json.dumps({
-                        "stage": "embedding",
-                        "percent": percent,
-                        "message": f"Embedding page {batch_idx + 1}/{total_batches}",
-                    }),
-                }
-
-                # Rate-limit delay between Jina API calls
-                if batch_idx + 1 < total_batches:
-                    await asyncio.sleep(3)
-
-            embeddings = np.vstack(all_embeddings)
-
-            # 4. Store in PostgreSQL
-            yield {
-                "event": "progress",
-                "data": json.dumps({
-                    "stage": "storing",
-                    "percent": 50,
-                    "message": "Storing embeddings",
-                }),
-            }
-
-            pages = []
-            for page_id in page_ids:
-                doc_id, page_num_val = page_store.page_id_to_components(page_id)
-                pages.append({
-                    "page_id": page_id,
-                    "document_id": doc_id,
-                    "page_number": page_num_val,
-                    "image_path": page_store.get_image_path(page_id),
-                    "metadata": {},
-                })
-
-            # nest_asyncio is applied at startup, so sync wrapper works in async context
-            vector_store.add_vl_pages(pages, embeddings)
-
-            display_name = _format_display_name(safe_filename)
-            yield {
-                "event": "complete",
-                "data": json.dumps({
-                    "document_id": document_id,
-                    "pages": total_pages,
-                    "display_name": display_name,
-                }),
-            }
+            # 2-5. Render, embed, summarize, store via shared pipeline
+            async for event in index_document_pipeline(
+                pdf_path, document_id, jina_client, page_store, vector_store,
+                summary_provider=summary_provider,
+            ):
+                yield event
 
             logger.info(
                 f"User {user.get('id', 'unknown')} uploaded and indexed "
-                f"{safe_filename} ({total_pages} pages)"
+                f"{safe_filename} ({pdf_path.stem})"
             )
 
         except Exception as e:

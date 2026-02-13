@@ -10,19 +10,28 @@ Endpoints:
 - DELETE /admin/users/{id} - Delete user
 - GET /admin/health - Detailed health check
 - GET /admin/stats - System statistics
+- GET /admin/documents - List all documents with metadata
+- DELETE /admin/documents/{document_id} - Delete document completely
+- POST /admin/documents/{document_id}/reindex - Reindex document (SSE)
 
 All endpoints (except /admin/login) require admin JWT token.
 """
 
+import json
+import shutil
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Query
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
+from sse_starlette.sse import EventSourceResponse
 import logging
 import os
 import asyncpg
 
 from src.utils.security import sanitize_error
 from backend.auth.manager import AuthManager
+from backend.config import PDF_BASE_DIR
 from backend.database.auth_queries import AuthQueries
 from backend.database.admin_queries import AdminQueries
 from backend.middleware.auth import get_current_admin_user
@@ -38,6 +47,7 @@ from backend.models import (
     AdminConversationResponse,
     AdminMessageResponse,
 )
+from backend.routes.documents import _format_display_name, index_document_pipeline, DIRECT_ID_PATTERN
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +62,7 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 _auth_manager: Optional[AuthManager] = None
 _auth_queries: Optional[AuthQueries] = None
 _admin_queries: Optional[AdminQueries] = None
+_vl_components: Dict[str, Any] = {}
 
 
 def set_admin_dependencies(
@@ -71,6 +82,26 @@ def set_admin_dependencies(
     _auth_manager = auth_manager
     _auth_queries = auth_queries
     _admin_queries = AdminQueries(postgres_adapter)
+
+
+def set_admin_vl_components(
+    jina_client: Any, page_store: Any, vector_store: Any, summary_provider: Any = None
+) -> None:
+    """Set VL components for document management endpoints (called from main.py lifespan)."""
+    _vl_components["jina_client"] = jina_client
+    _vl_components["page_store"] = page_store
+    _vl_components["vector_store"] = vector_store
+    _vl_components["summary_provider"] = summary_provider
+
+
+def get_vl_components() -> Dict[str, Any]:
+    """Dependency that ensures VL components are initialized."""
+    if not _vl_components:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="VL pipeline not initialized"
+        )
+    return _vl_components
 
 
 def get_auth_manager() -> AuthManager:
@@ -757,3 +788,211 @@ async def get_user_conversation_messages(
         )
         for msg in messages
     ]
+
+
+# =============================================================================
+# Document Management Endpoints
+# =============================================================================
+
+
+@router.get("/documents")
+async def list_admin_documents(
+    admin: Dict = Depends(get_current_admin_user),
+    vl: Dict = Depends(get_vl_components),
+):
+    """
+    List all documents with vector metadata (page count, created_at).
+
+    Returns:
+        JSON with documents list and total count.
+    """
+    vector_store = vl["vector_store"]
+
+    documents = []
+    try:
+        # Ensure pool is initialized (lazy init pattern)
+        await vector_store._ensure_pool()
+
+        # Get page counts and earliest created_at per document from vectors.vl_pages
+        async with vector_store.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT document_id,
+                       COUNT(*) AS page_count,
+                       MIN(created_at) AS created_at
+                FROM vectors.vl_pages
+                GROUP BY document_id
+                ORDER BY document_id
+                """
+            )
+
+        doc_meta = {row["document_id"]: row for row in rows}
+
+        for pdf_path in PDF_BASE_DIR.glob("*.pdf"):
+            doc_id = pdf_path.stem
+            meta = doc_meta.get(doc_id)
+            documents.append({
+                "document_id": doc_id,
+                "display_name": _format_display_name(pdf_path.name),
+                "filename": pdf_path.name,
+                "size_bytes": pdf_path.stat().st_size,
+                "page_count": meta["page_count"] if meta else 0,
+                "created_at": meta["created_at"].isoformat() if meta and meta["created_at"] else None,
+            })
+
+        documents.sort(key=lambda d: d["display_name"])
+
+    except Exception as e:
+        logger.error(f"Error listing admin documents: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to list documents"
+        )
+
+    return {"documents": documents, "total": len(documents)}
+
+
+@router.delete("/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_admin_document(
+    document_id: str,
+    admin: Dict = Depends(get_current_admin_user),
+    vl: Dict = Depends(get_vl_components),
+):
+    """
+    Delete a document completely: vectors, page images, and PDF file.
+
+    Args:
+        document_id: Document identifier (PDF stem name)
+    """
+    # Validate document_id format (prevent path traversal)
+    if not DIRECT_ID_PATTERN.match(document_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid document ID format"
+        )
+
+    vector_store = vl["vector_store"]
+    page_store = vl["page_store"]
+
+    # Verify PDF exists
+    pdf_path = PDF_BASE_DIR / f"{document_id}.pdf"
+    if not pdf_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document not found: {document_id}"
+        )
+
+    try:
+        await vector_store._ensure_pool()
+
+        # 1. Delete vectors from DB
+        async with vector_store.pool.acquire() as conn:
+            deleted_count = await conn.execute(
+                "DELETE FROM vectors.vl_pages WHERE document_id = $1",
+                document_id,
+            )
+        logger.info(f"Deleted vectors for {document_id}: {deleted_count}")
+
+        # 2. Delete page images
+        doc_dir = page_store.store_dir / document_id
+        if doc_dir.exists():
+            shutil.rmtree(doc_dir)
+            logger.info(f"Deleted page images for {document_id}")
+
+        # 3. Delete PDF
+        pdf_path.unlink()
+        logger.info(f"Admin {admin['id']} deleted document {document_id}")
+
+    except Exception as e:
+        logger.error(f"Error deleting document {document_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete document"
+        )
+
+    return None
+
+
+@router.post("/documents/{document_id}/reindex")
+async def reindex_admin_document(
+    document_id: str,
+    admin: Dict = Depends(get_current_admin_user),
+    vl: Dict = Depends(get_vl_components),
+):
+    """
+    Reindex an existing document: delete old vectors/images, re-render, re-embed, re-store.
+
+    Returns SSE stream with progress events.
+    """
+    # Validate document_id format (prevent path traversal)
+    if not DIRECT_ID_PATTERN.match(document_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid document ID format"
+        )
+
+    pdf_path = PDF_BASE_DIR / f"{document_id}.pdf"
+    if not pdf_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document not found: {document_id}"
+        )
+
+    jina_client = vl["jina_client"]
+    page_store = vl["page_store"]
+    vector_store = vl["vector_store"]
+    summary_provider = vl.get("summary_provider")
+
+    async def event_generator():
+        try:
+            await vector_store._ensure_pool()
+
+            # 1. Delete old vectors
+            yield {
+                "event": "progress",
+                "data": json.dumps({
+                    "stage": "cleaning",
+                    "percent": 50,
+                    "message": "Removing old vectors",
+                }),
+            }
+            async with vector_store.pool.acquire() as conn:
+                await conn.execute(
+                    "DELETE FROM vectors.vl_pages WHERE document_id = $1",
+                    document_id,
+                )
+
+            # 2. Delete old page images
+            doc_dir = page_store.store_dir / document_id
+            if doc_dir.exists():
+                shutil.rmtree(doc_dir)
+
+            yield {
+                "event": "progress",
+                "data": json.dumps({
+                    "stage": "cleaning",
+                    "percent": 100,
+                    "message": "Old data removed",
+                }),
+            }
+
+            # 3-5. Render, embed, summarize, store via shared pipeline
+            async for event in index_document_pipeline(
+                pdf_path, document_id, jina_client, page_store, vector_store,
+                summary_provider=summary_provider,
+            ):
+                yield event
+
+            logger.info(f"Admin {admin['id']} reindexed document {document_id}")
+
+        except Exception as e:
+            logger.error(f"Reindex failed for {document_id}: {e}", exc_info=True)
+            yield {
+                "event": "error",
+                "data": json.dumps({
+                    "message": str(e),
+                    "stage": "reindex",
+                }),
+            }
+
+    return EventSourceResponse(event_generator())
