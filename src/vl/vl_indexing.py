@@ -48,6 +48,9 @@ class VLIndexingPipeline:
         self.vector_store = vector_store
         self.page_store = page_store
         self.summary_provider = summary_provider
+        self._summary_prompt: Optional[str] = None
+        if summary_provider and _SUMMARY_PROMPT_PATH.exists():
+            self._summary_prompt = _SUMMARY_PROMPT_PATH.read_text(encoding="utf-8")
 
     def _summarize_page(self, page_id: str) -> Optional[str]:
         """
@@ -59,11 +62,11 @@ class VLIndexingPipeline:
         Returns:
             Summary text, or None if summarization fails
         """
-        if not self.summary_provider:
+        if not self.summary_provider or not self._summary_prompt:
             return None
 
         image_b64 = self.page_store.get_image_base64(page_id)
-        prompt_text = _SUMMARY_PROMPT_PATH.read_text(encoding="utf-8")
+        prompt_text = self._summary_prompt
 
         messages = [
             {
@@ -188,16 +191,30 @@ class VLIndexingPipeline:
 
         # 4. Summarize pages (optional, if summary_provider is set)
         summaries: dict[str, Optional[str]] = {}
+        model_name: Optional[str] = None
         if self.summary_provider:
             model_name = self.summary_provider.get_model_name()
             logger.info(f"Summarizing {len(page_ids)} pages via {model_name}...")
+            max_consecutive_failures = 3
+            consecutive_failures = 0
             for i, page_id in enumerate(page_ids):
                 try:
                     summaries[page_id] = self._summarize_page(page_id)
+                    if summaries[page_id]:
+                        consecutive_failures = 0
+                    else:
+                        consecutive_failures += 1
                     logger.debug(f"Summarized page {i + 1}/{len(page_ids)}: {page_id}")
                 except Exception as e:
                     logger.warning(f"Failed to summarize {page_id}: {e}")
                     summaries[page_id] = None
+                    consecutive_failures += 1
+                if consecutive_failures >= max_consecutive_failures:
+                    logger.error(
+                        f"Aborting summarization after {max_consecutive_failures} "
+                        f"consecutive failures (completed {i + 1}/{len(page_ids)})"
+                    )
+                    break
             summarized = sum(1 for v in summaries.values() if v)
             logger.info(f"Summarized {summarized}/{len(page_ids)} pages")
 
@@ -206,9 +223,9 @@ class VLIndexingPipeline:
         for page_id in page_ids:
             doc_id, page_num = PageStore.page_id_to_components(page_id)
             metadata: dict = {}
-            if summaries.get(page_id):
+            if summaries.get(page_id) and model_name:
                 metadata["page_summary"] = summaries[page_id]
-                metadata["summary_model"] = self.summary_provider.get_model_name()
+                metadata["summary_model"] = model_name
             pages.append(
                 {
                     "page_id": page_id,
@@ -258,7 +275,10 @@ class VLIndexingPipeline:
             f"Summarizing {len(pages)} pages via {model_name}..."
         )
 
+        max_consecutive_failures = 3
+        consecutive_failures = 0
         success = 0
+
         for i, page in enumerate(pages):
             page_id = page["page_id"]
             try:
@@ -269,14 +289,24 @@ class VLIndexingPipeline:
                         {"page_summary": summary, "summary_model": model_name},
                     )
                     success += 1
+                    consecutive_failures = 0
                     logger.info(
                         f"[{i + 1}/{len(pages)}] {page_id}: "
                         f"{summary[:80]}..."
                     )
                 else:
+                    consecutive_failures += 1
                     logger.warning(f"[{i + 1}/{len(pages)}] {page_id}: empty summary")
             except Exception as e:
+                consecutive_failures += 1
                 logger.warning(f"[{i + 1}/{len(pages)}] {page_id}: failed — {e}")
+
+            if consecutive_failures >= max_consecutive_failures:
+                logger.error(
+                    f"Aborting summarization after {max_consecutive_failures} "
+                    f"consecutive failures (completed {i + 1}/{len(pages)})"
+                )
+                break
 
         logger.info(f"Summarization complete: {success}/{len(pages)} pages.")
         return success

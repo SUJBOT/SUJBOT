@@ -808,12 +808,9 @@ async def list_admin_documents(
     """
     vector_store = vl["vector_store"]
 
-    documents = []
+    # Query vector metadata from DB
     try:
-        # Ensure pool is initialized (lazy init pattern)
         await vector_store._ensure_pool()
-
-        # Get page counts and earliest created_at per document from vectors.vl_pages
         async with vector_store.pool.acquire() as conn:
             rows = await conn.fetch(
                 """
@@ -825,9 +822,18 @@ async def list_admin_documents(
                 ORDER BY document_id
                 """
             )
+    except asyncpg.PostgresError as e:
+        logger.error(f"Database error listing documents: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to query document metadata"
+        )
 
-        doc_meta = {row["document_id"]: row for row in rows}
+    doc_meta = {row["document_id"]: row for row in rows}
 
+    # Scan filesystem for PDFs
+    documents = []
+    try:
         for pdf_path in PDF_BASE_DIR.glob("*.pdf"):
             doc_id = pdf_path.stem
             meta = doc_meta.get(doc_id)
@@ -839,16 +845,14 @@ async def list_admin_documents(
                 "page_count": meta["page_count"] if meta else 0,
                 "created_at": meta["created_at"].isoformat() if meta and meta["created_at"] else None,
             })
-
-        documents.sort(key=lambda d: d["display_name"])
-
-    except Exception as e:
-        logger.error(f"Error listing admin documents: {e}", exc_info=True)
+    except OSError as e:
+        logger.error(f"Filesystem error listing documents: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to list documents"
+            detail="Failed to scan document directory"
         )
 
+    documents.sort(key=lambda d: d["display_name"])
     return {"documents": documents, "total": len(documents)}
 
 
@@ -883,31 +887,41 @@ async def delete_admin_document(
         )
 
     try:
-        await vector_store._ensure_pool()
+        # Delete filesystem first (idempotent), DB last (transactional).
+        # If filesystem delete succeeds but DB fails, admin can retry
+        # and the DB delete will succeed. Reverse order would leave
+        # orphan files if DB succeeds but filesystem fails.
 
-        # 1. Delete vectors from DB
-        async with vector_store.pool.acquire() as conn:
-            deleted_count = await conn.execute(
-                "DELETE FROM vectors.vl_pages WHERE document_id = $1",
-                document_id,
-            )
-        logger.info(f"Deleted vectors for {document_id}: {deleted_count}")
-
-        # 2. Delete page images
+        # 1. Delete page images
         doc_dir = page_store.store_dir / document_id
         if doc_dir.exists():
             shutil.rmtree(doc_dir)
             logger.info(f"Deleted page images for {document_id}")
 
-        # 3. Delete PDF
+        # 2. Delete PDF
         pdf_path.unlink()
-        logger.info(f"Admin {admin['id']} deleted document {document_id}")
+        logger.info(f"Deleted PDF for {document_id}")
 
-    except Exception as e:
-        logger.error(f"Error deleting document {document_id}: {e}", exc_info=True)
+        # 3. Delete vectors from DB
+        await vector_store._ensure_pool()
+        async with vector_store.pool.acquire() as conn:
+            deleted_count = await conn.execute(
+                "DELETE FROM vectors.vl_pages WHERE document_id = $1",
+                document_id,
+            )
+        logger.info(f"Admin {admin['id']} deleted document {document_id} ({deleted_count})")
+
+    except OSError as e:
+        logger.error(f"Filesystem error deleting {document_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete document"
+            detail="Failed to delete document files"
+        )
+    except Exception as e:
+        logger.error(f"Database error deleting {document_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete document vectors"
         )
 
     return None
@@ -945,43 +959,28 @@ async def reindex_admin_document(
 
     async def event_generator():
         try:
-            await vector_store._ensure_pool()
-
-            # 1. Delete old vectors
-            yield {
-                "event": "progress",
-                "data": json.dumps({
-                    "stage": "cleaning",
-                    "percent": 50,
-                    "message": "Removing old vectors",
-                }),
-            }
-            async with vector_store.pool.acquire() as conn:
-                await conn.execute(
-                    "DELETE FROM vectors.vl_pages WHERE document_id = $1",
-                    document_id,
-                )
-
-            # 2. Delete old page images
-            doc_dir = page_store.store_dir / document_id
-            if doc_dir.exists():
-                shutil.rmtree(doc_dir)
-
-            yield {
-                "event": "progress",
-                "data": json.dumps({
-                    "stage": "cleaning",
-                    "percent": 100,
-                    "message": "Old data removed",
-                }),
-            }
-
-            # 3-5. Render, embed, summarize, store via shared pipeline
+            # Render, embed, summarize, store via shared pipeline.
+            # Uses upsert (ON CONFLICT DO UPDATE) so old vectors are
+            # replaced in-place — no need to delete upfront.
+            # Images are overwritten naturally (same filenames).
             async for event in index_document_pipeline(
                 pdf_path, document_id, jina_client, page_store, vector_store,
                 summary_provider=summary_provider,
             ):
                 yield event
+
+            # Clean up orphan vectors (pages that no longer exist in the PDF,
+            # e.g., if the PDF was replaced with a shorter version)
+            await vector_store._ensure_pool()
+            async with vector_store.pool.acquire() as conn:
+                # Get current page count from the just-rendered images
+                doc_dir = page_store.store_dir / document_id
+                current_page_count = len(list(doc_dir.glob(f"*.{page_store.image_format}"))) if doc_dir.exists() else 0
+                if current_page_count > 0:
+                    await conn.execute(
+                        "DELETE FROM vectors.vl_pages WHERE document_id = $1 AND page_number > $2",
+                        document_id, current_page_count,
+                    )
 
             logger.info(f"Admin {admin['id']} reindexed document {document_id}")
 

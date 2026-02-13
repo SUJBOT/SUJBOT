@@ -1443,7 +1443,7 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
         patch_json = json.dumps(metadata_patch)
 
         async with self.pool.acquire() as conn:
-            await conn.execute(
+            result = await conn.execute(
                 """
                 UPDATE vectors.vl_pages
                 SET metadata = metadata || $2::jsonb
@@ -1452,6 +1452,8 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
                 page_id,
                 patch_json,
             )
+            if result == "UPDATE 0":
+                logger.warning(f"update_vl_page_metadata: no row found for page_id={page_id}")
 
     def get_vl_pages_without_summary(
         self, document_id: Optional[str] = None
@@ -1558,7 +1560,11 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
             INSERT INTO vectors.vl_pages
                 (page_id, document_id, page_number, embedding, image_path, metadata)
             VALUES ($1, $2, $3, $4::vector, $5, $6::jsonb)
-            ON CONFLICT (page_id) DO NOTHING
+            ON CONFLICT (page_id) DO UPDATE SET
+                embedding = EXCLUDED.embedding,
+                page_number = EXCLUDED.page_number,
+                image_path = EXCLUDED.image_path,
+                metadata = EXCLUDED.metadata
         """
 
         async with self.pool.acquire() as conn:

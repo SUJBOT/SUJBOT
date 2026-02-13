@@ -67,35 +67,36 @@ async def index_document_pipeline(
     import numpy as np
 
     doc = fitz.open(str(pdf_path))
-    total_pages = len(doc)
-    zoom = page_store.dpi / 72.0
-    matrix = fitz.Matrix(zoom, zoom)
+    try:
+        total_pages = len(doc)
+        zoom = page_store.dpi / 72.0
+        matrix = fitz.Matrix(zoom, zoom)
 
-    doc_dir = page_store.store_dir / document_id
-    doc_dir.mkdir(parents=True, exist_ok=True)
+        doc_dir = page_store.store_dir / document_id
+        doc_dir.mkdir(parents=True, exist_ok=True)
 
-    page_ids = []
-    for page_num in range(total_pages):
-        page = doc[page_num]
-        pix = page.get_pixmap(matrix=matrix)
-        page_number = page_num + 1
-        img_path = page_store._image_path(document_id, page_number)
-        pix.save(str(img_path))
-        page_id = page_store.make_page_id(document_id, page_number)
-        page_ids.append(page_id)
+        page_ids = []
+        for page_num in range(total_pages):
+            page = doc[page_num]
+            pix = page.get_pixmap(matrix=matrix)
+            page_number = page_num + 1
+            img_path = page_store._image_path(document_id, page_number)
+            pix.save(str(img_path))
+            page_id = page_store.make_page_id(document_id, page_number)
+            page_ids.append(page_id)
 
-        percent = int((page_number / total_pages) * 100)
-        yield {
-            "event": "progress",
-            "data": json.dumps({
-                "stage": "rendering",
-                "percent": percent,
-                "message": f"Rendering page {page_number}/{total_pages}",
-            }),
-        }
-        await asyncio.sleep(0)
-
-    doc.close()
+            percent = int((page_number / total_pages) * 100)
+            yield {
+                "event": "progress",
+                "data": json.dumps({
+                    "stage": "rendering",
+                    "percent": percent,
+                    "message": f"Rendering page {page_number}/{total_pages}",
+                }),
+            }
+            await asyncio.sleep(0)
+    finally:
+        doc.close()
 
     # Embed via Jina in batches
     batch_size = jina_client.batch_size
@@ -131,10 +132,19 @@ async def index_document_pipeline(
 
     # Summarize pages (if summary_provider available)
     summaries: dict = {}
+    model_name = None
     if summary_provider:
-        prompt_path = Path(__file__).resolve().parent.parent.parent / "prompts" / "vl_page_summary.txt"
-        prompt_text = prompt_path.read_text(encoding="utf-8")
-        model_name = summary_provider.get_model_name()
+        try:
+            prompt_path = Path(__file__).resolve().parent.parent.parent / "prompts" / "vl_page_summary.txt"
+            prompt_text = prompt_path.read_text(encoding="utf-8")
+            model_name = summary_provider.get_model_name()
+        except Exception as e:
+            logger.error(f"Summary setup failed, skipping summarization: {e}")
+            summary_provider = None
+
+    if summary_provider:
+        max_consecutive_failures = 3
+        consecutive_failures = 0
 
         for i, page_id in enumerate(page_ids):
             try:
@@ -163,8 +173,19 @@ async def index_document_pipeline(
                 text = response.text.strip() if response.text else None
                 if text:
                     summaries[page_id] = text
+                    consecutive_failures = 0
+                else:
+                    consecutive_failures += 1
             except Exception as e:
                 logger.warning(f"Failed to summarize {page_id}: {e}")
+                consecutive_failures += 1
+
+            if consecutive_failures >= max_consecutive_failures:
+                logger.error(
+                    f"Aborting summarization after {max_consecutive_failures} "
+                    f"consecutive failures (completed {i + 1}/{len(page_ids)})"
+                )
+                break
 
             percent = int(((i + 1) / len(page_ids)) * 100)
             yield {
@@ -191,7 +212,7 @@ async def index_document_pipeline(
     for page_id in page_ids:
         doc_id, page_num_val = page_store.page_id_to_components(page_id)
         metadata: dict = {}
-        if summaries.get(page_id):
+        if summaries.get(page_id) and model_name:
             metadata["page_summary"] = summaries[page_id]
             metadata["summary_model"] = model_name
         pages.append({

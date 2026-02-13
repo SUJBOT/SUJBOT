@@ -220,7 +220,7 @@ async def lifespan(app: FastAPI):
                     summary_provider = create_provider(summary_model)
                     logger.info(f"✓ Summary provider initialized: {summary_model}")
                 except Exception as e:
-                    logger.warning(f"Summary provider not available (summaries disabled): {e}")
+                    logger.error(f"Summary provider init failed (summaries disabled): {e}", exc_info=True)
 
                 set_vl_components(jina_client, page_store, vl_vector_store, summary_provider)
                 set_admin_vl_components(jina_client, page_store, vl_vector_store, summary_provider)
