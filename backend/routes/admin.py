@@ -17,7 +17,6 @@ Endpoints:
 All endpoints (except /admin/login) require admin JWT token.
 """
 
-import asyncio
 import json
 import shutil
 from pathlib import Path
@@ -914,7 +913,7 @@ async def delete_admin_document(
         graph_storage = vl.get("graph_storage")
         if graph_storage:
             try:
-                await asyncio.to_thread(graph_storage.delete_document_graph, document_id)
+                await graph_storage.async_delete_document_graph(document_id)
             except Exception as e:
                 logger.error(
                     f"Graph cleanup failed for {document_id} — orphaned entities may remain: {e}",

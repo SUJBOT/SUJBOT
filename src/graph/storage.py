@@ -118,13 +118,13 @@ class GraphStorageAdapter:
     # =========================================================================
 
     def add_entities(self, entities: List[Dict], document_id: str, source_page_id: Optional[str] = None) -> int:
-        """Bulk upsert entities. Returns count of records processed (attempted, not DB-reported)."""
+        """Bulk upsert entities (sync). Returns count of records processed."""
         return _run_async_safe(
-            self._async_add_entities(entities, document_id, source_page_id),
+            self.async_add_entities(entities, document_id, source_page_id),
             operation_name="add_entities",
         )
 
-    async def _async_add_entities(
+    async def async_add_entities(
         self, entities: List[Dict], document_id: str, source_page_id: Optional[str] = None
     ) -> int:
         if not entities:
@@ -166,9 +166,9 @@ class GraphStorageAdapter:
     def add_relationships(
         self, relationships: List[Dict], document_id: str, source_page_id: Optional[str] = None
     ) -> int:
-        """Bulk insert relationships. Resolves entity names to IDs."""
+        """Bulk insert relationships (sync). Resolves entity names to IDs."""
         return _run_async_safe(
-            self._async_add_relationships(relationships, document_id, source_page_id),
+            self.async_add_relationships(relationships, document_id, source_page_id),
             operation_name="add_relationships",
         )
 
@@ -187,7 +187,7 @@ class GraphStorageAdapter:
             )
         return entity_id
 
-    async def _async_add_relationships(
+    async def async_add_relationships(
         self, relationships: List[Dict], document_id: str, source_page_id: Optional[str] = None
     ) -> int:
         if not relationships:
@@ -249,11 +249,11 @@ class GraphStorageAdapter:
     ) -> List[Dict]:
         """Search entities by name using trigram similarity."""
         return _run_async_safe(
-            self._async_search_entities(query, entity_type, limit),
+            self.async_search_entities(query, entity_type, limit),
             operation_name="search_entities",
         )
 
-    async def _async_search_entities(
+    async def async_search_entities(
         self, query: str, entity_type: Optional[str], limit: int
     ) -> List[Dict]:
         await self._ensure_pool()
@@ -298,11 +298,11 @@ class GraphStorageAdapter:
         """Get N-hop neighborhood of an entity using recursive CTE."""
         depth = min(depth, 5)  # Cap depth to prevent runaway recursive CTEs
         return _run_async_safe(
-            self._async_get_entity_relationships(entity_id, depth),
+            self.async_get_entity_relationships(entity_id, depth),
             operation_name="get_entity_relationships",
         )
 
-    async def _async_get_entity_relationships(self, entity_id: int, depth: int) -> Dict:
+    async def async_get_entity_relationships(self, entity_id: int, depth: int) -> Dict:
         await self._ensure_pool()
         try:
             async with self.pool.acquire() as conn:
@@ -405,11 +405,11 @@ class GraphStorageAdapter:
     def save_communities(self, communities: List[Dict]) -> int:
         """Store Leiden community detection results."""
         return _run_async_safe(
-            self._async_save_communities(communities),
+            self.async_save_communities(communities),
             operation_name="save_communities",
         )
 
-    async def _async_save_communities(self, communities: List[Dict]) -> int:
+    async def async_save_communities(self, communities: List[Dict]) -> int:
         if not communities:
             return 0
         await self._ensure_pool()
@@ -449,11 +449,11 @@ class GraphStorageAdapter:
     def get_communities(self, level: int = 0) -> List[Dict]:
         """Get all communities at a given level."""
         return _run_async_safe(
-            self._async_get_communities(level),
+            self.async_get_communities(level),
             operation_name="get_communities",
         )
 
-    async def _async_get_communities(self, level: int) -> List[Dict]:
+    async def async_get_communities(self, level: int) -> List[Dict]:
         await self._ensure_pool()
         try:
             async with self.pool.acquire() as conn:
@@ -486,11 +486,11 @@ class GraphStorageAdapter:
     def get_community_entities(self, community_id: int) -> List[Dict]:
         """Get entity details for a community."""
         return _run_async_safe(
-            self._async_get_community_entities(community_id),
+            self.async_get_community_entities(community_id),
             operation_name="get_community_entities",
         )
 
-    async def _async_get_community_entities(self, community_id: int) -> List[Dict]:
+    async def async_get_community_entities(self, community_id: int) -> List[Dict]:
         await self._ensure_pool()
         try:
             async with self.pool.acquire() as conn:
@@ -521,11 +521,11 @@ class GraphStorageAdapter:
     def delete_document_graph(self, document_id: str) -> int:
         """Delete all graph data for a document. Returns deleted entity count."""
         return _run_async_safe(
-            self._async_delete_document_graph(document_id),
+            self.async_delete_document_graph(document_id),
             operation_name="delete_document_graph",
         )
 
-    async def _async_delete_document_graph(self, document_id: str) -> int:
+    async def async_delete_document_graph(self, document_id: str) -> int:
         await self._ensure_pool()
         try:
             async with self.pool.acquire() as conn:
@@ -555,11 +555,11 @@ class GraphStorageAdapter:
     def get_all_entities_and_relationships(self) -> tuple:
         """Get all entities and relationships for igraph construction."""
         return _run_async_safe(
-            self._async_get_all(),
+            self.async_get_all(),
             operation_name="get_all_entities_and_relationships",
         )
 
-    async def _async_get_all(self) -> tuple:
+    async def async_get_all(self) -> tuple:
         await self._ensure_pool()
         try:
             async with self.pool.acquire() as conn:
@@ -596,11 +596,11 @@ class GraphStorageAdapter:
     def get_graph_stats(self) -> Dict[str, Any]:
         """Get knowledge graph statistics."""
         return _run_async_safe(
-            self._async_get_graph_stats(),
+            self.async_get_graph_stats(),
             operation_name="get_graph_stats",
         )
 
-    async def _async_get_graph_stats(self) -> Dict[str, Any]:
+    async def async_get_graph_stats(self) -> Dict[str, Any]:
         await self._ensure_pool()
         try:
             async with self.pool.acquire() as conn:

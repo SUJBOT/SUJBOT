@@ -222,6 +222,9 @@ async def lifespan(app: FastAPI):
                 except Exception as e:
                     logger.error(f"Summary provider init failed (summaries disabled): {e}", exc_info=True)
 
+                # Initialize VL vector store pool (needed before sharing with graph storage)
+                await vl_vector_store.initialize()
+
                 # Create graph components for entity extraction during upload
                 entity_extractor = None
                 graph_storage = None
@@ -235,9 +238,9 @@ async def lifespan(app: FastAPI):
 
                 if GraphStorageAdapter is not None:
                     try:
-                        graph_storage = GraphStorageAdapter(
-                            connection_string=os.getenv("DATABASE_URL")
-                        )
+                        # Share VL vector store pool (avoids duplicate connections
+                        # and asyncio.to_thread event loop mismatch)
+                        graph_storage = GraphStorageAdapter(pool=vl_vector_store.pool)
                         if summary_provider and EntityExtractor is not None:
                             entity_extractor = EntityExtractor(summary_provider)
                             logger.info("✓ Graph components initialized for entity extraction")
@@ -307,11 +310,8 @@ async def lifespan(app: FastAPI):
         if hasattr(agent_adapter, 'runner'):
             agent_adapter.runner.shutdown()
 
-    # Close graph storage pool (owns its pool when created with connection_string)
-    graph_storage_ref = _vl_components.get("graph_storage") if _vl_components else None
-    if graph_storage_ref and hasattr(graph_storage_ref, "close"):
-        await graph_storage_ref.close()
-        logger.info("✓ Graph storage pool closed")
+    # Note: graph_storage shares vl_vector_store pool (_owns_pool=False),
+    # so it doesn't need separate cleanup.
 
     if postgres_adapter:
         await postgres_adapter.close()

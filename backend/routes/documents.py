@@ -241,22 +241,23 @@ async def index_document_pipeline(
 
         for i, page_id in enumerate(page_ids):
             try:
+                # entity_extractor.extract_from_page is sync (LLM call) → offload to thread
                 result = await asyncio.to_thread(
                     entity_extractor.extract_from_page, page_id, page_store
                 )
                 entities = result.get("entities", [])
                 relationships = result.get("relationships", [])
 
+                # graph_storage methods are async-backed → call async API directly
+                # (asyncio.to_thread + _run_async_safe would cause event loop mismatch)
                 if entities:
-                    await asyncio.to_thread(
-                        graph_storage.add_entities, entities, document_id,
-                        source_page_id=page_id,
+                    await graph_storage.async_add_entities(
+                        entities, document_id, source_page_id=page_id,
                     )
 
                 if relationships:
-                    await asyncio.to_thread(
-                        graph_storage.add_relationships, relationships, document_id,
-                        source_page_id=page_id,
+                    await graph_storage.async_add_relationships(
+                        relationships, document_id, source_page_id=page_id,
                     )
 
                 # Successful extraction (even if empty) resets the counter
