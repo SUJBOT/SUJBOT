@@ -93,6 +93,8 @@ class CommunityDetector:
                     resolution=resolution,
                     n_iterations=10,
                 )
+            except (KeyboardInterrupt, SystemExit, MemoryError):
+                raise
             except Exception as e:
                 logger.error(
                     f"Leiden algorithm failed at level {level} "

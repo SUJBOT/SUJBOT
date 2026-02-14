@@ -190,7 +190,7 @@ async def build_communities(args, graph_storage, community_detector, community_s
                     logger.warning(f"[{i}/{n_communities}] Empty summary")
             except Exception as e:
                 comm["title"] = fallback_title
-                logger.warning(f"[{i}/{n_communities}] Summarization failed: {e}")
+                logger.warning(f"[{i}/{n_communities}] Summarization failed: {e}", exc_info=True)
 
     # Save communities
     saved = graph_storage.save_communities(communities)
@@ -234,21 +234,21 @@ async def async_main(args):
         create_graph_components(pool=vector_store.pool, provider=provider)
     )
 
-    # Phase 1: Extract entities
-    if not args.skip_extraction:
-        await extract_entities(args, graph_storage, entity_extractor, page_store, vector_store)
+    try:
+        # Phase 1: Extract entities
+        if not args.skip_extraction:
+            await extract_entities(args, graph_storage, entity_extractor, page_store, vector_store)
 
-    # Phase 2: Communities
-    if not args.skip_communities:
-        await build_communities(args, graph_storage, community_detector, community_summarizer)
+        # Phase 2: Communities
+        if not args.skip_communities:
+            await build_communities(args, graph_storage, community_detector, community_summarizer)
 
-    stats = graph_storage.get_graph_stats()
-    _log_phase("GRAPH STATS")
-    for k, v in stats.items():
-        logger.info(f"  {k}: {v}")
-
-    # Cleanup
-    await vector_store.close()
+        stats = graph_storage.get_graph_stats()
+        _log_phase("GRAPH STATS")
+        for k, v in stats.items():
+            logger.info(f"  {k}: {v}")
+    finally:
+        await vector_store.close()
 
 
 def main():

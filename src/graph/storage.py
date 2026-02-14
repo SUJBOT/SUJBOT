@@ -48,6 +48,8 @@ def _run_async_safe(coro, timeout: float = 30.0, operation_name: str = "graph op
             return asyncio.run(asyncio.wait_for(coro, timeout=timeout))
         else:
             return loop.run_until_complete(asyncio.wait_for(coro, timeout=timeout))
+    except asyncio.CancelledError:
+        raise
     except asyncio.TimeoutError as e:
         logger.error(f"Timeout ({timeout}s) during {operation_name}")
         raise TimeoutError(f"'{operation_name}' timed out after {timeout}s") from e

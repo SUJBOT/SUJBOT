@@ -108,7 +108,10 @@ class GraphCommunitiesTool(BaseTool):
                     for e in entities[:15]
                 ]
             except Exception as e:
-                logger.warning(f"Failed to get entities for community {c['community_id']}: {e}")
+                logger.warning(
+                    f"Failed to get entities for community {c['community_id']}: {e}",
+                    exc_info=True,
+                )
                 c["entities"] = []
 
         return ToolResult(

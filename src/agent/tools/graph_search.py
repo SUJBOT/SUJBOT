@@ -80,7 +80,10 @@ class GraphSearchTool(BaseTool):
                 result = graph_storage.get_entity_relationships(entity["entity_id"], depth=1)
                 entity["relationships"] = result.get("relationships", [])[:10]
             except Exception as e:
-                logger.warning(f"Failed to get relationships for {entity['name']}: {e}")
+                logger.warning(
+                    f"Failed to get relationships for {entity['name']}: {e}",
+                    exc_info=True,
+                )
                 entity["relationships"] = []
 
         return ToolResult(
