@@ -110,6 +110,8 @@ class SingleAgentRunner:
             )
             self.llm_provider = None
 
+        architecture = self.config.get("architecture", "vl")
+
         # Vector store
         if backend == "postgresql":
             connection_string = os.getenv(
@@ -118,7 +120,6 @@ class SingleAgentRunner:
             if not connection_string:
                 raise ValueError("DATABASE_URL not set. Cannot initialize vector store.")
 
-            architecture = self.config.get("architecture", "vl")
             vector_store = await load_vector_store_adapter(
                 backend="postgresql",
                 connection_string=connection_string,
@@ -150,9 +151,26 @@ class SingleAgentRunner:
         )
         embedder = EmbeddingGenerator(embedding_config)
 
+        # Graph storage (optional — initialized before ToolConfig so it can be passed in)
+        graph_storage = None
+        if architecture == "vl" and hasattr(vector_store, "pool") and vector_store.pool:
+            try:
+                from ..graph import GraphStorageAdapter
+            except ImportError as e:
+                logger.warning(f"Graph module not importable: {e}")
+                GraphStorageAdapter = None
+
+            if GraphStorageAdapter is not None:
+                try:
+                    graph_storage = GraphStorageAdapter(pool=vector_store.pool)
+                    logger.info("Graph storage initialized (shares vector_store pool)")
+                except Exception as e:
+                    logger.error(f"Graph storage initialization failed: {e}", exc_info=True)
+
         # Tool config
         agent_tools_config = self.config.get("agent_tools", {})
         tool_config = ToolConfig(
+            graph_storage=graph_storage,
             default_k=agent_tools_config.get("default_k", 6),
             enable_reranking=agent_tools_config.get("enable_reranking", False),
             reranker_candidates=agent_tools_config.get("reranker_candidates", 50),
@@ -170,7 +188,6 @@ class SingleAgentRunner:
         # VL components (optional)
         vl_retriever = None
         page_store = None
-        architecture = self.config.get("architecture", "vl")
 
         if architecture == "vl":
             try:

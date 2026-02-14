@@ -222,8 +222,41 @@ async def lifespan(app: FastAPI):
                 except Exception as e:
                     logger.error(f"Summary provider init failed (summaries disabled): {e}", exc_info=True)
 
-                set_vl_components(jina_client, page_store, vl_vector_store, summary_provider)
-                set_admin_vl_components(jina_client, page_store, vl_vector_store, summary_provider)
+                # Initialize VL vector store pool (needed before sharing with graph storage)
+                await vl_vector_store.initialize()
+
+                # Create graph components for entity extraction during upload
+                entity_extractor = None
+                graph_storage = None
+                try:
+                    from src.graph import GraphStorageAdapter
+                    from src.graph.entity_extractor import EntityExtractor
+                except ImportError as e:
+                    logger.warning(f"Graph module not importable (entity extraction disabled): {e}")
+                    GraphStorageAdapter = None
+                    EntityExtractor = None
+
+                if GraphStorageAdapter is not None:
+                    try:
+                        # Share VL vector store pool (avoids duplicate connections
+                        # and asyncio.to_thread event loop mismatch)
+                        graph_storage = GraphStorageAdapter(pool=vl_vector_store.pool)
+                        if summary_provider and EntityExtractor is not None:
+                            entity_extractor = EntityExtractor(summary_provider)
+                            logger.info("✓ Graph components initialized for entity extraction")
+                        else:
+                            logger.info("Graph storage initialized (entity extractor requires summary provider)")
+                    except Exception as e:
+                        logger.error(f"Graph component initialization failed: {e}", exc_info=True)
+
+                set_vl_components(
+                    jina_client, page_store, vl_vector_store, summary_provider,
+                    entity_extractor=entity_extractor, graph_storage=graph_storage,
+                )
+                set_admin_vl_components(
+                    jina_client, page_store, vl_vector_store, summary_provider,
+                    entity_extractor=entity_extractor, graph_storage=graph_storage,
+                )
                 logger.info("✓ VL components initialized for document upload")
             else:
                 logger.info("VL config not set, upload indexing disabled")
@@ -276,6 +309,9 @@ async def lifespan(app: FastAPI):
         # Shutdown main runner
         if hasattr(agent_adapter, 'runner'):
             agent_adapter.runner.shutdown()
+
+    # Note: graph_storage shares vl_vector_store pool (_owns_pool=False),
+    # so it doesn't need separate cleanup.
 
     if postgres_adapter:
         await postgres_adapter.close()

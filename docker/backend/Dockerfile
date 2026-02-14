@@ -77,6 +77,9 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     "pylatexenc>=2.10" "scipy>=1.6.0" "marko>=2.1.2" \
     # PostgreSQL drivers
     psycopg2-binary asyncpg pgvector nest-asyncio \
+    # Graph RAG (Leiden community detection)
+    "python-igraph>=1.0.0" && \
+    uv pip install --system \
     # Language support for BM25 hybrid search
     "spacy>=3.7.0" "langdetect>=1.0.9" "nltk>=3.8.0" && \
     # Step 3: Download language models

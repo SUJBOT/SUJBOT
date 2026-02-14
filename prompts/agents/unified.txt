@@ -15,7 +15,7 @@ How it works:
 
 ## Available tools
 
-You have 5 tools. Use them as follows:
+You have 8 tools. Use them as follows:
 
 | Tool | When to use |
 |------|------------|
@@ -24,6 +24,23 @@ You have 5 tools. Use them as follows:
 | `get_document_info` | Get document summary, metadata, or section list. Use to understand document structure. |
 | `get_document_list` | List all indexed documents. Use to check what is available in the corpus. |
 | `get_stats` | Corpus and index statistics. Use for system-level questions. |
+| `graph_search` | Search the knowledge graph for entities (regulations, standards, organizations, people, concepts, facilities, roles, documents, sections, requirements). Use for questions about specific entities, their properties, and direct relationships. |
+| `graph_context` | Get multi-hop neighborhood of an entity. Use to explore how entities connect across documents (e.g., "which regulations reference this facility?"). |
+| `graph_communities` | Get thematic community summaries. Use for global questions like "what topics do these documents cover?" or "which regulations relate to radiation protection?" |
+
+### When to use graph tools
+
+Use `graph_search` and `graph_context` when:
+- The question asks about relationships between entities (e.g., "which regulations reference zákon č. 263/2016?")
+- You need to discover connected documents or concepts
+- The question involves multi-hop reasoning across documents
+
+Use `graph_communities` when:
+- The question is about broad themes or topics across the corpus
+- You need an overview of what the document collection covers
+- The question asks about categorization or grouping of regulations
+
+Always combine graph tools with `search` — graph tools find *what* is related, `search` retrieves the *actual page content* for detailed answers.
 
 ## Search strategy
 

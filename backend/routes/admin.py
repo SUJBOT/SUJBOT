@@ -85,13 +85,20 @@ def set_admin_dependencies(
 
 
 def set_admin_vl_components(
-    jina_client: Any, page_store: Any, vector_store: Any, summary_provider: Any = None
+    jina_client: Any,
+    page_store: Any,
+    vector_store: Any,
+    summary_provider: Any = None,
+    entity_extractor: Any = None,
+    graph_storage: Any = None,
 ) -> None:
     """Set VL components for document management endpoints (called from main.py lifespan)."""
     _vl_components["jina_client"] = jina_client
     _vl_components["page_store"] = page_store
     _vl_components["vector_store"] = vector_store
     _vl_components["summary_provider"] = summary_provider
+    _vl_components["entity_extractor"] = entity_extractor
+    _vl_components["graph_storage"] = graph_storage
 
 
 def get_vl_components() -> Dict[str, Any]:
@@ -902,7 +909,18 @@ async def delete_admin_document(
         pdf_path.unlink()
         logger.info(f"Deleted PDF for {document_id}")
 
-        # 3. Delete vectors from DB
+        # 3. Delete graph data (entities cascade-delete relationships via FK ON DELETE CASCADE)
+        graph_storage = vl.get("graph_storage")
+        if graph_storage:
+            try:
+                await graph_storage.async_delete_document_graph(document_id)
+            except Exception as e:
+                logger.error(
+                    f"Graph cleanup failed for {document_id} — orphaned entities may remain: {e}",
+                    exc_info=True,
+                )
+
+        # 4. Delete vectors from DB
         await vector_store._ensure_pool()
         async with vector_store.pool.acquire() as conn:
             deleted_count = await conn.execute(
@@ -956,16 +974,20 @@ async def reindex_admin_document(
     page_store = vl["page_store"]
     vector_store = vl["vector_store"]
     summary_provider = vl.get("summary_provider")
+    entity_extractor = vl.get("entity_extractor")
+    graph_storage = vl.get("graph_storage")
 
     async def event_generator():
         try:
-            # Render, embed, summarize, store via shared pipeline.
+            # Render, embed, summarize, store, extract entities via shared pipeline.
             # Uses upsert (ON CONFLICT DO UPDATE) so old vectors are
             # replaced in-place — no need to delete upfront.
             # Images are overwritten naturally (same filenames).
             async for event in index_document_pipeline(
                 pdf_path, document_id, jina_client, page_store, vector_store,
                 summary_provider=summary_provider,
+                entity_extractor=entity_extractor,
+                graph_storage=graph_storage,
             ):
                 yield event
 
