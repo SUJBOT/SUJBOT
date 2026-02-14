@@ -75,5 +75,5 @@ class CommunitySummarizer:
         except (KeyboardInterrupt, SystemExit, MemoryError):
             raise
         except Exception as e:
-            logger.warning(f"Community summarization failed: {e}")
+            logger.warning(f"Community summarization failed: {e}", exc_info=True)
             return None

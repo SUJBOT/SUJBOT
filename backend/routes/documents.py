@@ -252,9 +252,6 @@ async def index_document_pipeline(
                         graph_storage.add_entities, entities, document_id,
                         source_page_id=page_id,
                     )
-                    consecutive_failures = 0
-                else:
-                    consecutive_failures += 1
 
                 if relationships:
                     await asyncio.to_thread(
@@ -262,8 +259,13 @@ async def index_document_pipeline(
                         source_page_id=page_id,
                     )
 
+                # Successful extraction (even if empty) resets the counter
+                consecutive_failures = 0
+
+            except asyncio.CancelledError:
+                raise
             except Exception as e:
-                logger.warning(f"Entity extraction failed for {page_id}: {e}")
+                logger.error(f"Entity extraction failed for {page_id}: {e}", exc_info=True)
                 consecutive_failures += 1
 
             if consecutive_failures >= max_consecutive_failures:

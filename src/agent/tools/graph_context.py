@@ -47,7 +47,16 @@ class GraphContextTool(BaseTool):
             )
 
         # Find the entity first
-        entities = graph_storage.search_entities(query=entity_name, limit=1)
+        try:
+            entities = graph_storage.search_entities(query=entity_name, limit=1)
+        except Exception as e:
+            logger.error(f"Graph context search failed: {e}", exc_info=True)
+            return ToolResult(
+                success=False,
+                data=None,
+                error=f"Graph context search failed: {e}",
+            )
+
         if not entities:
             return ToolResult(
                 success=True,
@@ -56,7 +65,15 @@ class GraphContextTool(BaseTool):
             )
 
         entity = entities[0]
-        result = graph_storage.get_entity_relationships(entity["entity_id"], depth=depth)
+        try:
+            result = graph_storage.get_entity_relationships(entity["entity_id"], depth=depth)
+        except Exception as e:
+            logger.error(f"Graph traversal failed for {entity_name}: {e}", exc_info=True)
+            return ToolResult(
+                success=False,
+                data=None,
+                error=f"Graph traversal failed: {e}",
+            )
 
         return ToolResult(
             success=True,

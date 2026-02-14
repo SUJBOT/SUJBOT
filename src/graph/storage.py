@@ -16,6 +16,25 @@ from ..exceptions import DatabaseConnectionError, GraphStoreError
 
 logger = logging.getLogger(__name__)
 
+# Column lists reused across entity queries
+_ENTITY_COLS = "entity_id, name, entity_type, description, document_id"
+
+
+def _entity_from_row(row: asyncpg.Record) -> Dict[str, Any]:
+    """Convert an asyncpg Record to an entity dict. Shared by all entity queries."""
+    return {
+        "entity_id": row["entity_id"],
+        "name": row["name"],
+        "entity_type": row["entity_type"],
+        "description": row["description"],
+        "document_id": row["document_id"],
+    }
+
+
+def _in_placeholders(values, start: int = 1) -> str:
+    """Build '$1, $2, ...' placeholders for an IN clause."""
+    return ", ".join(f"${start + i}" for i in range(len(values)))
+
 
 def _run_async_safe(coro, timeout: float = 30.0, operation_name: str = "graph operation"):
     """Safely run async coroutine from sync context (same pattern as postgres_adapter.py)."""
@@ -54,8 +73,11 @@ class GraphStorageAdapter:
         Initialize with existing pool or connection string.
 
         Args:
-            pool: Existing asyncpg pool (preferred — avoids duplicate connections)
-            connection_string: PostgreSQL DSN (creates new pool if pool is None)
+            pool: Existing asyncpg pool (preferred — avoids duplicate connections).
+                When provided, this adapter does NOT own the pool (close() is a no-op).
+            connection_string: PostgreSQL DSN (creates new pool if pool is None).
+                When pool is None and connection_string is provided, this adapter
+                creates and owns a new pool (close() will terminate it).
         """
         self.pool = pool
         self._connection_string = connection_string
@@ -92,11 +114,11 @@ class GraphStorageAdapter:
             await self.pool.close()
 
     # =========================================================================
-    # Entity CRUD
+    # Entity & Relationship Storage
     # =========================================================================
 
     def add_entities(self, entities: List[Dict], document_id: str, source_page_id: Optional[str] = None) -> int:
-        """Bulk upsert entities. Returns count of inserted/updated."""
+        """Bulk upsert entities. Returns count of records processed (attempted, not DB-reported)."""
         return _run_async_safe(
             self._async_add_entities(entities, document_id, source_page_id),
             operation_name="add_entities",
@@ -150,6 +172,21 @@ class GraphStorageAdapter:
             operation_name="add_relationships",
         )
 
+    @staticmethod
+    async def _resolve_entity_id(
+        conn: asyncpg.Connection, name: str, document_id: str
+    ) -> Optional[int]:
+        """Resolve entity name to ID: document-scoped first, then cross-document fallback."""
+        entity_id = await conn.fetchval(
+            "SELECT entity_id FROM graph.entities WHERE name = $1 AND document_id = $2 LIMIT 1",
+            name, document_id,
+        )
+        if entity_id is None:
+            entity_id = await conn.fetchval(
+                "SELECT entity_id FROM graph.entities WHERE name = $1 LIMIT 1", name
+            )
+        return entity_id
+
     async def _async_add_relationships(
         self, relationships: List[Dict], document_id: str, source_page_id: Optional[str] = None
     ) -> int:
@@ -162,28 +199,8 @@ class GraphStorageAdapter:
                 inserted = 0
                 skipped = 0
                 for r in relationships:
-                    # Resolve entity names to IDs
-                    source_id = await conn.fetchval(
-                        "SELECT entity_id FROM graph.entities WHERE name = $1 AND document_id = $2 LIMIT 1",
-                        r["source"], document_id,
-                    )
-                    target_id = await conn.fetchval(
-                        "SELECT entity_id FROM graph.entities WHERE name = $1 AND document_id = $2 LIMIT 1",
-                        r["target"], document_id,
-                    )
-
-                    if source_id is None or target_id is None:
-                        # Try cross-document lookup
-                        if source_id is None:
-                            source_id = await conn.fetchval(
-                                "SELECT entity_id FROM graph.entities WHERE name = $1 LIMIT 1",
-                                r["source"],
-                            )
-                        if target_id is None:
-                            target_id = await conn.fetchval(
-                                "SELECT entity_id FROM graph.entities WHERE name = $1 LIMIT 1",
-                                r["target"],
-                            )
+                    source_id = await self._resolve_entity_id(conn, r["source"], document_id)
+                    target_id = await self._resolve_entity_id(conn, r["target"], document_id)
 
                     if source_id is None or target_id is None:
                         logger.debug(
@@ -253,8 +270,7 @@ class GraphStorageAdapter:
         params.append(limit)
 
         sql = f"""
-            SELECT entity_id, name, entity_type, description, document_id, metadata,
-                   similarity(name, $1) AS sim
+            SELECT {_ENTITY_COLS}, metadata, similarity(name, $1) AS sim
             FROM graph.entities
             WHERE {' AND '.join(where_parts)}
             ORDER BY sim DESC
@@ -270,15 +286,7 @@ class GraphStorageAdapter:
             ) from e
 
         return [
-            {
-                "entity_id": row["entity_id"],
-                "name": row["name"],
-                "entity_type": row["entity_type"],
-                "description": row["description"],
-                "document_id": row["document_id"],
-                "metadata": row["metadata"] or {},
-                "similarity": float(row["sim"]),
-            }
+            {**_entity_from_row(row), "metadata": row["metadata"] or {}, "similarity": float(row["sim"])}
             for row in rows
         ]
 
@@ -288,6 +296,7 @@ class GraphStorageAdapter:
 
     def get_entity_relationships(self, entity_id: int, depth: int = 1) -> Dict:
         """Get N-hop neighborhood of an entity using recursive CTE."""
+        depth = min(depth, 5)  # Cap depth to prevent runaway recursive CTEs
         return _run_async_safe(
             self._async_get_entity_relationships(entity_id, depth),
             operation_name="get_entity_relationships",
@@ -299,16 +308,15 @@ class GraphStorageAdapter:
             async with self.pool.acquire() as conn:
                 # Get the root entity
                 root = await conn.fetchrow(
-                    "SELECT entity_id, name, entity_type, description, document_id "
-                    "FROM graph.entities WHERE entity_id = $1",
+                    f"SELECT {_ENTITY_COLS} FROM graph.entities WHERE entity_id = $1",
                     entity_id,
                 )
                 if not root:
                     return {"entity": None, "relationships": [], "connected_entities": []}
 
                 # Recursive CTE for N-hop traversal.
-                # Uses a visited array to prevent exponential explosion:
-                # each step only follows edges from newly discovered entities.
+                # Uses a visited array per traversal path to avoid cycles.
+                # The final DISTINCT ON deduplicates relationships found via multiple paths.
                 sql = """
                     WITH RECURSIVE traversal AS (
                         -- Base: direct relationships from/to root entity
@@ -316,13 +324,13 @@ class GraphStorageAdapter:
                             r.relationship_id, r.source_entity_id, r.target_entity_id,
                             r.relationship_type, r.description AS rel_description, r.weight,
                             1 AS hop,
-                            ARRAY[$1] || ARRAY[
-                                CASE WHEN r.source_entity_id = $1
+                            ARRAY[$1::int] || ARRAY[
+                                CASE WHEN r.source_entity_id = $1::int
                                      THEN r.target_entity_id
                                      ELSE r.source_entity_id END
                             ] AS visited
                         FROM graph.relationships r
-                        WHERE r.source_entity_id = $1 OR r.target_entity_id = $1
+                        WHERE r.source_entity_id = $1::int OR r.target_entity_id = $1::int
 
                         UNION ALL
 
@@ -358,23 +366,13 @@ class GraphStorageAdapter:
                     entity_ids.add(row["target_entity_id"])
 
                 # Fetch entity details
-                placeholders = ", ".join(f"${i+1}" for i in range(len(entity_ids)))
                 entity_rows = await conn.fetch(
-                    f"SELECT entity_id, name, entity_type, description, document_id "
-                    f"FROM graph.entities WHERE entity_id IN ({placeholders})",
+                    f"SELECT {_ENTITY_COLS} FROM graph.entities "
+                    f"WHERE entity_id IN ({_in_placeholders(entity_ids)})",
                     *entity_ids,
                 )
 
-                entities_map = {
-                    row["entity_id"]: {
-                        "entity_id": row["entity_id"],
-                        "name": row["name"],
-                        "entity_type": row["entity_type"],
-                        "description": row["description"],
-                        "document_id": row["document_id"],
-                    }
-                    for row in entity_rows
-                }
+                entities_map = {row["entity_id"]: _entity_from_row(row) for row in entity_rows}
         except asyncpg.PostgresError as e:
             raise GraphStoreError(
                 f"Graph traversal failed for entity {entity_id}: {e}", cause=e
@@ -430,7 +428,8 @@ class GraphStorageAdapter:
 
         try:
             async with self.pool.acquire() as conn:
-                # Atomic delete + insert: if insert fails, old communities are preserved
+                # Atomic delete ALL + insert within a transaction.
+                # If insert fails, the transaction rolls back and old communities are preserved.
                 async with conn.transaction():
                     await conn.execute("DELETE FROM graph.communities")
                     await conn.executemany(
@@ -503,13 +502,9 @@ class GraphStorageAdapter:
                     return []
 
                 entity_ids = row["entity_ids"]
-                placeholders = ", ".join(f"${i+1}" for i in range(len(entity_ids)))
                 entity_rows = await conn.fetch(
-                    f"""
-                    SELECT entity_id, name, entity_type, description, document_id
-                    FROM graph.entities
-                    WHERE entity_id IN ({placeholders})
-                    """,
+                    f"SELECT {_ENTITY_COLS} FROM graph.entities "
+                    f"WHERE entity_id IN ({_in_placeholders(entity_ids)})",
                     *entity_ids,
                 )
         except asyncpg.PostgresError as e:
@@ -517,16 +512,7 @@ class GraphStorageAdapter:
                 f"Failed to get entities for community {community_id}: {e}", cause=e
             ) from e
 
-        return [
-            {
-                "entity_id": row["entity_id"],
-                "name": row["name"],
-                "entity_type": row["entity_type"],
-                "description": row["description"],
-                "document_id": row["document_id"],
-            }
-            for row in entity_rows
-        ]
+        return [_entity_from_row(row) for row in entity_rows]
 
     # =========================================================================
     # Document Management
@@ -578,8 +564,7 @@ class GraphStorageAdapter:
         try:
             async with self.pool.acquire() as conn:
                 entity_rows = await conn.fetch(
-                    "SELECT entity_id, name, entity_type, description, document_id "
-                    "FROM graph.entities ORDER BY entity_id"
+                    f"SELECT {_ENTITY_COLS} FROM graph.entities ORDER BY entity_id"
                 )
                 rel_rows = await conn.fetch(
                     "SELECT relationship_id, source_entity_id, target_entity_id, "
@@ -590,16 +575,7 @@ class GraphStorageAdapter:
                 f"Failed to fetch all entities and relationships: {e}", cause=e
             ) from e
 
-        entities = [
-            {
-                "entity_id": r["entity_id"],
-                "name": r["name"],
-                "entity_type": r["entity_type"],
-                "description": r["description"],
-                "document_id": r["document_id"],
-            }
-            for r in entity_rows
-        ]
+        entities = [_entity_from_row(r) for r in entity_rows]
         relationships = [
             {
                 "relationship_id": r["relationship_id"],

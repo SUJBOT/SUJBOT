@@ -307,6 +307,12 @@ async def lifespan(app: FastAPI):
         if hasattr(agent_adapter, 'runner'):
             agent_adapter.runner.shutdown()
 
+    # Close graph storage pool (owns its pool when created with connection_string)
+    graph_storage_ref = _vl_components.get("graph_storage") if _vl_components else None
+    if graph_storage_ref and hasattr(graph_storage_ref, "close"):
+        await graph_storage_ref.close()
+        logger.info("✓ Graph storage pool closed")
+
     if postgres_adapter:
         await postgres_adapter.close()
         logger.info("✓ PostgreSQL connection pool closed")

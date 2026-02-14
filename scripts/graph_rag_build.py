@@ -8,7 +8,7 @@ Usage:
     uv run python scripts/graph_rag_build.py                     # full build
     uv run python scripts/graph_rag_build.py --limit 10          # test run (10 pages)
     uv run python scripts/graph_rag_build.py --doc-id BZ_VR1     # single document
-    uv run python scripts/graph_rag_build.py --skip-extraction   # communities only (re-run Leiden)
+    uv run python scripts/graph_rag_build.py --skip-extraction   # re-run community detection + summarization
     uv run python scripts/graph_rag_build.py --skip-communities  # extraction only
 """
 
@@ -34,7 +34,6 @@ from backend.constants import get_variant_model
 from src.agent.providers.factory import create_provider
 from src.config import get_config
 from src.graph import create_graph_components
-from src.graph.storage import GraphStorageAdapter
 from src.storage.postgres_adapter import PostgresVectorStoreAdapter
 from src.vl.page_store import PageStore
 
@@ -44,15 +43,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+SEPARATOR = "=" * 60
+
+
+def _log_phase(title: str) -> None:
+    """Log a phase banner."""
+    logger.info(SEPARATOR)
+    logger.info(title)
+    logger.info(SEPARATOR)
+
 
 async def extract_entities(args, graph_storage, entity_extractor, page_store, vector_store):
     """Phase 1: Extract entities and relationships from page images."""
-    logger.info("=" * 60)
-    logger.info("PHASE 1: Entity Extraction")
-    logger.info("=" * 60)
+    _log_phase("PHASE 1: Entity Extraction")
 
-    # Get pages to process
-    await vector_store._ensure_pool()
     async with vector_store.pool.acquire() as conn:
         if args.doc_id:
             rows = await conn.fetch(
@@ -76,14 +80,16 @@ async def extract_entities(args, graph_storage, entity_extractor, page_store, ve
 
     logger.info(f"Processing {len(pages)} pages...")
 
-    max_consecutive_failures = 3
+    MAX_CONSECUTIVE_FAILURES = 3
     consecutive_failures = 0
     total_entities = 0
     total_relationships = 0
+    n_pages = len(pages)
 
-    for i, page in enumerate(pages):
+    for i, page in enumerate(pages, 1):
         page_id = page["page_id"]
         document_id = page["document_id"]
+        progress = f"[{i}/{n_pages}]"
 
         try:
             result = entity_extractor.extract_from_page(page_id, page_store)
@@ -91,42 +97,41 @@ async def extract_entities(args, graph_storage, entity_extractor, page_store, ve
             relationships = result.get("relationships", [])
 
             if entities:
-                n_ent = graph_storage.add_entities(entities, document_id, source_page_id=page_id)
-                total_entities += n_ent
-                consecutive_failures = 0
-            else:
-                consecutive_failures += 1
-
+                total_entities += graph_storage.add_entities(
+                    entities, document_id, source_page_id=page_id
+                )
             if relationships:
-                n_rel = graph_storage.add_relationships(relationships, document_id, source_page_id=page_id)
-                total_relationships += n_rel
+                total_relationships += graph_storage.add_relationships(
+                    relationships, document_id, source_page_id=page_id
+                )
 
+            consecutive_failures = 0
             logger.info(
-                f"[{i + 1}/{len(pages)}] {page_id}: "
+                f"{progress} {page_id}: "
                 f"{len(entities)} entities, {len(relationships)} relationships"
             )
 
         except (KeyboardInterrupt, SystemExit, MemoryError):
             raise
         except Exception as e:
-            logger.warning(f"[{i + 1}/{len(pages)}] {page_id}: failed — {e}")
+            logger.warning(f"{progress} {page_id}: failed — {e}", exc_info=True)
             consecutive_failures += 1
 
-        if consecutive_failures >= max_consecutive_failures:
+        if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
             logger.error(
-                f"Aborting extraction after {max_consecutive_failures} "
-                f"consecutive failures (completed {i + 1}/{len(pages)})"
+                f"Aborting extraction after {MAX_CONSECUTIVE_FAILURES} "
+                f"consecutive failures (completed {i}/{n_pages})"
             )
             break
 
-    logger.info(f"Extraction complete: {total_entities} entities, {total_relationships} relationships")
+    logger.info(
+        f"Extraction complete: {total_entities} entities, {total_relationships} relationships"
+    )
 
 
 async def build_communities(args, graph_storage, community_detector, community_summarizer):
     """Phase 2: Community detection and summarization."""
-    logger.info("=" * 60)
-    logger.info("PHASE 2: Community Detection")
-    logger.info("=" * 60)
+    _log_phase("PHASE 2: Community Detection")
 
     entities, relationships = graph_storage.get_all_entities_and_relationships()
     logger.info(f"Graph: {len(entities)} entities, {len(relationships)} relationships")
@@ -147,22 +152,16 @@ async def build_communities(args, graph_storage, community_detector, community_s
 
     logger.info(f"Detected {len(communities)} communities")
 
-    # Summarize communities
     if community_summarizer:
-        logger.info("=" * 60)
-        logger.info("PHASE 3: Community Summarization")
-        logger.info("=" * 60)
+        _log_phase("PHASE 3: Community Summarization")
 
         model_name = community_summarizer.provider.get_model_name()
+        id_to_entity = {e["entity_id"]: e for e in entities}
+        n_communities = len(communities)
 
-        for i, comm in enumerate(communities):
+        for i, comm in enumerate(communities, 1):
             entity_ids = comm["entity_ids"]
-
-            # Get entity details for this community
-            id_to_entity = {e["entity_id"]: e for e in entities}
             comm_entities = [id_to_entity[eid] for eid in entity_ids if eid in id_to_entity]
-
-            # Get relationships within community
             comm_entity_set = set(entity_ids)
             comm_rels = [
                 {
@@ -171,26 +170,27 @@ async def build_communities(args, graph_storage, community_detector, community_s
                     "type": r["relationship_type"],
                 }
                 for r in relationships
-                if r["source_entity_id"] in comm_entity_set and r["target_entity_id"] in comm_entity_set
+                if r["source_entity_id"] in comm_entity_set
+                and r["target_entity_id"] in comm_entity_set
             ]
 
+            fallback_title = f"Community L{comm['level']}#{i - 1}"
             try:
                 summary = community_summarizer.summarize(comm_entities, comm_rels)
                 if summary:
                     comm["summary"] = summary
                     comm["summary_model"] = model_name
-                    # Generate title from first sentence
                     comm["title"] = summary.split(".")[0].strip()[:100]
                     logger.info(
-                        f"[{i + 1}/{len(communities)}] L{comm['level']}: "
+                        f"[{i}/{n_communities}] L{comm['level']}: "
                         f"{comm['title']} ({len(entity_ids)} entities)"
                     )
                 else:
-                    comm["title"] = f"Community L{comm['level']}#{i}"
-                    logger.warning(f"[{i + 1}/{len(communities)}] Empty summary")
+                    comm["title"] = fallback_title
+                    logger.warning(f"[{i}/{n_communities}] Empty summary")
             except Exception as e:
-                comm["title"] = f"Community L{comm['level']}#{i}"
-                logger.warning(f"[{i + 1}/{len(communities)}] Summarization failed: {e}")
+                comm["title"] = fallback_title
+                logger.warning(f"[{i}/{n_communities}] Summarization failed: {e}")
 
     # Save communities
     saved = graph_storage.save_communities(communities)
@@ -207,9 +207,9 @@ async def async_main(args):
         logger.error("DATABASE_URL not set in .env")
         sys.exit(1)
 
-    # Create provider
-    model = get_variant_model(args.variant)
-    logger.info(f"Using model: {model} (variant: {args.variant})")
+    # Create provider (--model overrides --variant)
+    model = args.model or get_variant_model(args.variant)
+    logger.info(f"Using model: {model}")
     provider = create_provider(model)
 
     # Create vector store (to read pages)
@@ -230,8 +230,9 @@ async def async_main(args):
     )
 
     # Create graph components (shares vector_store pool)
-    graph_storage, entity_extractor, community_detector, community_summarizer = \
+    graph_storage, entity_extractor, community_detector, community_summarizer = (
         create_graph_components(pool=vector_store.pool, provider=provider)
+    )
 
     # Phase 1: Extract entities
     if not args.skip_extraction:
@@ -241,23 +242,35 @@ async def async_main(args):
     if not args.skip_communities:
         await build_communities(args, graph_storage, community_detector, community_summarizer)
 
-    # Print stats
     stats = graph_storage.get_graph_stats()
-    logger.info("=" * 60)
-    logger.info("GRAPH STATS")
-    logger.info("=" * 60)
+    _log_phase("GRAPH STATS")
     for k, v in stats.items():
         logger.info(f"  {k}: {v}")
+
+    # Cleanup
+    await vector_store.close()
 
 
 def main():
     parser = argparse.ArgumentParser(description="Build knowledge graph from VL page images")
     parser.add_argument("--doc-id", type=str, default=None, help="Process only this document")
-    parser.add_argument("--limit", type=int, default=None, help="Max pages to process (for testing)")
+    parser.add_argument(
+        "--limit", type=int, default=None, help="Max pages to process (for testing)"
+    )
     parser.add_argument(
         "--variant", type=str, default="remote", help="Agent variant for LLM (default: remote)"
     )
-    parser.add_argument("--skip-extraction", action="store_true", help="Skip entity extraction (re-run communities only)")
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="claude-haiku-4-5-20251001",
+        help="Model to use (overrides --variant, default: claude-haiku-4-5-20251001)",
+    )
+    parser.add_argument(
+        "--skip-extraction",
+        action="store_true",
+        help="Skip entity extraction (re-run communities only)",
+    )
     parser.add_argument("--skip-communities", action="store_true", help="Skip community detection")
     args = parser.parse_args()
     asyncio.run(async_main(args))

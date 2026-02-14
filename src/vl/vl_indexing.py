@@ -38,6 +38,8 @@ class VLIndexingPipeline:
     Indexes PDF pages as image embeddings for VL retrieval.
 
     Optionally generates page summaries when a summary_provider is given.
+    Optionally extracts entities/relationships for the knowledge graph
+    when entity_extractor and graph_storage are provided.
     """
 
     def __init__(
@@ -271,9 +273,6 @@ class VLIndexingPipeline:
                             entities, document_id, source_page_id=page_id
                         )
                         total_entities += n_ent
-                        consecutive_failures = 0
-                    else:
-                        consecutive_failures += 1
 
                     if relationships:
                         n_rel = self.graph_storage.add_relationships(
@@ -281,12 +280,17 @@ class VLIndexingPipeline:
                         )
                         total_relationships += n_rel
 
+                    # Successful extraction (even if empty) resets the counter
+                    consecutive_failures = 0
+
                     logger.debug(
                         f"[{i + 1}/{len(page_ids)}] {page_id}: "
                         f"{len(entities)} entities, {len(relationships)} relationships"
                     )
+                except (KeyboardInterrupt, SystemExit, MemoryError):
+                    raise
                 except Exception as e:
-                    logger.warning(f"Entity extraction failed for {page_id}: {e}")
+                    logger.warning(f"Entity extraction failed for {page_id}: {e}", exc_info=True)
                     consecutive_failures += 1
 
                 if consecutive_failures >= max_consecutive_failures:

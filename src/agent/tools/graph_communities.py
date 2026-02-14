@@ -56,7 +56,15 @@ class GraphCommunitiesTool(BaseTool):
                 error="Knowledge graph not available (graph_storage not configured)",
             )
 
-        communities = graph_storage.get_communities(level=level)
+        try:
+            communities = graph_storage.get_communities(level=level)
+        except Exception as e:
+            logger.error(f"Graph communities query failed: {e}", exc_info=True)
+            return ToolResult(
+                success=False,
+                data=None,
+                error=f"Graph communities query failed: {e}",
+            )
 
         if not communities:
             return ToolResult(
@@ -100,7 +108,7 @@ class GraphCommunitiesTool(BaseTool):
                     for e in entities[:15]
                 ]
             except Exception as e:
-                logger.debug(f"Failed to get entities for community {c['community_id']}: {e}")
+                logger.warning(f"Failed to get entities for community {c['community_id']}: {e}")
                 c["entities"] = []
 
         return ToolResult(

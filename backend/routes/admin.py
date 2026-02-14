@@ -910,13 +910,16 @@ async def delete_admin_document(
         pdf_path.unlink()
         logger.info(f"Deleted PDF for {document_id}")
 
-        # 3. Delete graph data (entities cascade-delete relationships)
+        # 3. Delete graph data (entities cascade-delete relationships via FK ON DELETE CASCADE)
         graph_storage = vl.get("graph_storage")
         if graph_storage:
             try:
                 await asyncio.to_thread(graph_storage.delete_document_graph, document_id)
             except Exception as e:
-                logger.warning(f"Graph cleanup failed for {document_id}: {e}")
+                logger.error(
+                    f"Graph cleanup failed for {document_id} — orphaned entities may remain: {e}",
+                    exc_info=True,
+                )
 
         # 4. Delete vectors from DB
         await vector_store._ensure_pool()

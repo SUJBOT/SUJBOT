@@ -1,8 +1,8 @@
 """
 Community Detector — Leiden hierarchy on entity-relationship graph.
 
-Adapts the GraphRAG-style hierarchical Leiden detection from
-scripts/topic_clustering.py for entity-relationship graphs.
+Implements GraphRAG-style hierarchical Leiden community detection
+for entity-relationship graphs.
 """
 
 import logging
@@ -41,7 +41,8 @@ class CommunityDetector:
             min_community_size: Minimum entities per community
 
         Returns:
-            List of community dicts: {level, entity_ids, title}
+            List of community dicts: {level, entity_ids, title, summary}
+            (title and summary are None, populated later by CommunitySummarizer)
         """
         if not entities:
             return []

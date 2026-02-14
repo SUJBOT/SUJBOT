@@ -33,7 +33,8 @@ class GraphSearchTool(BaseTool):
 
     name = "graph_search"
     description = (
-        "Search knowledge graph for entities (regulations, organizations, concepts, facilities). "
+        "Search knowledge graph for entities (regulations, standards, organizations, persons, "
+        "concepts, facilities, roles, documents, sections, requirements). "
         "Returns matching entities with their relationships."
     )
     input_schema = GraphSearchInput
@@ -52,11 +53,19 @@ class GraphSearchTool(BaseTool):
                 error="Knowledge graph not available (graph_storage not configured)",
             )
 
-        entities = graph_storage.search_entities(
-            query=query,
-            entity_type=entity_type,
-            limit=limit,
-        )
+        try:
+            entities = graph_storage.search_entities(
+                query=query,
+                entity_type=entity_type,
+                limit=limit,
+            )
+        except Exception as e:
+            logger.error(f"Graph search failed: {e}", exc_info=True)
+            return ToolResult(
+                success=False,
+                data=None,
+                error=f"Graph search failed: {e}",
+            )
 
         if not entities:
             return ToolResult(
@@ -71,7 +80,7 @@ class GraphSearchTool(BaseTool):
                 result = graph_storage.get_entity_relationships(entity["entity_id"], depth=1)
                 entity["relationships"] = result.get("relationships", [])[:10]
             except Exception as e:
-                logger.debug(f"Failed to get relationships for {entity['name']}: {e}")
+                logger.warning(f"Failed to get relationships for {entity['name']}: {e}")
                 entity["relationships"] = []
 
         return ToolResult(
