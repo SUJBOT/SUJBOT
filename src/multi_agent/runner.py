@@ -291,9 +291,28 @@ class MultiAgentRunner:
             # See CLAUDE.md: "Cohere performs WORSE on legal docs"
             logger.info("Reranking DISABLED (HyDE + Expansion Fusion pipeline)")
 
+            architecture = self.config.get("architecture", "ocr")
+
+            # Graph storage (optional — initialized before ToolConfig)
+            graph_storage = None
+            if architecture == "vl" and hasattr(vector_store, "pool") and vector_store.pool:
+                try:
+                    from ..graph import GraphStorageAdapter
+                except ImportError as e:
+                    logger.warning(f"Graph module not importable: {e}")
+                    GraphStorageAdapter = None
+
+                if GraphStorageAdapter is not None:
+                    try:
+                        graph_storage = GraphStorageAdapter(pool=vector_store.pool)
+                        logger.info("Graph storage initialized (shares vector_store pool)")
+                    except Exception as e:
+                        logger.error(f"Graph storage initialization failed: {e}", exc_info=True)
+
             # Tool config from config.json (not hardcoded defaults)
             agent_tools_config = self.config.get("agent_tools", {})
             tool_config = ToolConfig(
+                graph_storage=graph_storage,
                 default_k=agent_tools_config.get("default_k", 6),
                 enable_reranking=agent_tools_config.get(
                     "enable_reranking", False
@@ -317,7 +336,6 @@ class MultiAgentRunner:
             # Initialize VL components if architecture == "vl"
             vl_retriever = None
             page_store = None
-            architecture = self.config.get("architecture", "ocr")
 
             if architecture == "vl":
                 try:

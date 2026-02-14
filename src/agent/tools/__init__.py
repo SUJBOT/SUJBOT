@@ -1,7 +1,7 @@
 """
 RAG Tools
 
-5 VL-adapted tools for retrieval and analysis.
+8 tools for retrieval, analysis, and knowledge graph queries.
 All tools are registered automatically via @register_tool decorator.
 
 Tools:
@@ -10,6 +10,9 @@ Tools:
 - get_document_list: List all indexed documents
 - get_document_info: Document metadata/summaries
 - get_stats: Corpus/index statistics
+- graph_search: Entity search in knowledge graph
+- graph_context: Multi-hop entity neighborhood
+- graph_communities: Thematic community summaries
 """
 
 import logging
@@ -54,6 +57,11 @@ _safe_import("get_document_list")
 
 # Analysis tools
 _safe_import("get_stats")
+
+# Graph RAG tools
+_safe_import("graph_search")
+_safe_import("graph_context")
+_safe_import("graph_communities")
 
 # Report import failures
 if _failed_imports:

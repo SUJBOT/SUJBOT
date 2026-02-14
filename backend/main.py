@@ -222,8 +222,38 @@ async def lifespan(app: FastAPI):
                 except Exception as e:
                     logger.error(f"Summary provider init failed (summaries disabled): {e}", exc_info=True)
 
-                set_vl_components(jina_client, page_store, vl_vector_store, summary_provider)
-                set_admin_vl_components(jina_client, page_store, vl_vector_store, summary_provider)
+                # Create graph components for entity extraction during upload
+                entity_extractor = None
+                graph_storage = None
+                try:
+                    from src.graph import GraphStorageAdapter
+                    from src.graph.entity_extractor import EntityExtractor
+                except ImportError as e:
+                    logger.warning(f"Graph module not importable (entity extraction disabled): {e}")
+                    GraphStorageAdapter = None
+                    EntityExtractor = None
+
+                if GraphStorageAdapter is not None:
+                    try:
+                        graph_storage = GraphStorageAdapter(
+                            connection_string=os.getenv("DATABASE_URL")
+                        )
+                        if summary_provider and EntityExtractor is not None:
+                            entity_extractor = EntityExtractor(summary_provider)
+                            logger.info("✓ Graph components initialized for entity extraction")
+                        else:
+                            logger.info("Graph storage initialized (entity extractor requires summary provider)")
+                    except Exception as e:
+                        logger.error(f"Graph component initialization failed: {e}", exc_info=True)
+
+                set_vl_components(
+                    jina_client, page_store, vl_vector_store, summary_provider,
+                    entity_extractor=entity_extractor, graph_storage=graph_storage,
+                )
+                set_admin_vl_components(
+                    jina_client, page_store, vl_vector_store, summary_provider,
+                    entity_extractor=entity_extractor, graph_storage=graph_storage,
+                )
                 logger.info("✓ VL components initialized for document upload")
             else:
                 logger.info("VL config not set, upload indexing disabled")

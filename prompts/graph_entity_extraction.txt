@@ -1,0 +1,47 @@
+Extract all entities and relationships from this page image. This is a Czech legal/regulatory document about nuclear safety.
+
+## Entity types to extract
+- REGULATION: Laws, decrees, ordinances (e.g., "zákon č. 263/2016 Sb.", "vyhláška č. 422/2016 Sb.")
+- STANDARD: Technical standards and norms (e.g., "ČSN EN 61226", "ISO 9001", "návod bezpečnosti NS-R-4")
+- SECTION: Named sections, articles, paragraphs (e.g., "§ 24", "Hlava III", "Příloha č. 2")
+- ORGANIZATION: Institutions, authorities, companies (e.g., "SÚJB", "ČEZ", "IAEA")
+- PERSON: Named individuals with their titles (e.g., "doc. Ing. Ľubomír Sklenka, Ph.D.")
+- CONCEPT: Legal/technical concepts defined in the text (e.g., "jaderné zařízení", "radiační ochrana")
+- REQUIREMENT: Specific obligations or prohibitions (e.g., "povinnost hlášení", "limit dávky")
+- FACILITY: Physical facilities, buildings, equipment (e.g., "JE Dukovany", "reaktor VVER-440")
+- ROLE: Roles or positions — NOT specific people (e.g., "dozimetrista", "inspektor", "držitel povolení")
+- DOCUMENT: Referenced documents, reports (e.g., "bezpečnostní zpráva", "havarijní plán")
+
+## Relationship types to extract
+- DEFINES: Entity defines/specifies another (regulation defines concept)
+- REFERENCES: Entity references/cites another (section references regulation)
+- AMENDS: Entity modifies/amends another (new regulation amends old)
+- REQUIRES: Entity requires/mandates another (regulation requires document)
+- REGULATES: Entity regulates/governs another (organization regulates facility)
+- PART_OF: Entity is part of another (section is part of regulation)
+- APPLIES_TO: Entity applies to another (requirement applies to role)
+- SUPERVISES: Entity supervises/oversees another (organization supervises facility)
+- AUTHORED_BY: Document or report was authored by a person
+
+## Rules
+- Use entity names in the same language as the page content (usually Czech).
+- Normalize regulation names to standard format: "zákon č. NNN/YYYY Sb." or "vyhláška č. NNN/YYYY Sb."
+- Keep entity names concise but unambiguous.
+- Use CONSISTENT names for the same entity — do NOT create variants like "reaktor VR-1" AND "školní reaktor VR-1" for the same thing. Pick one canonical name.
+- Use PERSON for specific named individuals, ROLE for generic positions/functions.
+- Each relationship must reference entities by their exact name as listed in the entities array.
+- Only extract entities and relationships that are explicitly mentioned on this page.
+
+## Output format
+Respond with ONLY a JSON object, no other text:
+
+```json
+{
+  "entities": [
+    {"name": "...", "type": "REGULATION", "description": "..."}
+  ],
+  "relationships": [
+    {"source": "entity name", "target": "entity name", "type": "REFERENCES", "description": "..."}
+  ]
+}
+```

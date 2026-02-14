@@ -6,6 +6,7 @@ Two modes:
 2. index_pdf(pdf_path, document_id) — render pages → Jina API → PostgreSQL
 
 Optionally summarizes each page image via a multimodal LLM provider.
+Optionally extracts entities/relationships for the knowledge graph.
 
 Uses PageStore for rendering, JinaClient for embedding,
 PostgresVectorStoreAdapter for storage.
@@ -24,6 +25,8 @@ from .page_store import PageStore
 
 if TYPE_CHECKING:
     from ..agent.providers.base import BaseProvider
+    from ..graph.entity_extractor import EntityExtractor
+    from ..graph.storage import GraphStorageAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -43,11 +46,15 @@ class VLIndexingPipeline:
         vector_store,  # PostgresVectorStoreAdapter
         page_store: PageStore,
         summary_provider: Optional["BaseProvider"] = None,
+        entity_extractor: Optional["EntityExtractor"] = None,
+        graph_storage: Optional["GraphStorageAdapter"] = None,
     ):
         self.jina_client = jina_client
         self.vector_store = vector_store
         self.page_store = page_store
         self.summary_provider = summary_provider
+        self.entity_extractor = entity_extractor
+        self.graph_storage = graph_storage
         self._summary_prompt: Optional[str] = None
         if summary_provider and _SUMMARY_PROMPT_PATH.exists():
             self._summary_prompt = _SUMMARY_PROMPT_PATH.read_text(encoding="utf-8")
@@ -244,6 +251,55 @@ class VLIndexingPipeline:
                 details={"pdf_path": str(pdf_path), "pages_embedded": len(page_ids)},
                 cause=e,
             ) from e
+
+        # 6. Extract entities + relationships (optional, if graph components set)
+        if self.entity_extractor and self.graph_storage:
+            logger.info(f"Extracting entities from {len(page_ids)} pages...")
+            max_consecutive_failures = 3
+            consecutive_failures = 0
+            total_entities = 0
+            total_relationships = 0
+
+            for i, page_id in enumerate(page_ids):
+                try:
+                    result = self.entity_extractor.extract_from_page(page_id, self.page_store)
+                    entities = result.get("entities", [])
+                    relationships = result.get("relationships", [])
+
+                    if entities:
+                        n_ent = self.graph_storage.add_entities(
+                            entities, document_id, source_page_id=page_id
+                        )
+                        total_entities += n_ent
+                        consecutive_failures = 0
+                    else:
+                        consecutive_failures += 1
+
+                    if relationships:
+                        n_rel = self.graph_storage.add_relationships(
+                            relationships, document_id, source_page_id=page_id
+                        )
+                        total_relationships += n_rel
+
+                    logger.debug(
+                        f"[{i + 1}/{len(page_ids)}] {page_id}: "
+                        f"{len(entities)} entities, {len(relationships)} relationships"
+                    )
+                except Exception as e:
+                    logger.warning(f"Entity extraction failed for {page_id}: {e}")
+                    consecutive_failures += 1
+
+                if consecutive_failures >= max_consecutive_failures:
+                    logger.error(
+                        f"Aborting entity extraction after {max_consecutive_failures} "
+                        f"consecutive failures (completed {i + 1}/{len(page_ids)})"
+                    )
+                    break
+
+            logger.info(
+                f"Entity extraction complete: {total_entities} entities, "
+                f"{total_relationships} relationships from {pdf_path.name}"
+            )
 
         logger.info(f"Indexed {inserted} pages from {pdf_path.name}")
         return inserted

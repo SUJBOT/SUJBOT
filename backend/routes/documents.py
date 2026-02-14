@@ -12,7 +12,7 @@ import logging
 import re
 import shutil
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, status
 from fastapi.responses import FileResponse
@@ -32,13 +32,20 @@ MAX_UPLOAD_SIZE = 100 * 1024 * 1024  # 100 MB
 
 
 def set_vl_components(
-    jina_client: Any, page_store: Any, vector_store: Any, summary_provider: Any = None
+    jina_client: Any,
+    page_store: Any,
+    vector_store: Any,
+    summary_provider: Any = None,
+    entity_extractor: Any = None,
+    graph_storage: Any = None,
 ) -> None:
     """Set VL components for upload endpoint (called from main.py lifespan)."""
     _vl_components["jina_client"] = jina_client
     _vl_components["page_store"] = page_store
     _vl_components["vector_store"] = vector_store
     _vl_components["summary_provider"] = summary_provider
+    _vl_components["entity_extractor"] = entity_extractor
+    _vl_components["graph_storage"] = graph_storage
 
 
 class DocumentInfo(BaseModel):
@@ -56,6 +63,8 @@ async def index_document_pipeline(
     page_store: Any,
     vector_store: Any,
     summary_provider: Any = None,
+    entity_extractor: Any = None,
+    graph_storage: Any = None,
 ):
     """
     Async generator that renders, embeds, and stores a PDF document.
@@ -224,6 +233,63 @@ async def index_document_pipeline(
         })
 
     vector_store.add_vl_pages(pages, embeddings)
+
+    # Graph entity extraction (optional)
+    if entity_extractor and graph_storage:
+        max_consecutive_failures = 3
+        consecutive_failures = 0
+
+        for i, page_id in enumerate(page_ids):
+            try:
+                result = await asyncio.to_thread(
+                    entity_extractor.extract_from_page, page_id, page_store
+                )
+                entities = result.get("entities", [])
+                relationships = result.get("relationships", [])
+
+                if entities:
+                    await asyncio.to_thread(
+                        graph_storage.add_entities, entities, document_id,
+                        source_page_id=page_id,
+                    )
+                    consecutive_failures = 0
+                else:
+                    consecutive_failures += 1
+
+                if relationships:
+                    await asyncio.to_thread(
+                        graph_storage.add_relationships, relationships, document_id,
+                        source_page_id=page_id,
+                    )
+
+            except Exception as e:
+                logger.warning(f"Entity extraction failed for {page_id}: {e}")
+                consecutive_failures += 1
+
+            if consecutive_failures >= max_consecutive_failures:
+                logger.error(
+                    f"Aborting entity extraction after {max_consecutive_failures} "
+                    f"consecutive failures (completed {i + 1}/{len(page_ids)})"
+                )
+                yield {
+                    "event": "warning",
+                    "data": json.dumps({
+                        "stage": "graph_extraction",
+                        "message": f"Entity extraction aborted after {max_consecutive_failures} consecutive failures",
+                    }),
+                }
+                break
+
+            percent = int(((i + 1) / len(page_ids)) * 100)
+            yield {
+                "event": "progress",
+                "data": json.dumps({
+                    "stage": "graph_extraction",
+                    "percent": percent,
+                    "message": f"Extracting entities from page {i + 1}/{len(page_ids)}",
+                }),
+            }
+            await asyncio.sleep(0)
 
     yield {
         "event": "complete",
@@ -453,6 +519,8 @@ async def upload_document(
         page_store = _vl_components["page_store"]
         vector_store = _vl_components["vector_store"]
         summary_provider = _vl_components.get("summary_provider")
+        entity_extractor = _vl_components.get("entity_extractor")
+        graph_storage = _vl_components.get("graph_storage")
         document_id = pdf_path.stem
 
         try:
@@ -467,10 +535,12 @@ async def upload_document(
                 }),
             }
 
-            # 2-5. Render, embed, summarize, store via shared pipeline
+            # 2-5. Render, embed, summarize, store, extract entities via shared pipeline
             async for event in index_document_pipeline(
                 pdf_path, document_id, jina_client, page_store, vector_store,
                 summary_provider=summary_provider,
+                entity_extractor=entity_extractor,
+                graph_storage=graph_storage,
             ):
                 yield event
 

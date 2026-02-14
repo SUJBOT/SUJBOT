@@ -9,7 +9,7 @@ import os
 import platform
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 import logging
 
 logger = logging.getLogger(__name__)
@@ -88,6 +88,9 @@ def _detect_optimal_embedding_model() -> str:
 @dataclass
 class ToolConfig:
     """Configuration for RAG tools."""
+
+    # Graph storage (optional — set when graph schema is available)
+    graph_storage: Optional[Any] = None
 
     # Retrieval settings
     default_k: int = 6

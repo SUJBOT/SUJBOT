@@ -1,0 +1,1 @@
+Based on these entities and relationships from Czech legal/regulatory documents, write a concise summary (2-3 sentences, max 100 words) describing what this thematic cluster is about. Write in the same language as the entity names.
