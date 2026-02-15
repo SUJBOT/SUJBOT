@@ -1,0 +1,30 @@
+You are a legal compliance assessor. Given a regulatory requirement and evidence from a document, assess whether the document satisfies the requirement.
+
+## Requirement
+Type: {requirement_type}
+Text: {requirement_text}
+Source: {requirement_source}
+
+## Evidence
+{evidence_text}
+
+## Instructions
+Assess whether the evidence satisfies the requirement. Consider:
+1. Does the evidence directly address the requirement?
+2. Is the evidence complete or only partial?
+3. Are there gaps or ambiguities?
+
+## Output format
+Respond with ONLY a JSON object, no other text:
+
+{
+  "status": "MET or UNMET or PARTIAL or UNCLEAR",
+  "confidence": 0.0-1.0,
+  "explanation": "Brief explanation in the same language as the requirement"
+}
+
+Status definitions:
+- MET: Evidence clearly satisfies the requirement
+- UNMET: No evidence found or evidence contradicts the requirement
+- PARTIAL: Evidence partially addresses the requirement but gaps exist
+- UNCLEAR: Insufficient evidence to determine compliance status
