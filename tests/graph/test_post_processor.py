@@ -14,7 +14,6 @@ from src.graph.post_processor import (
     rebuild_graph_communities,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers / Fixtures
 # ---------------------------------------------------------------------------
@@ -125,8 +124,7 @@ def _make_storage_mock(
 
     storage.async_get_all = AsyncMock(return_value=(entities, relationships))
     storage.async_deduplicate_exact = AsyncMock(
-        return_value=dedup_exact_result
-        or {"groups_merged": 0, "entities_removed": 0, "relationships_remapped": 0}
+        return_value=dedup_exact_result or {"groups_merged": 0, "entities_removed": 0}
     )
     storage.async_deduplicate_semantic = AsyncMock(
         return_value=dedup_semantic_result
@@ -309,6 +307,47 @@ async def test_embed_new_communities():
     embedder = FakeEmbedder()
     count = await _embed_new_communities(storage, embedder)
     assert count == 1
+
+
+@pytest.mark.anyio
+async def test_rebuild_summarizer_failure_uses_fallback_title():
+    """If summarizer raises, community gets fallback title instead of crashing."""
+    storage = _make_storage_mock()
+    detector = FakeDetector()
+
+    class FailingSummarizer:
+        provider = FakeProvider()
+
+        def summarize(self, *args, **kwargs):
+            raise RuntimeError("LLM timeout")
+
+    stats = await rebuild_graph_communities(
+        graph_storage=storage,
+        community_detector=detector,
+        community_summarizer=FailingSummarizer(),
+        enable_dedup=False,
+    )
+
+    assert stats["communities_detected"] == 1
+    assert stats["communities_summarized"] == 0
+    assert stats["communities_saved"] == 1
+
+
+@pytest.mark.anyio
+async def test_rebuild_continues_on_get_all_failure():
+    """If async_get_all fails, returns error in stats without crashing."""
+    storage = _make_storage_mock()
+    storage.async_get_all = AsyncMock(side_effect=RuntimeError("DB connection lost"))
+    detector = FakeDetector()
+
+    stats = await rebuild_graph_communities(
+        graph_storage=storage,
+        community_detector=detector,
+        enable_dedup=False,
+    )
+
+    assert "error" in stats
+    assert "communities_detected" not in stats
 
 
 @pytest.mark.anyio

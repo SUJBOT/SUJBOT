@@ -69,6 +69,7 @@ def _schedule_graph_rebuild(document_id: str) -> None:
     graph_storage = _vl_components.get("graph_storage")
     community_detector = _vl_components.get("community_detector")
     if not graph_storage or not community_detector:
+        logger.debug("Graph rebuild skipped: graph_storage or community_detector not configured")
         return
 
     try:
@@ -86,6 +87,16 @@ def _schedule_graph_rebuild(document_id: str) -> None:
         _rebuild_task.cancel()
         logger.info("Cancelled in-progress graph rebuild (new document indexed)")
 
+    def _on_rebuild_done(task: asyncio.Task) -> None:
+        """Log exceptions from background graph rebuild tasks."""
+        _background_tasks.discard(task)
+        if task.cancelled():
+            logger.debug("Graph rebuild task was cancelled")
+            return
+        exc = task.exception()
+        if exc:
+            logger.error("Background graph rebuild failed: %s", exc, exc_info=exc)
+
     def _fire():
         global _rebuild_task
         from src.graph.post_processor import rebuild_graph_communities
@@ -101,7 +112,7 @@ def _schedule_graph_rebuild(document_id: str) -> None:
             )
         )
         _background_tasks.add(_rebuild_task)
-        _rebuild_task.add_done_callback(_background_tasks.discard)
+        _rebuild_task.add_done_callback(_on_rebuild_done)
 
     _rebuild_timer = loop.call_later(_REBUILD_DELAY_SECONDS, _fire)
     logger.info(

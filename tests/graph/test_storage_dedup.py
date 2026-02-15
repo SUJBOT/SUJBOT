@@ -1,11 +1,10 @@
 """Tests for graph storage dedup methods (SQL merge logic)."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from src.graph.storage import GraphStorageAdapter, _parse_command_count
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -160,7 +159,7 @@ async def test_exact_dedup_handles_transaction_error():
 
     # Should not raise — partial success
     result = await adapter.async_deduplicate_exact()
-    assert result["groups_merged"] == 2  # both attempted
+    assert result["groups_merged"] == 1  # only second group succeeded
 
 
 # ---------------------------------------------------------------------------
@@ -251,34 +250,11 @@ async def test_semantic_dedup_llm_confirms():
     provider = MagicMock()
     provider.create_message = MagicMock(return_value=Response())
 
-    # Need the prompt file to exist
-    with patch("src.graph.storage.Path") as mock_path:
-        mock_path_instance = MagicMock()
-        mock_path_instance.exists.return_value = True
-        mock_path_instance.read_text.return_value = (
-            "Entity 1: {name1} (type: {type1}) — {desc1}\n"
-            "Entity 2: {name2} (type: {type2}) — {desc2}"
-        )
-        mock_path.return_value = mock_path_instance
-        # Also mock the resolve().parent chain
-        mock_path.__truediv__ = MagicMock(return_value=mock_path_instance)
-        file_path = MagicMock()
-        file_path.resolve.return_value.parent.parent.parent.__truediv__ = MagicMock(
-            return_value=MagicMock(__truediv__=MagicMock(return_value=mock_path_instance))
-        )
-
-        # Simpler approach: just put a real prompt file
-        import tempfile
-        import os
-
-        prompt_dir = os.path.join(os.path.dirname(__file__), "..", "..", "prompts")
-        prompt_file = os.path.join(prompt_dir, "graph_entity_dedup.txt")
-
-        # The prompt file should already exist from our earlier step
-        result = await adapter.async_deduplicate_semantic(
-            similarity_threshold=0.85,
-            llm_provider=provider,
-        )
+    # The prompt file exists at prompts/graph_entity_dedup.txt in the project root
+    result = await adapter.async_deduplicate_semantic(
+        similarity_threshold=0.85,
+        llm_provider=provider,
+    )
 
     assert result["llm_confirmed"] == 1
     assert result["entities_removed"] == 1
@@ -326,3 +302,83 @@ async def test_semantic_dedup_llm_rejects():
     assert result["candidates_found"] == 1
     assert result["llm_confirmed"] == 0
     assert result["entities_removed"] == 0
+
+
+class TestParseCommandCountEdgeCases:
+    def test_empty_string(self):
+        assert _parse_command_count("") == 0
+
+    def test_single_word(self):
+        assert _parse_command_count("DELETE") == 0
+
+
+@pytest.mark.anyio
+async def test_semantic_dedup_transitive_closure():
+    """Three entities forming a chain: A≈B and B≈C → all merge into one group."""
+    adapter = _make_adapter_with_mock_pool()
+
+    cand1 = MagicMock()
+    cand1.__getitem__ = lambda self, key: {
+        "id1": 1,
+        "id2": 2,
+        "name1": "Entity A",
+        "name2": "Entity B",
+        "type1": "CONCEPT",
+        "type2": "CONCEPT",
+        "desc1": "desc a",
+        "desc2": "desc b",
+        "similarity": 0.90,
+    }[key]
+
+    cand2 = MagicMock()
+    cand2.__getitem__ = lambda self, key: {
+        "id1": 2,
+        "id2": 3,
+        "name1": "Entity B",
+        "name2": "Entity C",
+        "type1": "CONCEPT",
+        "type2": "CONCEPT",
+        "desc1": "desc b",
+        "desc2": "desc c",
+        "similarity": 0.88,
+    }[key]
+
+    call_count = 0
+
+    def make_acq():
+        nonlocal call_count
+        conn = AsyncMock()
+        if call_count == 0:
+            conn.fetch = AsyncMock(return_value=[cand1, cand2])
+        else:
+            conn.execute = AsyncMock(return_value="DELETE 2")
+            conn.transaction = MagicMock(
+                return_value=AsyncMock(
+                    __aenter__=AsyncMock(), __aexit__=AsyncMock(return_value=False)
+                )
+            )
+        call_count += 1
+        acq = AsyncMock()
+        acq.__aenter__ = AsyncMock(return_value=conn)
+        acq.__aexit__ = AsyncMock(return_value=False)
+        return acq
+
+    adapter.pool.acquire = make_acq
+
+    from dataclasses import dataclass
+
+    @dataclass
+    class Response:
+        text: str = "YES\nSame entity"
+
+    provider = MagicMock()
+    provider.create_message = MagicMock(return_value=Response())
+
+    result = await adapter.async_deduplicate_semantic(
+        similarity_threshold=0.85,
+        llm_provider=provider,
+    )
+
+    # Both pairs confirmed, but transitive closure merges into 1 group
+    assert result["llm_confirmed"] == 2
+    assert result["groups_merged"] == 1  # all three → one group

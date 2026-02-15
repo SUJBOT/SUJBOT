@@ -87,7 +87,7 @@ def _run_async_safe(coro, timeout: float = 30.0, operation_name: str = "graph op
         raise
 
 
-def _parse_command_count(result: str) -> int:
+def _parse_command_count(result: Optional[str]) -> int:
     """Parse row count from asyncpg command result (e.g. 'DELETE 5' → 5)."""
     try:
         return int(result.split()[-1])
@@ -773,6 +773,83 @@ class GraphStorageAdapter:
     # Entity Deduplication
     # =========================================================================
 
+    async def _merge_entity_group(
+        self,
+        conn,
+        canonical_id: int,
+        duplicate_ids: List[int],
+        merged_description: Optional[str] = None,
+    ) -> int:
+        """Merge duplicate entities into canonical within an open transaction.
+
+        Remaps relationships, removes self-references and duplicate edges,
+        updates canonical entity, and deletes duplicates.
+
+        Args:
+            conn: Active asyncpg connection (must be inside a transaction).
+            canonical_id: Entity ID to keep.
+            duplicate_ids: Entity IDs to merge into canonical and delete.
+            merged_description: If provided, set as canonical's description.
+                When None, only the search_embedding is cleared.
+
+        Returns:
+            Number of duplicate entity rows deleted.
+        """
+        # Remap relationships from duplicates to canonical
+        for dup_id in duplicate_ids:
+            await conn.execute(
+                "UPDATE graph.relationships SET source_entity_id = $1 WHERE source_entity_id = $2",
+                canonical_id,
+                dup_id,
+            )
+            await conn.execute(
+                "UPDATE graph.relationships SET target_entity_id = $1 WHERE target_entity_id = $2",
+                canonical_id,
+                dup_id,
+            )
+
+        # Remove self-referencing relationships created by remap (scoped to canonical)
+        await conn.execute(
+            "DELETE FROM graph.relationships "
+            "WHERE source_entity_id = target_entity_id AND source_entity_id = $1",
+            canonical_id,
+        )
+
+        # Deduplicate relationship edges involving canonical (keep lowest relationship_id)
+        await conn.execute(
+            """
+            DELETE FROM graph.relationships r1
+            USING graph.relationships r2
+            WHERE r1.source_entity_id = r2.source_entity_id
+              AND r1.target_entity_id = r2.target_entity_id
+              AND r1.relationship_type = r2.relationship_type
+              AND r1.relationship_id > r2.relationship_id
+              AND (r1.source_entity_id = $1 OR r1.target_entity_id = $1)
+            """,
+            canonical_id,
+        )
+
+        # Update canonical: set description if provided, always clear embedding
+        if merged_description is not None:
+            await conn.execute(
+                "UPDATE graph.entities SET description = $1, search_embedding = NULL WHERE entity_id = $2",
+                merged_description,
+                canonical_id,
+            )
+        else:
+            await conn.execute(
+                "UPDATE graph.entities SET search_embedding = NULL WHERE entity_id = $1",
+                canonical_id,
+            )
+
+        # Delete duplicate entity rows
+        placeholders = ", ".join(f"${i + 1}" for i in range(len(duplicate_ids)))
+        result = await conn.execute(
+            f"DELETE FROM graph.entities WHERE entity_id IN ({placeholders})",
+            *duplicate_ids,
+        )
+        return _parse_command_count(result)
+
     def deduplicate_exact(self) -> Dict:
         """Merge entities with identical (name, entity_type) across documents (sync)."""
         return _run_async_safe(
@@ -785,17 +862,12 @@ class GraphStorageAdapter:
         """
         Merge entities with identical (name, entity_type) across different documents.
 
-        For each duplicate group:
-        1. Pick canonical: longest description, lowest entity_id as tiebreaker
-        2. Remap relationships from duplicates → canonical
-        3. Delete self-referencing relationships created by merge
-        4. Deduplicate relationship edges (same source+target+type)
-        5. Merge descriptions on canonical
-        6. Delete duplicate entity rows
-        7. Clear search_embedding on canonical (needs re-embed)
+        For each duplicate group, delegates to ``_merge_entity_group`` which
+        remaps relationships, removes self-references and duplicate edges,
+        updates the canonical entity description, and deletes duplicates.
 
         Returns:
-            Dict with merge stats: groups_merged, entities_removed, relationships_remapped
+            Dict with merge stats: groups_merged, entities_removed
         """
         await self._ensure_pool()
 
@@ -817,12 +889,12 @@ class GraphStorageAdapter:
 
         if not groups:
             logger.info("No exact duplicates found")
-            return {"groups_merged": 0, "entities_removed": 0, "relationships_remapped": 0}
+            return {"groups_merged": 0, "entities_removed": 0}
 
         logger.info(f"Found {len(groups)} exact duplicate groups to merge")
 
         total_removed = 0
-        total_remapped = 0
+        groups_succeeded = 0
 
         for group in groups:
             entity_ids = list(group["entity_ids"])
@@ -833,71 +905,29 @@ class GraphStorageAdapter:
             if not duplicate_ids:
                 continue
 
+            # Build merged description (concatenate distinct, max 2000 chars)
+            distinct_descs = list(dict.fromkeys(d for d in descriptions if d))
+            merged_desc = " | ".join(distinct_descs)[:2000] if distinct_descs else None
+
             try:
                 async with self.pool.acquire() as conn:
                     async with conn.transaction():
-                        # 1. Remap relationships from duplicates → canonical
-                        for dup_id in duplicate_ids:
-                            remapped = await conn.execute(
-                                "UPDATE graph.relationships SET source_entity_id = $1 WHERE source_entity_id = $2",
-                                canonical_id,
-                                dup_id,
-                            )
-                            remapped2 = await conn.execute(
-                                "UPDATE graph.relationships SET target_entity_id = $1 WHERE target_entity_id = $2",
-                                canonical_id,
-                                dup_id,
-                            )
-                            total_remapped += _parse_command_count(remapped) + _parse_command_count(
-                                remapped2
-                            )
-
-                        # 2. Delete self-referencing relationships
-                        await conn.execute(
-                            "DELETE FROM graph.relationships WHERE source_entity_id = target_entity_id"
+                        removed = await self._merge_entity_group(
+                            conn, canonical_id, duplicate_ids, merged_description=merged_desc
                         )
-
-                        # 3. Deduplicate relationship edges (keep longest description)
-                        await conn.execute(
-                            """
-                            DELETE FROM graph.relationships r1
-                            USING graph.relationships r2
-                            WHERE r1.source_entity_id = r2.source_entity_id
-                              AND r1.target_entity_id = r2.target_entity_id
-                              AND r1.relationship_type = r2.relationship_type
-                              AND r1.relationship_id > r2.relationship_id
-                            """
-                        )
-
-                        # 4. Merge descriptions on canonical (concatenate distinct, max 2000 chars)
-                        distinct_descs = list(dict.fromkeys(d for d in descriptions if d))
-                        merged_desc = " | ".join(distinct_descs)[:2000] if distinct_descs else None
-                        await conn.execute(
-                            "UPDATE graph.entities SET description = $1, search_embedding = NULL WHERE entity_id = $2",
-                            merged_desc,
-                            canonical_id,
-                        )
-
-                        # 5. Delete duplicate entity rows
-                        if duplicate_ids:
-                            placeholders = ", ".join(f"${i + 1}" for i in range(len(duplicate_ids)))
-                            result = await conn.execute(
-                                f"DELETE FROM graph.entities WHERE entity_id IN ({placeholders})",
-                                *duplicate_ids,
-                            )
-                            total_removed += _parse_command_count(result)
+                        total_removed += removed
+                        groups_succeeded += 1
 
             except asyncpg.PostgresError as e:
                 logger.error(
                     f"Failed to merge exact duplicates for '{group['name']}' ({group['entity_type']}): {e}",
                     exc_info=True,
                 )
-                # Continue with next group — partial failure doesn't corrupt
+                # Continue with next group -- partial failure doesn't corrupt
 
         stats = {
-            "groups_merged": len(groups),
+            "groups_merged": groups_succeeded,
             "entities_removed": total_removed,
-            "relationships_remapped": total_remapped,
         }
         logger.info(f"Exact dedup complete: {stats}")
         return stats
@@ -918,7 +948,8 @@ class GraphStorageAdapter:
         """
         Merge semantically similar entities using embedding nearest-neighbor + LLM arbiter.
 
-        1. For each entity type, find pairs above similarity threshold via pgvector KNN
+        1. Find candidate pairs above similarity threshold via pgvector KNN
+           (same entity_type required, uses CROSS JOIN LATERAL for batch NN)
         2. Ask LLM to confirm each candidate pair
         3. Build Union-Find from confirmed pairs (transitive closure)
         4. Merge each group using same logic as exact dedup
@@ -936,13 +967,20 @@ class GraphStorageAdapter:
             logger.info("No LLM provider for semantic dedup — skipping")
             return {"candidates_found": 0, "llm_confirmed": 0, "entities_removed": 0}
 
-        # Load dedup prompt
+        # Load dedup prompt (try relative to source first, then cwd)
         prompt_path = (
             Path(__file__).resolve().parent.parent.parent / "prompts" / "graph_entity_dedup.txt"
         )
         if not prompt_path.exists():
-            logger.warning(f"Dedup prompt not found at {prompt_path}, skipping semantic dedup")
-            return {"candidates_found": 0, "llm_confirmed": 0, "entities_removed": 0}
+            prompt_path = Path("prompts") / "graph_entity_dedup.txt"
+        if not prompt_path.exists():
+            logger.error(f"Dedup prompt not found at {prompt_path}, skipping semantic dedup")
+            return {
+                "candidates_found": 0,
+                "llm_confirmed": 0,
+                "entities_removed": 0,
+                "error": f"Prompt file not found: {prompt_path}",
+            }
         prompt_template = prompt_path.read_text(encoding="utf-8")
 
         # Find candidate pairs via pgvector KNN (batch nearest-neighbor)
@@ -1021,7 +1059,8 @@ class GraphStorageAdapter:
                 raise
             except Exception as e:
                 logger.warning(
-                    f"LLM arbitration failed for '{cand['name1']}' vs '{cand['name2']}': {e}"
+                    f"LLM arbitration failed for '{cand['name1']}' vs '{cand['name2']}': {e}",
+                    exc_info=True,
                 )
 
         if not confirmed_pairs:
@@ -1066,8 +1105,9 @@ class GraphStorageAdapter:
         for root in merge_groups:
             merge_groups[root] = sorted(set(merge_groups[root]))
 
-        # Merge each group (reuse exact dedup merge logic)
+        # Merge each group using shared merge logic
         total_removed = 0
+        groups_succeeded = 0
         for canonical_id, group_ids in merge_groups.items():
             duplicate_ids = [eid for eid in group_ids if eid != canonical_id]
             if not duplicate_ids:
@@ -1076,44 +1116,9 @@ class GraphStorageAdapter:
             try:
                 async with self.pool.acquire() as conn:
                     async with conn.transaction():
-                        for dup_id in duplicate_ids:
-                            await conn.execute(
-                                "UPDATE graph.relationships SET source_entity_id = $1 WHERE source_entity_id = $2",
-                                canonical_id,
-                                dup_id,
-                            )
-                            await conn.execute(
-                                "UPDATE graph.relationships SET target_entity_id = $1 WHERE target_entity_id = $2",
-                                canonical_id,
-                                dup_id,
-                            )
-
-                        await conn.execute(
-                            "DELETE FROM graph.relationships WHERE source_entity_id = target_entity_id"
-                        )
-                        await conn.execute(
-                            """
-                            DELETE FROM graph.relationships r1
-                            USING graph.relationships r2
-                            WHERE r1.source_entity_id = r2.source_entity_id
-                              AND r1.target_entity_id = r2.target_entity_id
-                              AND r1.relationship_type = r2.relationship_type
-                              AND r1.relationship_id > r2.relationship_id
-                            """
-                        )
-
-                        # Clear embedding on canonical (needs re-embed after merge)
-                        await conn.execute(
-                            "UPDATE graph.entities SET search_embedding = NULL WHERE entity_id = $1",
-                            canonical_id,
-                        )
-
-                        placeholders = ", ".join(f"${i + 1}" for i in range(len(duplicate_ids)))
-                        result = await conn.execute(
-                            f"DELETE FROM graph.entities WHERE entity_id IN ({placeholders})",
-                            *duplicate_ids,
-                        )
-                        total_removed += _parse_command_count(result)
+                        removed = await self._merge_entity_group(conn, canonical_id, duplicate_ids)
+                        total_removed += removed
+                        groups_succeeded += 1
 
             except asyncpg.PostgresError as e:
                 logger.error(
@@ -1123,7 +1128,7 @@ class GraphStorageAdapter:
         stats = {
             "candidates_found": len(candidates),
             "llm_confirmed": len(confirmed_pairs),
-            "groups_merged": len(merge_groups),
+            "groups_merged": groups_succeeded,
             "entities_removed": total_removed,
         }
         logger.info(f"Semantic dedup complete: {stats}")

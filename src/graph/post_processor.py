@@ -10,8 +10,6 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-import numpy as np
-
 from .storage import GraphStorageAdapter, _vec_to_pg
 
 if TYPE_CHECKING:
@@ -83,12 +81,12 @@ async def rebuild_graph_communities(
             stats["semantic_dedup"] = {"error": str(e)}
 
         # Phase 4: Re-embed merged entities (canonical got embedding cleared)
-        if graph_embedder:
-            try:
-                re_embed_count = await _embed_new_entities(graph_storage, graph_embedder)
-                stats["entities_re_embedded"] = re_embed_count
-            except Exception as e:
-                logger.error(f"Re-embedding failed, continuing: {e}", exc_info=True)
+        try:
+            re_embed_count = await _embed_new_entities(graph_storage, graph_embedder)
+            stats["entities_re_embedded"] = re_embed_count
+        except Exception as e:
+            logger.error(f"Re-embedding failed, continuing: {e}", exc_info=True)
+            stats["entities_re_embedded"] = {"error": str(e)}
 
     # Phase 5: Community detection
     try:
@@ -128,8 +126,8 @@ async def rebuild_graph_communities(
         model_name = None
         try:
             model_name = community_summarizer.provider.get_model_name()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Could not get summarizer model name: {e}")
 
         summarized = 0
         for comm in communities:
@@ -159,7 +157,7 @@ async def rebuild_graph_communities(
                 else:
                     comm["title"] = f"Community L{comm['level']}"
             except Exception as e:
-                logger.warning(f"Community summarization failed: {e}")
+                logger.warning(f"Community summarization failed: {e}", exc_info=True)
                 comm["title"] = f"Community L{comm['level']}"
 
         stats["communities_summarized"] = summarized
@@ -193,44 +191,19 @@ async def _embed_new_entities(
     batch_size: int = 256,
 ) -> int:
     """Embed entities that have NULL search_embedding."""
-    await graph_storage._ensure_pool()
-
-    async with graph_storage.pool.acquire() as conn:
-        rows = await conn.fetch(
+    return await _embed_rows(
+        graph_storage=graph_storage,
+        graph_embedder=graph_embedder,
+        fetch_sql=(
             "SELECT entity_id, name, entity_type, coalesce(description, '') AS description "
             "FROM graph.entities WHERE search_embedding IS NULL ORDER BY entity_id"
-        )
-
-    if not rows:
-        logger.info("No entities need embedding")
-        return 0
-
-    logger.info(f"Embedding {len(rows)} entities")
-
-    # Build text representations
-    texts = [f"{r['name']} ({r['entity_type']}): {r['description']}" for r in rows]
-    entity_ids = [r["entity_id"] for r in rows]
-
-    # Batch encode
-    embeddings = await asyncio.to_thread(graph_embedder.encode_passages, texts, batch_size)
-
-    # Store embeddings in batches
-    total_stored = 0
-    for i in range(0, len(entity_ids), batch_size):
-        batch_ids = entity_ids[i : i + batch_size]
-        batch_vecs = embeddings[i : i + batch_size]
-
-        records = [(eid, _vec_to_pg(vec)) for eid, vec in zip(batch_ids, batch_vecs)]
-
-        async with graph_storage.pool.acquire() as conn:
-            await conn.executemany(
-                "UPDATE graph.entities SET search_embedding = $2::vector WHERE entity_id = $1",
-                records,
-            )
-        total_stored += len(records)
-
-    logger.info(f"Embedded {total_stored} entities")
-    return total_stored
+        ),
+        id_column="entity_id",
+        text_fn=lambda r: f"{r['name']} ({r['entity_type']}): {r['description']}",
+        update_sql="UPDATE graph.entities SET search_embedding = $2::vector WHERE entity_id = $1",
+        label="entities",
+        batch_size=batch_size,
+    )
 
 
 async def _embed_new_communities(
@@ -239,38 +212,61 @@ async def _embed_new_communities(
     batch_size: int = 256,
 ) -> int:
     """Embed communities that have NULL search_embedding."""
+    return await _embed_rows(
+        graph_storage=graph_storage,
+        graph_embedder=graph_embedder,
+        fetch_sql=(
+            "SELECT community_id, coalesce(title, '') AS title, coalesce(summary, '') AS summary "
+            "FROM graph.communities WHERE search_embedding IS NULL ORDER BY community_id"
+        ),
+        id_column="community_id",
+        text_fn=lambda r: f"{r['title']}: {r['summary']}",
+        update_sql="UPDATE graph.communities SET search_embedding = $2::vector WHERE community_id = $1",
+        label="communities",
+        batch_size=batch_size,
+    )
+
+
+async def _embed_rows(
+    graph_storage: GraphStorageAdapter,
+    graph_embedder: "GraphEmbedder",
+    fetch_sql: str,
+    id_column: str,
+    text_fn,
+    update_sql: str,
+    label: str,
+    batch_size: int = 256,
+) -> int:
+    """Fetch rows with NULL embeddings, encode them, and store the vectors.
+
+    Shared implementation for entity and community embedding.
+    """
     await graph_storage._ensure_pool()
 
     async with graph_storage.pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT community_id, coalesce(title, '') AS title, coalesce(summary, '') AS summary "
-            "FROM graph.communities WHERE search_embedding IS NULL ORDER BY community_id"
-        )
+        rows = await conn.fetch(fetch_sql)
 
     if not rows:
-        logger.info("No communities need embedding")
+        logger.info(f"No {label} need embedding")
         return 0
 
-    logger.info(f"Embedding {len(rows)} communities")
+    logger.info(f"Embedding {len(rows)} {label}")
 
-    texts = [f"{r['title']}: {r['summary']}" for r in rows]
-    community_ids = [r["community_id"] for r in rows]
+    texts = [text_fn(r) for r in rows]
+    row_ids = [r[id_column] for r in rows]
 
     embeddings = await asyncio.to_thread(graph_embedder.encode_passages, texts, batch_size)
 
     total_stored = 0
-    for i in range(0, len(community_ids), batch_size):
-        batch_ids = community_ids[i : i + batch_size]
+    for i in range(0, len(row_ids), batch_size):
+        batch_ids = row_ids[i : i + batch_size]
         batch_vecs = embeddings[i : i + batch_size]
 
-        records = [(cid, _vec_to_pg(vec)) for cid, vec in zip(batch_ids, batch_vecs)]
+        records = [(rid, _vec_to_pg(vec)) for rid, vec in zip(batch_ids, batch_vecs)]
 
         async with graph_storage.pool.acquire() as conn:
-            await conn.executemany(
-                "UPDATE graph.communities SET search_embedding = $2::vector WHERE community_id = $1",
-                records,
-            )
+            await conn.executemany(update_sql, records)
         total_stored += len(records)
 
-    logger.info(f"Embedded {total_stored} communities")
+    logger.info(f"Embedded {total_stored} {label}")
     return total_stored
