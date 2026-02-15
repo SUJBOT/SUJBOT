@@ -457,6 +457,7 @@ def _normalize_text_diacritics(text: str) -> str:
         'ˇn': 'ň', 'ˇN': 'Ň',
         'ˇd': 'ď', 'ˇD': 'Ď',
         'ˇt': 'ť', 'ˇT': 'Ť',
+        '˚u': 'ů', 
     }
     for wrong, correct in caron_map.items():
         text = text.replace(wrong, correct)

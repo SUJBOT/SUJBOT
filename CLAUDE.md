@@ -26,6 +26,90 @@ uv run python scripts/langsmith_eval.py \
 
 Other: `--limit 5` (quick test), `--upload-only`, `--judge-model openai:gpt-4o-mini`
 
+## Docker Management
+
+> **YOUR ACCESS:** You can ONLY use `./scripts/dev.sh` for your development environment.
+> Database and production management is handled by prusemic (docker group admin).
+
+**SUJBOT uses a two-tier Docker architecture:**
+
+1. **System Docker** (shared databases) - managed by prusemic
+2. **Rootless Docker** (per-user development) - YOUR environment
+
+### Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    HOST (147.32.8.174)                          │
+├─────────────────────────────────────────────────────────────────┤
+│  SYSTEM DOCKER (managed by prusemic)                            │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐                       │
+│  │ postgres │  │  neo4j   │  │  redis   │  ← Shared databases   │
+│  │ :5432    │  │ :7687    │  │ :6379    │    (always running)   │
+│  └──────────┘  └──────────┘  └──────────┘                       │
+│                                                                  │
+│  PRODUCTION (managed by prusemic)                               │
+│  nginx:80,443 → frontend → backend                              │
+├─────────────────────────────────────────────────────────────────┤
+│  ROOTLESS DOCKER (per-user, YOUR environment)                   │
+│  User francji1 (UID 1000): backend:10002, frontend:10003        │
+│  User prusemic (UID 1001): backend:10102, frontend:10103        │
+│  User matyas (UID 1004): backend:10402, frontend:10403          │
+│  User vendula (UID 1005): backend:10502, frontend:10503         │
+│  └── DATABASE_URL=postgresql://...@147.32.8.174:5432            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Your Development Commands
+
+```bash
+./scripts/dev.sh up       # Start YOUR development environment
+./scripts/dev.sh down     # Stop YOUR development environment
+./scripts/dev.sh logs     # View YOUR logs
+./scripts/dev.sh status   # YOUR container status
+./scripts/dev.sh ports    # Show YOUR allocated ports
+./scripts/dev.sh build    # Rebuild YOUR containers
+```
+
+### Your Port Allocation
+
+| User | UID | Port Range | Backend | Frontend | Nginx |
+|------|-----|------------|---------|----------|-------|
+| francji1 | 1000 | 10000-10099 | 10002 | 10003 | 10000 |
+| prusemic | 1001 | 10100-10199 | 10102 | 10103 | 10100 |
+| matyas | 1004 | 10400-10499 | 10402 | 10403 | 10400 |
+| vendula | 1005 | 10500-10599 | 10502 | 10503 | 10500 |
+
+### Quick Start
+
+```bash
+# Start your development (databases are already running)
+./scripts/dev.sh up
+
+# View your logs
+./scripts/dev.sh logs
+
+# Check your ports
+./scripts/dev.sh ports
+```
+
+### Troubleshooting
+
+If Docker commands fail, make sure your shell has the correct environment:
+```bash
+source ~/.bashrc
+docker info | grep "Docker Root Dir"  # Should show ~/.local/share/docker
+```
+
+### Docker Compose Files
+
+| File | Purpose |
+|------|---------|
+| `docker-compose.yml` | Shared databases (managed by prusemic) |
+| `docker-compose.prod.yml` | Production (managed by prusemic) |
+| `docker-compose.dev.yml` | YOUR development stack |
+
+
 ## Common Commands
 
 ```bash

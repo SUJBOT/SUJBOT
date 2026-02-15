@@ -133,6 +133,7 @@ results_all/
 extraction_dataset/*.json
 !extraction_dataset/*_gt.json
 !extraction_dataset/.gitkeep
+extraction_dataset/*.xlsx
 
 # -----------------------------------------------------------------------------
 # Serialized Data (embeddings, models)
