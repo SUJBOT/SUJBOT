@@ -8,6 +8,8 @@
     "title": "Dostupné dokumenty",
     "loadError": "Nepodařilo se načíst dokumenty",
     "noDocuments": "Žádné dokumenty nejsou k dispozici",
+    "legislation": "Legislativa",
+    "documentation": "Dokumentace",
     "upload": "Nahrát PDF",
     "uploading": "Nahrávám...",
     "rendering": "Renderuji stránky...",

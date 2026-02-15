@@ -104,7 +104,6 @@ class AgentAdapter:
             "agent_tools": full_config.get("agent_tools", {}),
             "single_agent": full_config.get("single_agent", {}),
             "multi_agent": full_config.get("multi_agent", {}),  # For LangSmith config
-            "architecture": full_config.get("architecture", "ocr"),
             "vl": full_config.get("vl", {}),
         }
 
@@ -403,19 +402,6 @@ class AgentAdapter:
                     "details": {},
                     "degraded_components": [],
                 }
-
-            # Check vector store (skip for PostgreSQL backend)
-            storage_backend = os.getenv("STORAGE_BACKEND", "faiss")
-
-            if storage_backend == "faiss":
-                vector_store_exists = self.config.vector_store_path.exists()
-                if not vector_store_exists:
-                    return {
-                        "status": "error",
-                        "message": "Vector store not found",
-                        "details": {"vector_store_path": str(self.config.vector_store_path)},
-                        "degraded_components": [],
-                    }
 
             # Check API keys
             has_anthropic_key = bool(self.config.anthropic_api_key)

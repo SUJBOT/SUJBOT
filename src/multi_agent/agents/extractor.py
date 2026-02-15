@@ -2,9 +2,9 @@
 Extractor Agent - Document retrieval and information extraction.
 
 Responsibilities:
-1. Hybrid search for document retrieval (BM25 + Dense + RRF)
-2. Context expansion around relevant chunks
-3. Document metadata and summary retrieval
+1. VL page retrieval via cosine similarity
+2. Context expansion around relevant pages
+3. Document metadata retrieval
 4. Citation preservation and provenance tracking
 """
 
@@ -24,8 +24,8 @@ class ExtractorAgent(BaseAgent):
     """
     Extractor Agent - Retrieves documents and chunks from vector store.
 
-    Uses hybrid search (BM25 + Dense + RRF) for semantic retrieval,
-    expands context around relevant chunks, and preserves full citations.
+    Uses VL page retrieval for semantic search,
+    expands context around relevant pages, and preserves full citations.
     """
 
     def __init__(self, config):

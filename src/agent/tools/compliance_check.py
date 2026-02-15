@@ -3,7 +3,7 @@ Compliance Check Tool — regulatory requirement assessment.
 
 Searches knowledge graph communities for compliance requirements
 (OBLIGATION, PROHIBITION, PERMISSION, REQUIREMENT), gathers evidence
-from the document corpus (VL or OCR mode), and uses an LLM to assess
+from the document corpus (page images via VL retriever), and uses an LLM to assess
 each requirement's compliance status. Falls back to UNCLEAR status
 when no LLM provider is configured.
 """
@@ -255,7 +255,7 @@ class ComplianceCheckTool(BaseTool):
             requirement, evidence, evidence_source, assessment_prompt
         )
 
-        # Build finding — evidence field is page refs for VL, truncated text for OCR
+        # Build finding — evidence field is page references
         if isinstance(evidence, list):
             evidence_display = ", ".join(
                 f"{img['document_id']} p.{img['page_number']}" for img in evidence
@@ -282,13 +282,7 @@ class ComplianceCheckTool(BaseTool):
         return finding
 
     def _search_evidence(self, query: str, document_id: Optional[str]) -> tuple:
-        """Search for evidence. Returns (page_images_list, source) in VL mode, (text, source) in OCR."""
-        if self._is_vl_mode():
-            return self._search_evidence_vl(query, document_id)
-        return self._search_evidence_ocr(query, document_id)
-
-    def _search_evidence_vl(self, query: str, document_id: Optional[str]) -> tuple:
-        """VL mode: search page embeddings and load page images for multimodal LLM.
+        """Search page embeddings and load page images for multimodal LLM.
 
         When no document_id is specified, automatically filters to 'documentation'
         category — requirements already come from legislation (via the knowledge graph),
@@ -329,64 +323,12 @@ class ComplianceCheckTool(BaseTool):
                     "VL evidence search found %d results but all page images failed to load",
                     len(results),
                 )
+                return (None, "All page images failed to load")
 
             return (page_images, source)
         except Exception as e:
             logger.error(f"VL evidence search failed: {e}", exc_info=True)
             return (None, f"VL evidence search failed: {e}")
-
-    def _search_evidence_ocr(self, query: str, document_id: Optional[str]) -> tuple:
-        """OCR mode: search text chunks via vector store.
-
-        Note: Unlike VL mode, OCR does not auto-filter by category. This may return
-        chunks from legislation documents, which could match the requirement text itself.
-
-        Returns:
-            (text, source) on success, ("", None) when no results,
-            (None, error_message) when search fails.
-        """
-        try:
-            results = self.vector_store.similarity_search(query, k=3)
-            if not results:
-                return ("", None)
-
-            # Filter by document_id if specified
-            if document_id:
-                results = [
-                    r
-                    for r in results
-                    if (
-                        r.get("document_id", "")
-                        if isinstance(r, dict)
-                        else getattr(r, "document_id", "")
-                    )
-                    == document_id
-                ]
-
-            if not results:
-                return ("", None)
-
-            # Extract text content
-            texts = []
-            source = None
-            for r in results:
-                if isinstance(r, dict):
-                    content = r.get("content", r.get("raw_content", ""))
-                    chunk_id = r.get("chunk_id", "")
-                else:
-                    content = getattr(r, "page_content", getattr(r, "content", ""))
-                    chunk_id = getattr(r, "chunk_id", "")
-
-                if content:
-                    texts.append(content)
-                if source is None and chunk_id:
-                    source = chunk_id
-
-            evidence = "\n\n".join(texts) if texts else ""
-            return (evidence, source)
-        except Exception as e:
-            logger.error(f"OCR evidence search failed: {e}", exc_info=True)
-            return (None, f"OCR evidence search failed: {e}")
 
     def _run_assessment(
         self,
@@ -395,7 +337,7 @@ class ComplianceCheckTool(BaseTool):
         evidence_source: Optional[str],
         assessment_prompt: Optional[str],
     ) -> tuple:
-        """Run LLM assessment. Returns UNCLEAR fallback if LLM or prompt is unavailable. Evidence is images (list) or text (str)."""
+        """Run LLM assessment. Returns UNCLEAR fallback if LLM or prompt is unavailable."""
         if not self.llm_provider:
             return ("UNCLEAR", 0.25, "LLM provider not available for assessment")
 
@@ -420,7 +362,7 @@ class ComplianceCheckTool(BaseTool):
             .replace("{evidence_text}", evidence_note)
         )
 
-        # Build message content — multimodal for VL, text-only for OCR
+        # Build multimodal message content with page images
         if isinstance(evidence, list) and evidence:
             content: List[Dict[str, Any]] = []
             for img in evidence:

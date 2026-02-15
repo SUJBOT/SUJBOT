@@ -5,7 +5,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { FileText, FolderOpen, X, Loader2, RefreshCw, Upload, CheckCircle, AlertCircle } from 'lucide-react';
+import { FolderOpen, X, Loader2, RefreshCw, Upload, CheckCircle, AlertCircle, Scale, BookOpen } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../design-system/utils/cn';
 import { apiService } from '../../services/api';
@@ -284,35 +284,79 @@ export function DocumentBrowser({ isOpen, onClose }: DocumentBrowserProps) {
           </div>
         )}
 
-        {!isLoading && !error && documents.length > 0 && (
-          <div className="p-2">
-            {documents.map((doc) => (
-              <button
-                key={doc.document_id}
-                onClick={() => handleSelectDocument(doc)}
-                className={cn(
-                  'w-full flex items-center gap-3 px-3 py-2.5',
-                  'hover:bg-accent-100 dark:hover:bg-accent-800',
-                  'rounded-lg transition-colors',
-                  'text-left group'
-                )}
-              >
-                <FileText
-                  size={18}
-                  className="text-accent-400 group-hover:text-accent-600 dark:group-hover:text-accent-300 transition-colors flex-shrink-0"
+        {!isLoading && !error && documents.length > 0 && (() => {
+          const legislation = documents.filter(d => d.category === 'legislation');
+          const documentation = documents.filter(d => d.category !== 'legislation');
+
+          const renderDocItem = (doc: DocumentInfo) => (
+            <button
+              key={doc.document_id}
+              onClick={() => handleSelectDocument(doc)}
+              className={cn(
+                'w-full flex items-center gap-3 px-3 py-2',
+                'hover:bg-accent-100 dark:hover:bg-accent-800',
+                'rounded-lg transition-colors',
+                'text-left group'
+              )}
+            >
+              {doc.category === 'legislation' ? (
+                <Scale
+                  size={16}
+                  className="text-amber-500 dark:text-amber-400 flex-shrink-0"
                 />
-                <div className="flex-1 min-w-0">
-                  <div className="truncate font-medium text-sm text-accent-800 dark:text-accent-200">
-                    {doc.display_name}
-                  </div>
-                  <div className="text-xs text-accent-500 dark:text-accent-400">
-                    {formatSize(doc.size_bytes)}
-                  </div>
+              ) : (
+                <BookOpen
+                  size={16}
+                  className="text-blue-500 dark:text-blue-400 flex-shrink-0"
+                />
+              )}
+              <div className="flex-1 min-w-0">
+                <div className="truncate font-medium text-sm text-accent-800 dark:text-accent-200">
+                  {doc.display_name}
                 </div>
-              </button>
-            ))}
-          </div>
-        )}
+                <div className="text-xs text-accent-500 dark:text-accent-400">
+                  {formatSize(doc.size_bytes)}
+                </div>
+              </div>
+            </button>
+          );
+
+          return (
+            <div className="p-2 space-y-1">
+              {legislation.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 px-3 pt-1 pb-1.5">
+                    <Scale size={14} className="text-amber-500 dark:text-amber-400" />
+                    <span className="text-xs font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400">
+                      {t('documentBrowser.legislation')}
+                    </span>
+                    <span className="text-xs text-accent-400 dark:text-accent-500">
+                      ({legislation.length})
+                    </span>
+                  </div>
+                  {legislation.map(renderDocItem)}
+                </div>
+              )}
+              {legislation.length > 0 && documentation.length > 0 && (
+                <div className="border-t border-accent-200 dark:border-accent-700 my-1" />
+              )}
+              {documentation.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 px-3 pt-1 pb-1.5">
+                    <BookOpen size={14} className="text-blue-500 dark:text-blue-400" />
+                    <span className="text-xs font-semibold uppercase tracking-wider text-blue-600 dark:text-blue-400">
+                      {t('documentBrowser.documentation')}
+                    </span>
+                    <span className="text-xs text-accent-400 dark:text-accent-500">
+                      ({documentation.length})
+                    </span>
+                  </div>
+                  {documentation.map(renderDocItem)}
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
     </div>
   );

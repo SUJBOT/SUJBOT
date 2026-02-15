@@ -19,9 +19,6 @@ from typing import List, Literal, Optional
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-# Architecture mode
-ArchitectureMode = Literal["ocr", "vl"]
-
 # Type alias for providers
 LLMProvider = Literal["anthropic", "openai", "google", "deepinfra"]
 EmbeddingProvider = Literal["openai", "deepinfra", "voyage", "huggingface", "jina"]
@@ -230,21 +227,6 @@ class ExtractionConfig(BaseModel):
     fallback_to_unstructured: bool = Field(
         ...,
         description="Fallback to Unstructured if Gemini fails"
-    )
-
-    # OCR settings
-    enable_ocr: bool = Field(..., description="Enable OCR processing")
-    ocr_engine: Literal["tesseract", "rapidocr"] = Field(
-        ...,
-        description="OCR engine: 'tesseract' (Czech support) or 'rapidocr' (3-5x faster)"
-    )
-    ocr_language: List[str] = Field(
-        ...,
-        description="OCR languages (e.g., ['ces', 'eng'])"
-    )
-    ocr_recognition: Literal["accurate", "fast"] = Field(
-        ...,
-        description="OCR recognition mode"
     )
 
     # Table extraction
@@ -590,9 +572,9 @@ class AgentConfig(BaseModel):
         description="Keep last N messages with full tool context",
         ge=1
     )
-    query_expansion_model: str = Field(
-        ...,
-        description="Query expansion LLM model (gpt-4o-mini recommended)"
+    query_expansion_model: Optional[str] = Field(
+        default=None,
+        description="[DEPRECATED] Query expansion LLM model (OCR-only, unused in VL mode)"
     )
 
 
@@ -605,19 +587,6 @@ class AgentToolConfig(BaseModel):
         ge=1,
         le=100
     )
-    enable_reranking: bool = Field(
-        ...,
-        description="Enable cross-encoder reranking (+25% accuracy)"
-    )
-    reranker_candidates: int = Field(
-        ...,
-        description="Number of candidates before reranking (must be >= default_k)",
-        ge=1
-    )
-    reranker_model: Literal["bge-reranker-large", "bge-reranker-base", "ms-marco-mini"] = Field(
-        ...,
-        description="Reranker model"
-    )
     max_document_compare: int = Field(
         ...,
         description="Max documents to compare",
@@ -629,21 +598,30 @@ class AgentToolConfig(BaseModel):
         ge=0.0,
         le=1.0
     )
-    context_window: int = Field(
-        ...,
-        description="Context window for expansion (chunks before/after)",
-        ge=0
+    # Deprecated OCR fields — kept Optional for backward compat with existing config.json
+    enable_reranking: Optional[bool] = Field(
+        default=None,
+        description="[DEPRECATED] OCR-only reranking"
     )
-    lazy_load_reranker: bool = Field(
-        ...,
-        description="Lazy load reranker (speeds up startup)"
+    reranker_candidates: Optional[int] = Field(
+        default=None,
+        description="[DEPRECATED] OCR-only reranker candidates"
     )
-    cache_embeddings: bool = Field(..., description="Cache embeddings")
-    hyde_num_hypotheses: int = Field(
-        ...,
-        description="Number of hypothetical documents for HyDE (multi-hypothesis averaging)",
-        ge=1,
-        le=10
+    reranker_model: Optional[str] = Field(
+        default=None,
+        description="[DEPRECATED] OCR-only reranker model"
+    )
+    context_window: Optional[int] = Field(
+        default=None,
+        description="[DEPRECATED] OCR-only context window"
+    )
+    lazy_load_reranker: Optional[bool] = Field(
+        default=None,
+        description="[DEPRECATED] OCR-only lazy reranker loading"
+    )
+    cache_embeddings: Optional[bool] = Field(
+        default=None,
+        description="[DEPRECATED] OCR-only embedding cache"
     )
 
 
@@ -1061,30 +1039,46 @@ class RootConfig(BaseModel):
         extra="allow",  # Allow unknown fields (for backwards compatibility with multi_agent, storage, etc.)
     )
 
-    architecture: Optional[ArchitectureMode] = Field(
-        default="ocr",
-        description="RAG architecture mode: 'ocr' (text chunking) or 'vl' (vision-language page images)"
-    )
     vl: Optional[VLConfig] = Field(
         default=None,
-        description="Vision-Language configuration (only used when architecture='vl')"
+        description="Vision-Language configuration"
     )
     api_keys: APIKeysConfig = Field(default_factory=APIKeysConfig)
     models: ModelsConfig
-    extraction: ExtractionConfig
-    unstructured: UnstructuredConfig
-    hierarchy_detection: HierarchyDetectionConfig
-    summarization: SummarizationConfig
-    context_generation: ContextGenerationConfig
-    chunking: ChunkingConfig
-    embedding: EmbeddingConfig
-    clustering: ClusteringConfig
-    hybrid_search: HybridSearchConfig
+    extraction: Optional[ExtractionConfig] = Field(
+        default=None, description="[DEPRECATED] OCR extraction config"
+    )
+    unstructured: Optional[UnstructuredConfig] = Field(
+        default=None, description="[DEPRECATED] Unstructured.io config"
+    )
+    hierarchy_detection: Optional[HierarchyDetectionConfig] = Field(
+        default=None, description="[DEPRECATED] Hierarchy detection config"
+    )
+    summarization: Optional[SummarizationConfig] = Field(
+        default=None, description="[DEPRECATED] Summarization config"
+    )
+    context_generation: Optional[ContextGenerationConfig] = Field(
+        default=None, description="[DEPRECATED] Contextual Retrieval config"
+    )
+    chunking: Optional[ChunkingConfig] = Field(
+        default=None, description="[DEPRECATED] Chunking config"
+    )
+    embedding: Optional[EmbeddingConfig] = Field(
+        default=None, description="[DEPRECATED] OCR embedding config"
+    )
+    clustering: Optional[ClusteringConfig] = Field(
+        default=None, description="[DEPRECATED] Clustering config"
+    )
+    hybrid_search: Optional[HybridSearchConfig] = Field(
+        default=None, description="[DEPRECATED] Hybrid search config"
+    )
     agent: AgentConfig
     agent_tools: AgentToolConfig
     cli: CLIConfig
     pipeline: PipelineConfig
-    indexing: IndexingConfig = Field(default_factory=IndexingConfig)
+    indexing: Optional[IndexingConfig] = Field(
+        default=None, description="[DEPRECATED] OCR indexing config"
+    )
 
     # SSOT Configuration sections (optional for backwards compatibility)
     model_registry: Optional[ModelRegistryConfig] = Field(
@@ -1127,16 +1121,6 @@ class RootConfig(BaseModel):
         ]
 
         return any(pattern in value.upper() for pattern in PLACEHOLDER_PATTERNS)
-
-    @model_validator(mode="after")
-    def validate_architecture_config(self) -> "RootConfig":
-        """Validate architecture-specific config is present."""
-        if self.architecture == "vl" and self.vl is None:
-            raise ValueError(
-                "architecture is set to 'vl' but 'vl' configuration section is missing. "
-                "Add a 'vl' section to config.json or set architecture='ocr'."
-            )
-        return self
 
     @model_validator(mode="after")
     def validate_api_keys(self) -> "RootConfig":

@@ -134,8 +134,6 @@ PRICING = {
         "meta-llama/Meta-Llama-3.1-8B-Instruct": {"input": 0.03, "output": 0.05},
         "llama-70b": {"input": 0.40, "output": 0.40},
         # Embedding models
-        "Qwen/Qwen3-Embedding-8B": {"input": 0.03, "output": 0.0},
-        "qwen3-embedding-8b": {"input": 0.03, "output": 0.0},
         "BAAI/bge-m3": {"input": 0.01, "output": 0.0},
         "bge-m3": {"input": 0.01, "output": 0.0},
         "BAAI/bge-large-en-v1.5": {"input": 0.01, "output": 0.0},

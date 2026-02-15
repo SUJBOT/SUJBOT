@@ -153,37 +153,27 @@ class BaseTool(ABC):
     detailed_help: str = ""  # Detailed help text (for get_tool_help)
     input_schema: type[ToolInput] = ToolInput
 
-    # Metadata flags
-    requires_reranker: bool = False  # Requires reranker
-
     def __init__(
         self,
         vector_store: Any,
-        embedder: Any,
-        reranker: Any = None,
-        context_assembler: Any = None,
         llm_provider: Any = None,
         config: Optional[Any] = None,
         vl_retriever: Any = None,
         page_store: Any = None,
+        **kwargs,
     ):
         """
         Initialize tool with dependencies.
 
         Args:
-            vector_store: Vector store adapter
-            embedder: Embedding generator
-            reranker: Reranker (optional)
-            context_assembler: Context assembler (optional)
-            llm_provider: LLM provider for synthesis/HyDE (optional)
+            vector_store: Vector store adapter (PostgreSQL)
+            llm_provider: LLM provider for compliance checks (optional)
             config: Tool configuration (optional)
-            vl_retriever: VL retriever for vision-language mode (optional)
-            page_store: Page image store for VL mode (optional)
+            vl_retriever: VL retriever for page search (optional)
+            page_store: Page image store (optional)
+            **kwargs: Ignored (backward compat for embedder/reranker/context_assembler)
         """
         self.vector_store = vector_store
-        self.embedder = embedder
-        self.reranker = reranker
-        self.context_assembler = context_assembler
         self.llm_provider = llm_provider
         self.config = config or {}
         self.vl_retriever = vl_retriever
@@ -364,10 +354,6 @@ class BaseTool(ABC):
             "total_time_ms": round(self.total_time_ms, 2),
             "avg_time_ms": round(avg_time, 2),
         }
-
-    def _is_vl_mode(self) -> bool:
-        """Check if VL (Vision-Language) architecture is active."""
-        return self.vl_retriever is not None and self.page_store is not None
 
     def get_claude_sdk_definition(self) -> Dict[str, Any]:
         """

@@ -26,7 +26,7 @@ class SingleAgentRunner:
     Replaces MultiAgentRunner by:
     - Using one LLM call loop instead of orchestrator + specialist routing
     - Exposing ALL tools (search, expand_context, etc.) to one agent
-    - Loading system prompt: unified.txt (VL) or unified_ocr.txt (OCR)
+    - Loading system prompt from prompts/agents/unified.txt
     """
 
     def __init__(self, config: Dict[str, Any]):
@@ -84,76 +84,54 @@ class SingleAgentRunner:
             self.langsmith = None
 
     async def _initialize_tools(self) -> None:
-        """Initialize tool registry with all RAG components (vector store, embedder, VL components)."""
+        """Initialize tool registry with all RAG components (vector store, VL components)."""
         from ..agent.tools import get_registry
         from ..storage import load_vector_store_adapter
-        from ..embedding_generator import EmbeddingGenerator
         from ..agent.config import ToolConfig
         from ..agent.providers.factory import create_provider
-        from ..config import EmbeddingConfig
 
         storage_config = self.config.get("storage", {})
         backend = storage_config.get("backend", "postgresql")
 
-        # LLM provider for tools (OCR mode: HyDE/synthesis) — use cheap model
+        # LLM provider for tools — use cheap model
         tool_model = self.config.get("models", {}).get("llm_model", "gpt-4o-mini")
         try:
             self.llm_provider = create_provider(model=tool_model)
             logger.info(f"Tool LLM provider: {tool_model}")
         except Exception as e:
             logger.error(
-                "Tool LLM provider failed for %s: %s. HyDE search disabled — "
-                "expect degraded retrieval quality.",
+                "Tool LLM provider failed for %s: %s.",
                 tool_model,
                 e,
                 exc_info=True,
             )
             self.llm_provider = None
 
-        architecture = self.config.get("architecture", "vl")
+        # Vector store (PostgreSQL only)
+        if backend != "postgresql":
+            raise ValueError(
+                f"Storage backend '{backend}' is no longer supported. "
+                f"Only 'postgresql' is available."
+            )
 
-        # Vector store
-        if backend == "postgresql":
-            connection_string = os.getenv(
-                storage_config.get("postgresql", {}).get("connection_string_env", "DATABASE_URL")
-            )
-            if not connection_string:
-                raise ValueError("DATABASE_URL not set. Cannot initialize vector store.")
+        connection_string = os.getenv(
+            storage_config.get("postgresql", {}).get("connection_string_env", "DATABASE_URL")
+        )
+        if not connection_string:
+            raise ValueError("DATABASE_URL not set. Cannot initialize vector store.")
 
-            vector_store = await load_vector_store_adapter(
-                backend="postgresql",
-                connection_string=connection_string,
-                pool_size=storage_config.get("postgresql", {}).get("pool_size", 20),
-                dimensions=storage_config.get("postgresql", {}).get("dimensions", 4096),
-                architecture=architecture,
-            )
-        else:
-            vector_store_path = Path(self.config.get("vector_store_path", "vector_db"))
-            if not vector_store_path.exists():
-                raise ValueError(f"Vector store not found at {vector_store_path}")
-            vector_store = await load_vector_store_adapter(
-                backend="faiss", path=str(vector_store_path)
-            )
+        vector_store = await load_vector_store_adapter(
+            backend="postgresql",
+            connection_string=connection_string,
+            pool_size=storage_config.get("postgresql", {}).get("pool_size", 20),
+            dimensions=storage_config.get("postgresql", {}).get("dimensions", 2048),
+        )
 
         self.vector_store = vector_store
 
-        # Embedder
-        model_name = self.config.get("models", {}).get("embedding_model", "bge-m3")
-        model_provider = self.config.get("models", {}).get("embedding_provider", "huggingface")
-        embedding_config = EmbeddingConfig(
-            provider=model_provider,
-            model=model_name,
-            batch_size=64,
-            normalize=True,
-            enable_multi_layer=True,
-            cache_enabled=True,
-            cache_max_size=1000,
-        )
-        embedder = EmbeddingGenerator(embedding_config)
-
         # Graph storage (optional — initialized before ToolConfig so it can be passed in)
         graph_storage = None
-        if architecture == "vl" and hasattr(vector_store, "pool") and vector_store.pool:
+        if hasattr(vector_store, "pool") and vector_store.pool:
             try:
                 from ..graph import GraphEmbedder, GraphStorageAdapter
             except ImportError as e:
@@ -171,50 +149,53 @@ class SingleAgentRunner:
                 except Exception as e:
                     logger.error(f"Graph storage initialization failed: {e}", exc_info=True)
 
-        # Tool config
+        # Adaptive retrieval config
+        from ..retrieval.adaptive_k import AdaptiveKConfig
+
         agent_tools_config = self.config.get("agent_tools", {})
+        adaptive_raw = agent_tools_config.get("adaptive_retrieval", {})
+        adaptive_config = AdaptiveKConfig(
+            enabled=adaptive_raw.get("enabled", True),
+            method=adaptive_raw.get("method", "otsu"),
+            fetch_k=adaptive_raw.get("fetch_k", 20),
+            min_k=adaptive_raw.get("min_k", 1),
+            max_k=adaptive_raw.get("max_k", 10),
+            score_gap_threshold=adaptive_raw.get("score_gap_threshold", 0.05),
+            min_samples_for_adaptive=adaptive_raw.get("min_samples_for_adaptive", 3),
+        )
+
+        # Tool config
         tool_config = ToolConfig(
             graph_storage=graph_storage,
             default_k=agent_tools_config.get("default_k", 6),
-            enable_reranking=agent_tools_config.get("enable_reranking", False),
-            reranker_candidates=agent_tools_config.get("reranker_candidates", 50),
-            reranker_model=agent_tools_config.get("reranker_model", "bge-reranker-large"),
+            adaptive_retrieval=adaptive_config,
             max_document_compare=agent_tools_config.get("max_document_compare", 3),
             compliance_threshold=agent_tools_config.get("compliance_threshold", 0.7),
-            context_window=agent_tools_config.get("context_window", 2),
-            lazy_load_reranker=agent_tools_config.get("lazy_load_reranker", False),
-            cache_embeddings=agent_tools_config.get("cache_embeddings", True),
-            hyde_num_hypotheses=agent_tools_config.get("hyde_num_hypotheses", 3),
-            query_expansion_provider=agent_tools_config.get("query_expansion_provider", "openai"),
-            query_expansion_model=agent_tools_config.get("query_expansion_model", "gpt-4o-mini"),
         )
 
-        # VL components (optional)
+        # VL components
         vl_retriever = None
         page_store = None
 
-        if architecture == "vl":
-            try:
-                from ..vl import create_vl_components
+        try:
+            from ..vl import create_vl_components
 
-                vl_config = self.config.get("vl", {})
-                vl_retriever, page_store = create_vl_components(vl_config, vector_store)
-            except Exception as e:
-                logger.error(f"Failed to init VL components: {e}", exc_info=True)
-                raise AgentInitializationError(
-                    f"VL architecture was explicitly configured but initialization failed: {e}. "
-                    f"Fix VL config or switch to architecture='ocr' in config.json.",
-                    details={"phase": "vl_initialization", "architecture": "vl"},
-                    cause=e,
-                ) from e
+            vl_config = self.config.get("vl", {})
+            vl_retriever, page_store = create_vl_components(
+                vl_config, vector_store, adaptive_config=adaptive_config
+            )
+        except Exception as e:
+            logger.error(f"Failed to init VL components: {e}", exc_info=True)
+            raise AgentInitializationError(
+                f"VL initialization failed: {e}.",
+                details={"phase": "vl_initialization"},
+                cause=e,
+            ) from e
 
         # Initialize registry
         registry = get_registry()
         registry.initialize_tools(
             vector_store=vector_store,
-            embedder=embedder,
-            reranker=None,
-            context_assembler=None,
             llm_provider=self.llm_provider,
             config=tool_config,
             vl_retriever=vl_retriever,
@@ -225,22 +206,14 @@ class SingleAgentRunner:
         logger.info(f"Tool registry initialized: {total_tools} tools")
 
     def _load_system_prompt(self) -> None:
-        """Load system prompt based on architecture mode (VL or OCR)."""
-        architecture = self.config.get("architecture", "vl")
-        default_prompt = (
-            "prompts/agents/unified.txt"
-            if architecture == "vl"
-            else "prompts/agents/unified_ocr.txt"
-        )
-        prompt_file = self.single_agent_config.get("prompt_file", default_prompt)
+        """Load system prompt."""
+        prompt_file = self.single_agent_config.get("prompt_file", "prompts/agents/unified.txt")
         prompt_path = Path(prompt_file)
         if not prompt_path.exists():
             # Try relative to project root
             prompt_path = Path(__file__).parent.parent.parent / prompt_file
         if not prompt_path.exists():
-            raise FileNotFoundError(
-                f"System prompt not found: {prompt_file} (architecture={architecture})"
-            )
+            raise FileNotFoundError(f"System prompt not found: {prompt_file}")
 
         self.system_prompt = prompt_path.read_text(encoding="utf-8")
         logger.info(f"Loaded system prompt from {prompt_path} ({len(self.system_prompt)} chars)")
@@ -270,11 +243,23 @@ class SingleAgentRunner:
                 summary = f"All {len(available)} tools healthy"
                 healthy = True
 
+            # Track degraded components
+            degraded = []
+            if not self.llm_provider:
+                degraded.append("llm_provider (compliance_check will return UNCLEAR)")
+
+            # Check graph storage via tool config
+            from ..agent.tools import get_registry
+            reg = get_registry()
+            sample_tool = next(iter(reg._tools.values()), None)
+            if sample_tool and not getattr(getattr(sample_tool, "config", None), "graph_storage", None):
+                degraded.append("graph_storage (graph_search/graph_context/compliance_check unavailable)")
+
             return {
-                "healthy": healthy,
+                "healthy": healthy and not missing_critical,
                 "available_tools": available,
                 "unavailable_tools": unavailable,
-                "degraded_tools": [],
+                "degraded_tools": degraded,
                 "critical_missing": missing_critical,
                 "summary": summary,
                 "total_available": len(available),
@@ -635,8 +620,8 @@ class SingleAgentRunner:
                 "content": (
                     "Provide your FINAL answer now based on the information gathered. "
                     "Do NOT call any more tools. Use \\cite{id} citations for all facts, "
-                    "where id is the exact chunk_id or page_id from search results "
-                    "(e.g., \\cite{BZ_VR1_p003} for VL page results, \\cite{BZ_VR1_L3_5} for text chunks)."
+                    "where id is the exact page_id from search results "
+                    "(e.g., \\cite{BZ_VR1_p003})."
                 ),
             }
         ]

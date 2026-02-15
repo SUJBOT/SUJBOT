@@ -31,12 +31,9 @@ Other: `--limit 5` (quick test), `--upload-only`, `--judge-model openai:gpt-4o-m
 ```bash
 # Development
 uv sync                                    # Install dependencies
-uv run python run_pipeline.py data/doc.pdf # Index single document
-uv run python run_pipeline.py data/        # Index directory
 
 # Testing
 uv run pytest tests/ -v                                    # All tests
-uv run pytest tests/test_phase4_indexing.py -v             # Single file
 uv run pytest tests/agent/test_tool_registry.py::test_name -v  # Single test
 uv run pytest tests/ --cov=src --cov-report=html           # With coverage
 # NOTE: pytest-asyncio NOT installed. Use @pytest.mark.anyio + conftest anyio_backend="asyncio".
@@ -119,7 +116,7 @@ docker network connect sujbot_sujbot_db_net sujbot_backend
 ```
 User Query → SingleAgentRunner (autonomous tool loop)
   → RAG Tools (search, expand_context, get_document_info, compliance_check, etc.)
-  → Retrieval: OCR mode (HyDE + Expansion Fusion) or VL mode (Jina v4 cosine)
+  → VL Retrieval: Jina v4 cosine → page images → multimodal LLM
   → Storage (PostgreSQL: vectors + checkpoints)
 ```
 
@@ -128,7 +125,6 @@ User Query → SingleAgentRunner (autonomous tool loop)
 - `src/agent/` - Agent CLI and tools (`tools/` has individual tool files)
 - `src/graph/` - Graph RAG (storage, embedder, entity extraction, communities)
 - `src/multi_agent/` - Legacy LangGraph-based multi-agent system
-- `src/retrieval/` - HyDE + Expansion Fusion retrieval pipeline
 - `src/vl/` - Vision-Language RAG module (Jina v4 embeddings, page store, VL retriever)
 - `backend/` - FastAPI web backend with auth, routes, middleware
 - `frontend/` - React + Vite web UI
@@ -146,25 +142,17 @@ User Query → SingleAgentRunner (autonomous tool loop)
 
 ### VL (Vision-Language) Architecture
 
-**Dual architecture: OCR vs VL** — switchable via `config.json` → `"architecture": "ocr" | "vl"`.
-
 ```
 VL flow: Query → Jina v4 embed_query() → PostgreSQL exact cosine (vectors.vl_pages)
   → top-k page images (base64 PNG) → multimodal tool result → VL-capable LLM
 ```
 
+- Jina v4 embeddings (2048-dim), stored in `vectors.vl_pages`
 - No HNSW index — ~500 pages, exact cosine scan <50ms, 100% recall
 - `"local"` variant: `Qwen/Qwen3-VL-235B-A22B-Instruct` (DeepInfra, vision)
 - `"remote"` variant: Haiku 4.5 (vision natively)
 - DeepInfra provider converts Anthropic image blocks → OpenAI `image_url` format
-
-| | OCR mode | VL mode |
-|---|---|---|
-| Embedding | Qwen3-Embedding-8B (4096-dim) | Jina v4 (2048-dim) |
-| Content unit | Text chunks (512 tokens) | Page images (PNG) |
-| DB table | `vectors.layer3` | `vectors.vl_pages` |
-| Search | HyDE + Expansion Fusion | Simple cosine |
-| Token cost | ~100 tokens/chunk | ~1600 tokens/page |
+- ~1600 tokens/page
 
 **Graph search** uses `intfloat/multilingual-e5-small` (384-dim) for cross-language semantic search on entities/communities. Falls back to PostgreSQL FTS when embedder not configured.
 
@@ -182,57 +170,17 @@ Research-backed decisions. **DO NOT modify** without explicit approval.
 
 Agents MUST be LLM-driven. LLM decides tool calling sequence via `BaseAgent.run_autonomous_tool_loop()`. System prompts guide behavior, NOT code. No "step 1, step 2" logic. **NEVER use hardcoded template responses.**
 
-### 3. Hierarchical Document Summaries
+### 3. PostgreSQL Vector Schema
 
-`Sections → Section Summaries → Document Summary`. NEVER pass full document text to LLM. Length: 100-1000 chars (adaptive).
+Vectors in `vectors` schema (NOT `public`). Tables: `vl_pages`, `documents`.
 
-### 4. Token-Aware Chunking
-
-512 tokens max (tiktoken). Changing this invalidates ALL vector stores!
-
-### 5. Summary-Augmented Chunking (SAC)
-
-Prepend document summary during embedding, strip during retrieval. -58% context drift (Anthropic, 2024).
-
-### 6. Multi-Layer Embeddings
-
-3 separate indexes (document/section/chunk) — NOT merged. 2.3x essential chunks vs single-layer.
-
-### 6.1 Chunk JSON Format
-
-```json
-{
-  "chunk_id": "doc_L3_c1_sec_1",
-  "context": "SAC context summary",
-  "raw_content": "Actual document text",
-  "embedding_text": "[breadcrumb]\n\ncontext\n\nraw_content",
-  "metadata": { "chunk_id": "...", "layer": 3, "document_id": "..." }
-}
-```
-
-Do NOT use `content` field in JSON. `PhaseLoaders` use `embedding_text` as Chunk's `content`.
-
-### 6.2 PostgreSQL Vector Schema
-
-Vectors in `vectors` schema (NOT `public`). Tables: `layer1` (docs), `layer2` (sections), `layer3` (chunks), `vl_pages`, `documents`.
-
-- Embeddings: 4096-dim (Qwen3-Embedding-8B) for OCR, 2048-dim (Jina v4) for VL
+- Embeddings: 2048-dim (Jina v4) in `vectors.vl_pages`
 - Cosine similarity: `1 - (embedding <=> query_vector)`
 - `vectors.documents`: Document registry with category (`documentation` | `legislation`). Created at upload, deleted on document removal. Backfill: `scripts/backfill_document_categories.py`.
-
-### 7. No Cohere Reranking
-
-Cohere performs WORSE on legal docs. Use `ms-marco` or `bge-reranker` instead.
-
-### 8. Generic Summaries
-
-GENERIC style (NOT expert terminology). Reuter et al. (2024) — generic summaries improve retrieval.
 
 ## Configuration
 
 **Two-file system:** `.env` (secrets, gitignored) + `config.json` (settings, version-controlled). NO secrets in config.json.
-
-**Extraction backend:** `EXTRACTION_BACKEND=auto|gemini|unstructured` (env var, default: auto).
 
 ## Best Practices
 
@@ -282,11 +230,8 @@ Common issues: `403` → wrong endpoint (EU vs US); `0 tokens` → token countin
 
 ## Research Papers (DO NOT CONTRADICT)
 
-1. **LegalBench-RAG** (Pipitone & Alami, 2024) — RCTS, 500-char chunks
-2. **Summary-Augmented Chunking** (Reuter et al., 2024) — SAC, generic summaries
-3. **Multi-Layer Embeddings** (Lima, 2024) — 3-layer indexing
-4. **Contextual Retrieval** (Anthropic, 2024) — Context prepending
-5. **HyDE** (Gao et al., 2022) — Hypothetical Document Embeddings
+1. **LegalBench-RAG** (Pipitone & Alami, 2024) — Legal document RAG benchmarks
+2. **Contextual Retrieval** (Anthropic, 2024) — Context prepending
 
 ## Documentation
 

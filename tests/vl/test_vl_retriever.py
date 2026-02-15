@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 
+from src.retrieval.adaptive_k import AdaptiveKConfig
 from src.vl.vl_retriever import VLPageResult, VLRetriever
 
 
@@ -183,3 +184,101 @@ class TestVLRetrieverSearch:
 
         call_kwargs = mock_vector_store.search_vl_pages.call_args
         assert np.array_equal(call_kwargs.kwargs["query_embedding"], fake_embedding)
+
+
+# ---------------------------------------------------------------------------
+# Adaptive-k integration tests
+# ---------------------------------------------------------------------------
+
+
+def _bimodal_vector_store():
+    """Mock vector store returning 6 results: 3 high + 3 low scores."""
+    store = MagicMock()
+    store.search_vl_pages.return_value = [
+        {"page_id": "DOC_p001", "document_id": "DOC", "page_number": 1, "score": 0.90},
+        {"page_id": "DOC_p002", "document_id": "DOC", "page_number": 2, "score": 0.85},
+        {"page_id": "DOC_p003", "document_id": "DOC", "page_number": 3, "score": 0.80},
+        {"page_id": "DOC_p004", "document_id": "DOC", "page_number": 4, "score": 0.25},
+        {"page_id": "DOC_p005", "document_id": "DOC", "page_number": 5, "score": 0.20},
+        {"page_id": "DOC_p006", "document_id": "DOC", "page_number": 6, "score": 0.15},
+    ]
+    return store
+
+
+class TestAdaptiveKIntegration:
+    """Test adaptive-k filtering integrated into VLRetriever."""
+
+    def test_adaptive_reduces_bimodal_results(self, mock_jina, mock_page_store):
+        """With bimodal scores, adaptive-k should keep only the high group."""
+        vs = _bimodal_vector_store()
+        adaptive_config = AdaptiveKConfig(
+            enabled=True, method="otsu", fetch_k=20, min_k=1, max_k=10,
+        )
+        retriever = VLRetriever(
+            jina_client=mock_jina,
+            vector_store=vs,
+            page_store=mock_page_store,
+            default_k=5,
+            adaptive_config=adaptive_config,
+        )
+
+        results = retriever.search("test query")
+
+        # Should keep only the 3 high-scoring results
+        assert len(results) == 3
+        assert all(r.score >= 0.7 for r in results)
+
+    def test_adaptive_fetches_larger_pool(self, mock_jina, mock_page_store):
+        """When adaptive is enabled, DB query should use fetch_k, not k."""
+        vs = _bimodal_vector_store()
+        adaptive_config = AdaptiveKConfig(enabled=True, fetch_k=20, min_k=1, max_k=10)
+        retriever = VLRetriever(
+            jina_client=mock_jina,
+            vector_store=vs,
+            page_store=mock_page_store,
+            default_k=5,
+            adaptive_config=adaptive_config,
+        )
+
+        retriever.search("query", k=5)
+
+        # Should request fetch_k (20) from DB, not k (5)
+        call_kwargs = vs.search_vl_pages.call_args
+        assert call_kwargs.kwargs["k"] == 20
+
+    def test_disabled_adaptive_returns_fixed_k(self, mock_jina, mock_page_store):
+        """Disabled adaptive config should not filter results."""
+        vs = _bimodal_vector_store()
+        adaptive_config = AdaptiveKConfig(enabled=False)
+        retriever = VLRetriever(
+            jina_client=mock_jina,
+            vector_store=vs,
+            page_store=mock_page_store,
+            default_k=5,
+            adaptive_config=adaptive_config,
+        )
+
+        results = retriever.search("query", k=5)
+
+        # Should fetch exactly k=5 from DB, no filtering
+        call_kwargs = vs.search_vl_pages.call_args
+        assert call_kwargs.kwargs["k"] == 5
+        # Returns whatever the DB returns (6 in mock)
+        assert len(results) == 6
+
+    def test_no_adaptive_config_is_disabled(self, mock_jina, mock_page_store):
+        """VLRetriever without adaptive_config should behave as before."""
+        vs = _bimodal_vector_store()
+        retriever = VLRetriever(
+            jina_client=mock_jina,
+            vector_store=vs,
+            page_store=mock_page_store,
+            default_k=5,
+        )
+
+        results = retriever.search("query")
+
+        # No adaptive config → disabled → fetch exactly default_k
+        call_kwargs = vs.search_vl_pages.call_args
+        assert call_kwargs.kwargs["k"] == 5
+        assert len(results) == 6  # all DB results returned

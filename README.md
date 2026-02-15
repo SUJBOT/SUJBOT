@@ -1,85 +1,22 @@
 # SUJBOT - Production RAG System for Legal/Technical Documents
 
-Research-based RAG system optimized for legal and technical documentation with 7-phase pipeline and **multi-agent AI framework**.
+Vision-Language RAG system optimized for legal and technical documentation with autonomous agent framework, knowledge graph, and compliance checking.
 
-**Status:** PHASE 1-7 COMPLETE + **MULTI-AGENT v2.1** ✅ (2025-11-26)
+## Overview
 
-## 🆕 Multi-Agent System (v2.1 - SSOT Refactoring)
-
-SUJBOT is a **research-backed multi-agent framework** achieving:
-- ✅ **90% cost savings** via 3-level prompt caching (Harvey AI case study)
-- ✅ **8 specialized agents** for higher quality (Orchestrator, Extractor, Classifier, Compliance, Risk Verifier, Citation Auditor, Gap Synthesizer, Report Generator)
-- ✅ **State persistence** with PostgreSQL checkpointing
-- ✅ **Full observability** with LangSmith integration
-
-**Quick Start:**
-```bash
-# New multi-agent command
-uv run python -m src.multi_agent.runner --query "Verify GDPR compliance"
-
-# Interactive mode
-uv run python -m src.multi_agent.runner --interactive
-```
-
-**Migrating from v1.x single-agent?** → See [**MIGRATION_GUIDE.md**](MIGRATION_GUIDE.md)
-
-**Architecture details** → See [**MULTI_AGENT_STATUS.md**](MULTI_AGENT_STATUS.md)
-
-## 📚 Interactive Documentation
-
-**🌐 Live Documentation:** [https://ads-teama.github.io/SUJBOT/](https://ads-teama.github.io/SUJBOT/)
-
-Explore our visual, interactive pipeline documentation:
-- 📥 **[Indexing Pipeline](https://ads-teama.github.io/SUJBOT/indexing_pipeline.html)** - Phase 1-5: Document → Vector Store
-- 💬 **[User Search Pipeline](https://ads-teama.github.io/SUJBOT/user_search_pipeline.html)** - Phase 7: Query → AI Answer (14 Tools)
-- 🗓️ **[4-Week Roadmap](https://ads-teama.github.io/SUJBOT/roadmap.html)** - Team plans for pipeline optimization
-
----
-
-## 🎯 Overview
-
-Production-ready RAG system based on 4 research papers implementing state-of-the-art techniques:
-- **LegalBench-RAG** (Pipitone & Alami, 2024)
-- **Summary-Augmented Chunking** (Reuter et al., 2024)
-- **Multi-Layer Embeddings** (Lima, 2024)
-- **NLI for Legal Contracts** (Narendra et al., 2024)
+SUJBOT uses a **VL (Vision-Language) architecture** that processes document pages as images, enabling multimodal understanding via VL-capable LLMs.
 
 ### Key Features
 
-**Pipeline (PHASE 1-6):**
-- **PHASE 1:** Smart hierarchy extraction (Docling, font-size classification)
-- **PHASE 2:** Generic summary generation (150 chars, proven better than expert summaries)
-- **PHASE 3:** RCTS chunking (500 chars) + SAC (58% DRM reduction)
-- **PHASE 4:** Multi-layer indexing (3 separate FAISS indexes)
-- **PHASE 5:** Hybrid search (BM25+Dense+RRF) + Universal language support (Czech, 24+ languages) + Cross-encoder reranking + Query expansion
-- **PHASE 6:** Context assembly with citations
-
-**Agent (PHASE 7) - Multi-Agent System:**
-- **8 specialized agents** (Orchestrator, Extractor, Classifier, Compliance, Risk Verifier, Citation Auditor, Gap Synthesizer, Report Generator)
-- **SSOT agent initialization** (`agent_initializer.py`) - centralized provider/prompt/tool setup
-- **Typed exception hierarchy** (`src/exceptions.py`) - `SujbotError` → specific error types
-- **Unified cache abstractions** (`src/utils/cache.py`) - thread-safe `LRUCache` + `TTLCache`
-- **PostgreSQL checkpointing** for state persistence and recovery
-- **LangSmith observability** for full workflow tracing
+- **VL Architecture**: Jina v4 embeddings (2048-dim) + page images + multimodal LLM
+- **Knowledge Graph (Graph RAG)**: PostgreSQL-based entity/relationship graph with Leiden communities
+- **Compliance Checking**: Community-based regulatory compliance assessment
+- **Autonomous Agent**: LLM-driven tool loop with 9 specialized tools
+- **State persistence** with PostgreSQL checkpointing
+- **Full observability** with LangSmith integration
 ---
 
-## 🚀 Quick Start
-
-### ⚠️ Breaking Change (v2.0 - HybridChunker)
-
-**If upgrading from v1.x:**
-- Chunking strategy changed to **HybridChunker** (token-aware, 512 tokens ≈ 500 chars)
-- Layout model changed to **HERON** (+23.9% accuracy improvement)
-- **All existing vector stores must be re-indexed**
-- Run: `rm -rf vector_db/* && uv run python run_pipeline.py data/`
-- Estimated time: 15-30 minutes for 10k chunks
-
-**Why this change:**
-- Token-aware chunking guarantees embedding model compatibility
-- HERON provides best accuracy for complex legal layouts
-- Preserves research constraints (512 tokens ≈ 500 chars)
-
----
+## Quick Start
 
 ### Prerequisites
 
@@ -319,25 +256,14 @@ SUJBOT implements production-grade security following OWASP best practices:
 ---
 
 
-## 📖 Usage
+## Usage
 
-### 1. Index Documents
+### 1. Upload Documents
 
-```bash
-# Single document
-uv run python run_pipeline.py data/document.pdf
-
-# Batch processing
-uv run python run_pipeline.py data/regulace/
-
-# Fast mode (default) - 2-3 min, full price
-uv run python run_pipeline.py data/document.pdf
-
-# Eco mode - 15-30 min, 50% cheaper (overnight bulk indexing)
-# Set SPEED_MODE=eco in .env
-```
-
-**Output:** Vector store in `output/<document_name>/phase4_vector_store/`
+Documents are uploaded via the web UI (`POST /documents/upload`). The upload pipeline:
+1. Converts PDF pages to images (stored in `data/vl_pages/`)
+2. Embeds pages with Jina v4 (stored in `vectors.vl_pages`)
+3. Extracts entities/relationships for the knowledge graph
 
 ### 2. Run RAG Agent
 
@@ -385,236 +311,104 @@ Based on the safety manual, reactor shutdown follows these procedures:
 # All tests
 uv run pytest tests/ -v
 
-# Specific phase
-uv run pytest tests/test_phase4_indexing.py -v
-
 # With coverage
 uv run pytest tests/ --cov=src --cov-report=html
 ```
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
-### Complete Pipeline Flow
+### VL Pipeline Flow
 
 ```
-Document (PDF/DOCX)
+Document (PDF)
     ↓
-[PHASE 1] Hierarchy Extraction
-    ├─ Docling conversion (OCR: Czech/English)
-    ├─ Font-size based classification
-    └─ HierarchicalChunker (parent-child relationships)
+[Upload] VL Indexing Pipeline
+    ├─ Convert PDF pages to PNG images
+    ├─ Embed pages with Jina v4 (2048-dim)
+    ├─ Store in PostgreSQL (vectors.vl_pages)
+    └─ Extract entities/relationships (Graph RAG)
     ↓
-[PHASE 2] Summary Generation
-    ├─ gpt-4o-mini (~$0.001 per doc)
-    ├─ Generic summaries (150 chars) - NOT expert
-    └─ Document + section summaries
-    ↓
-[PHASE 3] Multi-Layer Chunking + SAC
-    ├─ Layer 1: Document (1 chunk, summary)
-    ├─ Layer 2: Sections (N chunks, summaries)
-    └─ Layer 3: RCTS 500 chars + SAC (PRIMARY)
-    ↓
-[PHASE 4] Embedding + FAISS Indexing
-    ├─ text-embedding-3-large (3072D) or bge-m3 (1024D)
-    ├─ 3 separate FAISS indexes (IndexFlatIP)
-    └─ Cosine similarity search
-    ↓
-[PHASE 5] Hybrid Search + Reranking + Query Expansion
-    ├─ Query expansion (optional, num_expands=0-5)
-    ├─ BM25 + Dense retrieval + RRF fusion
-    │   ├─ Universal language support (auto-detection)
-    │   ├─ Czech stop words (422 words, hardcoded)
-    │   ├─ spaCy lemmatization (24 languages)
-    │   └─ NLTK stop words fallback (16 languages)
-    ├─ Entity/relationship extraction (NetworkX)
-    └─ Cross-encoder reranking (NOT Cohere - hurts legal docs)
-    ↓
-[PHASE 6] Context Assembly
-    ├─ Strip SAC summaries
-    ├─ Concatenate chunks
-    └─ Add citations with section paths
-    ↓
-[PHASE 7] Agent with 27 Tools
-    ├─ Interactive CLI (Claude SDK)
-    ├─ 12 basic tools (fast search)
-    ├─ 9 advanced tools (quality retrieval)
-    ├─ 6 analysis tools (deep understanding)
-    └─ Cost tracking + prompt caching
+[Query] Autonomous Agent (SingleAgentRunner)
+    ├─ Jina v4 cosine similarity search
+    ├─ Top-k page images → multimodal LLM
+    ├─ Graph RAG for cross-document reasoning
+    └─ Compliance checking via knowledge graph
 ```
 
-### 27 Agent Tools
+### Agent Tools
 
-**Basic Tools (Fast, <1s):**
-- `search` - Unified hybrid search with optional query expansion (num_expands parameter)
-- `document_search` - Find relevant documents
-- `section_search` - Search within sections
-- `chunk_search` - Semantic chunk search
-- `keyword_search` - Exact keyword matching
-- ... (6 more)
-
-**5 RAG Tools:**
-- `search` - HyDE + Expansion Fusion (BM25 + Dense + RRF)
+**RAG Tools:**
+- `search` - VL page search (Jina v4 cosine similarity)
 - `expand_context` - Context window expansion
 - `get_document_info` - Document metadata and summaries
 - `get_document_list` - List indexed documents
 - `get_stats` - Retrieval statistics
 
-**Analysis Tools (Deep, 3-10s):**
-- `compare_documents` - Cross-document analysis
-- `summarize_topic` - Topic-based summarization
-- `extract_entities` - Entity recognition
-- `trace_relationships` - Relationship mapping
-- ... (2 more)
+**Graph RAG Tools:**
+- `graph_search` - Semantic entity search
+- `graph_context` - N-hop relationship traversal
+- `graph_communities` - Semantic community search
+- `compliance_check` - Community-based compliance assessment
 
 ---
 
-## 📊 Performance Metrics
+## Research Foundation
 
-Based on research and testing:
-
-| Metric | Baseline | Our Pipeline | Improvement |
-|--------|----------|-------------|-------------|
-| **Hierarchy depth** | 1 | 4 | **+300%** |
-| **Precision@1** | 2.40% | 6.41% | **+167%** |
-| **DRM Rate** | 67% | 28% | **-58%** |
-| **Essential chunks** | 16% | 38% | **+131%** |
-| **Recall@64** | 35% | 62% | **+77%** |
+Based on **LegalBench-RAG** (Pipitone & Alami, 2024) and **Contextual Retrieval** (Anthropic, 2024).
 
 ---
 
-## 🔬 Research Foundation
-
-### Critical Implementation Rules (DO NOT CHANGE)
-
-**Evidence-based decisions:**
-
-1. **RCTS > Fixed-size chunking** (LegalBench-RAG)
-   - Chunk size: **500 chars** (optimal, +167% Precision@1)
-   - Overlap: 0 (RCTS handles naturally)
-
-2. **Generic > Expert summaries** (Reuter et al.)
-   - Summary length: **150 chars**
-   - Style: **Generic** (NOT expert - counterintuitive but proven)
-
-3. **SAC reduces DRM by 58%** (Reuter et al.)
-   - Prepend document summary to each chunk
-   - Baseline DRM: 67% → SAC DRM: 28%
-
-4. **Multi-layer embeddings** (Lima)
-   - 3 separate FAISS indexes
-   - 2.3x essential chunks
-
-5. **No Cohere reranking** (LegalBench-RAG)
-   - Cohere worse than no reranking on legal docs
-   - Use cross-encoder instead
-
-6. **Dense > Sparse for legal docs** (Reuter et al.)
-   - Better precision/recall than BM25-only
-   - Hybrid (BM25+Dense+RRF) best overall
-
----
-
-## 💻 Configuration
-
-### Load from .env (Recommended)
-
-```python
-from src.indexing_pipeline import IndexingPipeline, IndexingConfig
-
-# Load all settings from .env
-config = IndexingConfig.from_env()
-pipeline = IndexingPipeline(config)
-
-# Override specific settings
-config = IndexingConfig.from_env(
-    enable_hybrid_search=True,
-    speed_mode="eco"  # 50% cheaper for bulk indexing
-)
-
-# Index document
-result = pipeline.index_document("document.pdf")
-```
+## Configuration
 
 ### Key .env Variables
 
 ```bash
 # API Keys
 ANTHROPIC_API_KEY=sk-ant-...
-OPENAI_API_KEY=sk-...
+JINA_API_KEY=jnswk_...
 
-# Models
-LLM_MODEL=gpt-4o-mini                   # Summaries & agent
-EMBEDDING_MODEL=text-embedding-3-large  # Windows
-# EMBEDDING_MODEL=bge-m3                # macOS (local, FREE)
+# LangSmith
+LANGSMITH_API_KEY=lsv2_pt_xxx
+LANGSMITH_PROJECT_NAME=sujbot-multi-agent
+LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com
 
-# Pipeline
-SPEED_MODE=fast                         # fast or eco (50% savings)
-ENABLE_HYBRID_SEARCH=true
-ENABLE_PROMPT_CACHING=true              # Anthropic only (90% savings)
-
-# OCR
-OCR_LANGUAGE=ces,eng                    # Czech + English
+# Database
+DATABASE_URL=postgresql://postgres:password@localhost:5432/sujbot
 ```
 
-### Optimal Settings (Research-Based)
-
-```python
-IndexingConfig(
-    # PHASE 1: Hierarchy
-    enable_smart_hierarchy=True,
-    ocr_language=["ces", "eng"],
-
-    # PHASE 2: Summaries
-    generate_summaries=True,
-    summary_model="gpt-4o-mini",
-    summary_max_chars=150,
-    summary_style="generic",  # NOT expert!
-
-    # PHASE 3: Chunking
-    chunk_size=500,           # Optimal per research
-    enable_sac=True,          # 58% DRM reduction
-
-    # PHASE 4: Embedding
-    embedding_model="text-embedding-3-large",
-
-    # PHASE 5: Advanced Features
-    enable_hybrid_search=True,
-
-    # Performance
-    speed_mode="fast",        # or "eco" for bulk indexing
-)
-```
+Settings are in `config.json` (version-controlled). See `CLAUDE.md` for details.
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
-MY_SUJBOT/
+SUJBOT/
 ├── src/
-│   ├── indexing_pipeline.py           # Main orchestrator (PHASE 1-6)
-│   ├── config.py                      # Central config (load from .env)
-│   ├── docling_extractor_v2.py        # PHASE 1: Hierarchy extraction
-│   ├── summary_generator.py           # PHASE 2: Generic summaries
-│   ├── multi_layer_chunker.py         # PHASE 3: Chunking + SAC
-│   ├── embedding_generator.py         # PHASE 4: Embeddings
-│   ├── faiss_vector_store.py          # PHASE 4: FAISS indexes
-│   ├── hybrid_search.py               # PHASE 5: BM25+Dense+RRF
-│   └── agent/                         # PHASE 7: RAG Agent
-│       ├── cli.py                     # Interactive CLI
-│       ├── config.py                  # Agent configuration
-│       └── tools/                     # 27 specialized tools
-├── tests/                             # Comprehensive test suite
-├── data/                              # Input documents
-├── output/                            # Pipeline outputs
-├── vector_db/                         # Central vector database
+│   ├── single_agent/                  # Production runner (autonomous tool loop)
+│   ├── agent/                         # Agent CLI and tools
+│   │   ├── cli.py                     # Interactive CLI
+│   │   ├── config.py                  # Agent configuration
+│   │   ├── providers/                 # LLM provider implementations
+│   │   └── tools/                     # 9 specialized tools
+│   ├── graph/                         # Graph RAG (knowledge graph)
+│   │   ├── storage.py                 # PostgreSQL graph CRUD
+│   │   ├── embedder.py                # multilingual-e5-small embeddings
+│   │   ├── entity_extractor.py        # Multimodal entity extraction
+│   │   └── community_detector.py      # Leiden community detection
+│   ├── vl/                            # Vision-Language RAG module
+│   │   ├── embedder.py                # Jina v4 embeddings
+│   │   ├── page_store.py              # Page image storage
+│   │   └── retriever.py               # VL retrieval
+│   └── storage/                       # PostgreSQL vector storage
+├── backend/                           # FastAPI web backend
+├── frontend/                          # React + Vite web UI
+├── tests/                             # Test suite
+├── data/                              # Input documents + page images
 ├── docs/                              # Documentation
-├── run_pipeline.py                    # Pipeline entry point
 ├── CLAUDE.md                          # Development guidelines
-├── INSTALL.md                         # Platform-specific installation
-├── PIPELINE.md                        # Complete pipeline spec
 └── .env.example                       # Environment template
 ```
 
@@ -642,16 +436,13 @@ MY_SUJBOT/
 
 ---
 
-## 🧪 Testing
+## Testing
 
 ```bash
 # Run all tests
 uv run pytest tests/ -v
 
-# Test specific phase
-uv run pytest tests/test_phase4_indexing.py -v
-
-# Test agent
+# Test agent tools
 uv run pytest tests/agent/ -v
 
 # With coverage
@@ -663,42 +454,11 @@ uv run pytest tests/agent/test_validation.py::test_api_key_validation -v
 
 ---
 
-## ⚡ Performance Tips
-
-### Background Processing
-
-```bash
-# Run pipeline in background (long-running)
-nohup uv run python run_pipeline.py data/ > pipeline.log 2>&1 &
-
-# Monitor progress
-tail -f pipeline.log
-
-# Agent in background
-nohup uv run python -m src.agent.cli > agent.log 2>&1 &
-```
-
-### Cost Optimization
-
-**Speed Modes:**
-- `speed_mode="fast"` (default): 2-3 min, full price (ThreadPoolExecutor)
-- `speed_mode="eco"`: 15-30 min, 50% cheaper (OpenAI Batch API)
-
-```python
-# For overnight bulk indexing
-config = IndexingConfig.from_env(speed_mode="eco")
-```
+## Performance Tips
 
 **Prompt Caching (Anthropic only):**
-```bash
-# .env
-ENABLE_PROMPT_CACHING=true  # 90% cost reduction on cached tokens
-```
-
-**Example savings:**
-```
-Session cost: $0.0234 (12,450 tokens) | Cache: 8,500 tokens read (90% saved)
-```
+- 90% cost reduction on cached tokens
+- Enabled by default for Anthropic models
 
 ---
 
@@ -727,13 +487,11 @@ Session cost: $0.0234 (12,450 tokens) | Cache: 8,500 tokens read (90% saved)
 
 ---
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 Based on research from:
 - Pipitone & Alami (LegalBench-RAG, 2024)
-- Reuter et al. (Summary-Augmented Chunking, 2024)
-- Lima (Multi-Layer Embeddings, 2024)
-- Narendra et al. (NLI for Legal Contracts, 2024)
+- Anthropic (Contextual Retrieval, 2024)
 
 ---
 
@@ -743,5 +501,5 @@ MIT License
 
 ---
 
-**Status:** PHASE 1-7 COMPLETE ✅
-**Last Updated:** 2025-10-26
+**Architecture:** VL-only (Vision-Language)
+**Last Updated:** 2026-02-15

@@ -83,7 +83,7 @@ def test_pipeline_dependencies():
     print_test("RAG pipeline dependencies")
 
     deps = [
-        ("faiss", "Vector search"),
+        ("asyncpg", "PostgreSQL async driver"),
     ]
 
     all_ok = True
@@ -123,13 +123,12 @@ def test_agent_imports():
         ("src.agent.config", "AgentConfig"),
         ("src.agent.agent_core", "AgentCore"),
         ("src.agent.cli", "CLI module"),
-        ("src.agent.tools.base", "Tool base classes"),
-        ("src.agent.tools.registry", "Tool registry"),
-        ("src.agent.tools.tier1_basic", "Tier 1 tools"),
-        ("src.agent.tools.tier2_advanced", "Tier 2 tools"),
-        ("src.agent.tools.tier3_analysis", "Tier 3 tools"),
-        ("src.agent.tools.token_manager", "Token manager module"),
-        ("src.agent.validation", "Validation module"),
+        ("src.agent.tools._base", "Tool base classes"),
+        ("src.agent.tools._registry", "Tool registry"),
+        ("src.agent.tools._utils", "Tool utilities"),
+        ("src.agent.tools.search", "Search tool"),
+        ("src.agent.tools.expand_context", "Expand context tool"),
+        ("src.agent.tools.get_document_info", "Document info tool"),
     ]
 
     all_ok = True
@@ -145,14 +144,11 @@ def test_agent_imports():
 
 
 def test_pipeline_imports():
-    """Test RAG pipeline imports."""
-    print_test("RAG pipeline imports")
+    """Test VL pipeline imports."""
+    print_test("VL pipeline imports")
 
     imports = [
-        ("src.hybrid_search", "Hybrid search"),
-        ("src.embedding_generator", "Embedding generator"),
-        ("src.reranker", "Cross-encoder reranker"),
-        ("src.context_assembly", "Context assembler"),
+        ("src.vl", "VL module"),
     ]
 
     all_ok = True
@@ -177,11 +173,11 @@ def test_tool_registry():
         registry = get_registry()
         tool_count = len(registry._tool_classes)
 
-        if tool_count == 14:
-            print_pass(f"All 14 tools registered")
+        if tool_count == 9:
+            print_pass(f"All 9 tools registered")
             return True
         else:
-            print_warn(f"Expected 14 tools, found {tool_count}")
+            print_warn(f"Expected 9 tools, found {tool_count}")
             return False
 
     except Exception as e:
@@ -243,34 +239,23 @@ def test_api_keys():
 
 
 def test_vector_store_exists():
-    """Test if vector store exists."""
-    print_test("Vector store")
+    """Test if VL page store exists."""
+    print_test("VL page store")
 
-    # Try default path
-    default_path = Path("output/hybrid_store")
+    # Check for VL page images directory
+    vl_path = Path("data/vl_pages")
 
-    if default_path.exists() and default_path.is_dir():
-        # Check for required files
-        required_files = [
-            "index_layer1.faiss",
-            "index_layer2.faiss",
-            "index_layer3.faiss",
-        ]
-
-        missing = []
-        for filename in required_files:
-            if not (default_path / filename).exists():
-                missing.append(filename)
-
-        if not missing:
-            print_pass(f"Vector store found at {default_path}")
+    if vl_path.exists() and vl_path.is_dir():
+        page_files = list(vl_path.glob("*.png"))
+        if page_files:
+            print_pass(f"VL page store found at {vl_path} ({len(page_files)} pages)")
             return True
         else:
-            print_warn(f"Vector store incomplete (missing: {missing})")
+            print_warn(f"VL page store empty at {vl_path}")
             return False
     else:
-        print_warn(f"Vector store not found at {default_path}")
-        print_warn("Run indexing pipeline: python run_pipeline.py data/documents/")
+        print_warn(f"VL page store not found at {vl_path}")
+        print_warn("Upload documents via web UI to populate page store")
         return False
 
 

@@ -8,6 +8,8 @@
     "title": "Available Documents",
     "loadError": "Failed to load documents",
     "noDocuments": "No documents available",
+    "legislation": "Legislation",
+    "documentation": "Documentation",
     "upload": "Upload PDF",
     "uploading": "Uploading...",
     "rendering": "Rendering pages...",

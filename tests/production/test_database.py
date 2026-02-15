@@ -30,41 +30,41 @@ class TestVectorSchema:
         assert "vectors" in result.stdout.decode(), \
             f"vectors schema not found. Output: {result.stdout.decode()}"
 
-    def test_layer3_table_exists(self):
-        """layer3 (chunks) table exists with correct columns."""
+    def test_vl_pages_table_exists(self):
+        """vl_pages table exists with correct columns."""
         container = get_container_name("sujbot_postgres")
         result = run_docker_command(
             [
                 "docker", "exec", container,
                 "psql", "-U", "postgres", "-d", "sujbot", "-t",
                 "-c", "SELECT column_name FROM information_schema.columns "
-                     "WHERE table_schema = 'vectors' AND table_name = 'layer3';"
+                     "WHERE table_schema = 'vectors' AND table_name = 'vl_pages';"
             ],
             timeout=10
         )
         assert result.returncode == 0, f"Query failed: {result.stderr.decode()}"
 
         columns = result.stdout.decode()
-        required_columns = ["chunk_id", "document_id", "embedding", "content"]
+        required_columns = ["page_id", "document_id", "embedding"]
         missing_columns = [col for col in required_columns if col not in columns]
 
         assert not missing_columns, \
-            f"Missing columns in vectors.layer3: {missing_columns}. Found: {columns}"
+            f"Missing columns in vectors.vl_pages: {missing_columns}. Found: {columns}"
 
-    def test_layer3_has_data(self):
-        """layer3 table has indexed chunks."""
+    def test_vl_pages_has_data(self):
+        """vl_pages table has indexed pages."""
         container = get_container_name("sujbot_postgres")
         result = run_docker_command(
             [
                 "docker", "exec", container,
                 "psql", "-U", "postgres", "-d", "sujbot", "-t",
-                "-c", "SELECT count(*) FROM vectors.layer3;"
+                "-c", "SELECT count(*) FROM vectors.vl_pages;"
             ],
             timeout=10
         )
 
         if result.returncode != 0:
-            pytest.skip(f"Cannot query vectors.layer3: {result.stderr.decode()}")
+            pytest.skip(f"Cannot query vectors.vl_pages: {result.stderr.decode()}")
 
         output = result.stdout.decode().strip()
         try:
@@ -76,7 +76,28 @@ class TestVectorSchema:
         # Skip if no data (might be fresh install)
         if count == 0:
             pytest.skip("No indexed data - fresh installation")
-        assert count > 0, f"Expected indexed chunks, got count={count}"
+        assert count > 0, f"Expected indexed pages, got count={count}"
+
+    def test_documents_table_exists(self):
+        """documents table exists in vectors schema."""
+        container = get_container_name("sujbot_postgres")
+        result = run_docker_command(
+            [
+                "docker", "exec", container,
+                "psql", "-U", "postgres", "-d", "sujbot", "-t",
+                "-c", "SELECT column_name FROM information_schema.columns "
+                     "WHERE table_schema = 'vectors' AND table_name = 'documents';"
+            ],
+            timeout=10
+        )
+        assert result.returncode == 0, f"Query failed: {result.stderr.decode()}"
+
+        columns = result.stdout.decode()
+        required_columns = ["document_id", "category"]
+        missing_columns = [col for col in required_columns if col not in columns]
+
+        assert not missing_columns, \
+            f"Missing columns in vectors.documents: {missing_columns}. Found: {columns}"
 
 
 class TestAuthSchema:
@@ -129,14 +150,14 @@ class TestAuthSchema:
 class TestEmbeddingDimensions:
     """Test embedding vector dimensions are correct."""
 
-    def test_embedding_dimension_4096(self):
-        """Embeddings have 4096 dimensions (Qwen3-Embedding-8B)."""
+    def test_vl_embedding_dimension_2048(self):
+        """VL page embeddings have 2048 dimensions (Jina v4)."""
         container = get_container_name("sujbot_postgres")
         result = run_docker_command(
             [
                 "docker", "exec", container,
                 "psql", "-U", "postgres", "-d", "sujbot", "-t",
-                "-c", "SELECT vector_dims(embedding) FROM vectors.layer3 LIMIT 1;"
+                "-c", "SELECT vector_dims(embedding) FROM vectors.vl_pages LIMIT 1;"
             ],
             timeout=10
         )
@@ -153,20 +174,20 @@ class TestEmbeddingDimensions:
         except ValueError:
             pytest.fail(f"Invalid dimension response: {output}")
 
-        assert dims == 4096, f"Expected 4096 dimensions, got {dims}"
+        assert dims == 2048, f"Expected 2048 dimensions, got {dims}"
 
 
 class TestIndexes:
     """Test that required indexes exist."""
 
-    def test_layer3_hnsw_index_exists(self):
-        """HNSW index exists on vectors.layer3 for fast similarity search."""
+    def test_vl_pages_indexes_exist(self):
+        """Indexes exist on vectors.vl_pages."""
         container = get_container_name("sujbot_postgres")
         result = run_docker_command(
             [
                 "docker", "exec", container,
                 "psql", "-U", "postgres", "-d", "sujbot", "-t",
-                "-c", "SELECT indexname FROM pg_indexes WHERE tablename = 'layer3' AND schemaname = 'vectors';"
+                "-c", "SELECT indexname FROM pg_indexes WHERE tablename = 'vl_pages' AND schemaname = 'vectors';"
             ],
             timeout=10
         )
@@ -174,29 +195,5 @@ class TestIndexes:
         if result.returncode != 0:
             pytest.skip(f"Cannot query indexes: {result.stderr.decode()}")
 
-        indexes = result.stdout.decode()
-        # Should have some index (HNSW or IVFFlat)
-        if not indexes.strip():
-            pytest.skip("No indexes found - may be fresh installation")
-
-        # Check for vector index (name may vary)
-        assert indexes.strip(), "No indexes found on vectors.layer3"
-
-    def test_content_tsv_index_exists(self):
-        """Full-text search index exists on content_tsv column."""
-        container = get_container_name("sujbot_postgres")
-        result = run_docker_command(
-            [
-                "docker", "exec", container,
-                "psql", "-U", "postgres", "-d", "sujbot", "-t",
-                "-c", "SELECT indexname FROM pg_indexes WHERE tablename = 'layer3' "
-                     "AND schemaname = 'vectors' AND indexdef LIKE '%content_tsv%';"
-            ],
-            timeout=10
-        )
-
-        if result.returncode != 0:
-            pytest.skip(f"Cannot query indexes: {result.stderr.decode()}")
-
-        # Full-text index is optional, just check query works
-        # (result may be empty if not using FTS)
+        # VL pages may use exact scan (no ANN index needed for ~500 pages)
+        # Just verify the query succeeds

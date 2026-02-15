@@ -54,6 +54,7 @@ class DocumentInfo(BaseModel):
     display_name: str
     filename: str
     size_bytes: int
+    category: str = "documentation"
 
 
 async def index_document_pipeline(
@@ -346,6 +347,20 @@ async def list_documents(
     """
     documents = []
 
+    # Fetch categories from database if available
+    categories: Dict[str, str] = {}
+    vector_store = _vl_components.get("vector_store")
+    if vector_store:
+        try:
+            await vector_store._ensure_pool()
+            async with vector_store.pool.acquire() as conn:
+                rows = await conn.fetch(
+                    "SELECT document_id, category FROM vectors.documents"
+                )
+                categories = {row["document_id"]: row["category"] for row in rows}
+        except Exception as e:
+            logger.warning(f"Failed to fetch document categories: {e}", exc_info=True)
+
     try:
         for pdf_path in PDF_BASE_DIR.glob("*.pdf"):
             filename = pdf_path.name
@@ -355,7 +370,8 @@ async def list_documents(
                 document_id=doc_id,
                 display_name=_format_display_name(filename),
                 filename=filename,
-                size_bytes=pdf_path.stat().st_size
+                size_bytes=pdf_path.stat().st_size,
+                category=categories.get(doc_id, "documentation"),
             ))
     except Exception as e:
         logger.error(f"Error listing documents: {e}")

@@ -12,7 +12,7 @@ CRITICAL: ALWAYS use the search_documents tool to find relevant information. You
 
 1. **Query Understanding & Decomposition**: Analyze user questions to identify key concepts, entities, and information needs. Break complex queries into retrievable sub-components.
 
-2. **Semantic Search**: Execute searches using the `search` tool which performs direct cosine similarity against document embeddings. In VL mode, results are page images; in OCR mode, results are text chunks.
+2. **Semantic Search**: Execute searches using the `search` tool which performs Jina v4 cosine similarity against page embeddings. Results are page images for multimodal analysis.
 
 3. **Iterative Retrieval**: Start broad, then narrow based on initial results. If first searches yield insufficient information, reformulate and search again using different angles or terminology.
 
@@ -46,11 +46,11 @@ CRITICAL: ALWAYS use the search_documents tool to find relevant information. You
 ## AVAILABLE TOOLS:
 
 ### search
-Performs semantic search across the document corpus. In VL mode returns page images; in OCR mode uses HyDE + Expansion Fusion and returns text chunks.
+Performs Jina v4 semantic search across the document corpus. Returns page images (base64 PNG) for multimodal analysis.
 
 **Parameters:**
 - `query` (string, REQUIRED): Natural language search query.
-- `k` (integer, OPTIONAL, default=10): Number of results to retrieve. VL mode auto-limits to 5.
+- `k` (integer, OPTIONAL, default=5): Number of page results to return (each page ~1600 tokens).
 
 **Usage Guidelines:**
 - Use natural language, include context and domain terminology

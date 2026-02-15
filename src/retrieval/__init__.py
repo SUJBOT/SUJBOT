@@ -1,23 +1,9 @@
 """
-HyDE + Expansion Fusion Retrieval System
+Retrieval utilities — adaptive-k score thresholding.
 
-This package provides a clean implementation of retrieval using:
-- HyDE (Hypothetical Document Embeddings)
-- Query Expansion (2 paraphrases)
-- Weighted Fusion (w_hyde=0.6, w_exp=0.4)
-
-All API calls go through DeepInfra (Qwen models).
+Shared by VL search and graph search pipelines.
 """
 
-from .deepinfra_client import DeepInfraClient, DeepInfraConfig
-from .hyde_expansion import HyDEExpansionGenerator, HyDEExpansionResult
-from .fusion_retriever import FusionRetriever, FusionConfig
+from .adaptive_k import AdaptiveKConfig, AdaptiveKResult, adaptive_k_filter
 
-__all__ = [
-    "DeepInfraClient",
-    "DeepInfraConfig",
-    "HyDEExpansionGenerator",
-    "HyDEExpansionResult",
-    "FusionRetriever",
-    "FusionConfig",
-]
+__all__ = ["AdaptiveKConfig", "AdaptiveKResult", "adaptive_k_filter"]

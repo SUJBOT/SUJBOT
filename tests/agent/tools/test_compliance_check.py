@@ -2,7 +2,7 @@
 Tests for compliance_check agent tool.
 
 Covers input validation, graph storage access, requirement extraction,
-evidence search (VL + OCR), LLM assessment parsing, and output structure.
+evidence search (VL), LLM assessment parsing, and output structure.
 """
 
 import json
@@ -43,9 +43,6 @@ def _make_tool(
     )
     return ComplianceCheckTool(
         vector_store=vector_store or MagicMock(),
-        embedder=MagicMock(),
-        reranker=None,
-        context_assembler=None,
         llm_provider=llm_provider,
         config=config,
         vl_retriever=vl_retriever,
@@ -310,15 +307,16 @@ class TestComplianceAssessment:
         gs.get_community_entities.return_value = entities
 
         vs = MagicMock()
-        # similarity_search returns dicts like real chunks
-        vs.similarity_search.return_value = [
-            {
-                "content": "Radiation monitoring is performed quarterly.",
-                "chunk_id": "doc_1_L3_c5",
-                "document_id": "doc_1",
-                "score": 0.85,
-            }
+
+        # VL retriever returns search results with page_id
+        vl_ret = MagicMock()
+        vl_ret.search.return_value = [
+            MagicMock(page_id="doc_1_page_5", score=0.85),
         ]
+
+        # Page store returns base64 image data
+        ps = MagicMock()
+        ps.get_image_base64.return_value = "iVBORw0KGgoAAAANSUhEUg=="
 
         if llm_response_text is not None:
             llm_provider = MagicMock()
@@ -334,6 +332,8 @@ class TestComplianceAssessment:
             graph_storage=gs,
             llm_provider=llm_provider,
             vector_store=vs,
+            vl_retriever=vl_ret,
+            page_store=ps,
         )
 
     def test_parse_valid_assessment(self):
@@ -437,14 +437,14 @@ class TestComplianceVLMode:
     def test_vl_auto_filters_to_documentation_when_no_doc_id(self):
         """When document_id is None, evidence search filters to 'documentation' category."""
         tool = self._setup_vl_tool()
-        tool._search_evidence_vl("radiation", document_id=None)
+        tool._search_evidence("radiation", document_id=None)
         call_kwargs = tool.vl_retriever.search.call_args
         assert call_kwargs.kwargs.get("category_filter") == "documentation"
 
     def test_vl_no_category_filter_when_doc_id_specified(self):
         """When document_id is specified, no category_filter should be applied."""
         tool = self._setup_vl_tool()
-        tool._search_evidence_vl("radiation", document_id="BZ_VR1")
+        tool._search_evidence("radiation", document_id="BZ_VR1")
         call_kwargs = tool.vl_retriever.search.call_args
         assert call_kwargs.kwargs.get("category_filter") is None
 
@@ -452,14 +452,14 @@ class TestComplianceVLMode:
         """VL evidence search failure returns (None, error_msg) not empty list."""
         tool = self._setup_vl_tool()
         tool.vl_retriever.search.side_effect = RuntimeError("connection lost")
-        evidence, source = tool._search_evidence_vl("radiation", document_id=None)
+        evidence, source = tool._search_evidence("radiation", document_id=None)
         assert evidence is None
         assert "failed" in source.lower()
 
     def test_vl_evidence_returns_page_images(self):
         """VL mode evidence search returns page image dicts, not text."""
         tool = self._setup_vl_tool()
-        evidence, source = tool._search_evidence_vl("radiation", document_id=None)
+        evidence, source = tool._search_evidence("radiation", document_id=None)
         assert isinstance(evidence, list)
         assert len(evidence) == 2
         assert evidence[0]["page_id"] == "doc_1_page_3"
@@ -471,7 +471,7 @@ class TestComplianceVLMode:
     def test_vl_evidence_empty_results(self):
         """VL mode returns empty list when no pages found."""
         tool = self._setup_vl_tool(search_results=[])
-        evidence, source = tool._search_evidence_vl("unknown", document_id=None)
+        evidence, source = tool._search_evidence("unknown", document_id=None)
         assert evidence == []
         assert source is None
 
@@ -483,7 +483,7 @@ class TestComplianceVLMode:
             "base64_ok",
             Exception("disk error"),
         ]
-        evidence, source = tool._search_evidence_vl("radiation", document_id=None)
+        evidence, source = tool._search_evidence("radiation", document_id=None)
         assert len(evidence) == 1
         assert evidence[0]["base64_data"] == "base64_ok"
 

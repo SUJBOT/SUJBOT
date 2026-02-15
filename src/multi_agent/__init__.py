@@ -23,12 +23,7 @@ Agents:
 7. Gap Synthesizer - Knowledge gap analysis
 8. Report Generator - Final report generation
 
-Research Constraints Preserved:
-- Hierarchical document summaries (unchanged)
-- Token-aware chunking (512 tokens, unchanged)
-- Generic summaries (150 chars, unchanged)
-- Multi-layer embeddings (3 FAISS indexes, unchanged)
-- Hybrid search (BM25+Dense+RRF, unchanged)
+Note: Legacy module. Production uses SingleAgentRunner with VL architecture.
 """
 
 from .core.state import MultiAgentState, AgentState

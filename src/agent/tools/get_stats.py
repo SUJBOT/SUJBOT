@@ -14,14 +14,11 @@ logger = logging.getLogger(__name__)
 
 
 class GetStatsInput(ToolInput):
-    """Input for unified get_stats tool."""
+    """Input for get_stats tool."""
 
     stat_scope: str = Field(
         ...,
-        description="Statistics scope: 'corpus' (overall stats), 'index' (comprehensive index stats with embedding/cache info), 'document' (per-document stats)",
-    )
-    include_cache_stats: bool = Field(
-        False, description="Include embedding cache statistics (for 'index' scope)"
+        description="Statistics scope: 'corpus' (overall stats), 'index' (VL index info), 'document' (per-document stats)",
     )
 
 
@@ -35,90 +32,46 @@ class GetStatsTool(BaseTool):
     Get statistics about corpus, index, or documents.
 
     **Stat scopes:**
-    - 'corpus': Overall document counts, sizes
-    - 'index': Comprehensive index stats (layers, dimensions, cache)
+    - 'corpus': Overall document counts, page counts
+    - 'index': VL index info (Jina v4, 2048-dim)
     - 'document': Per-document statistics
 
     **When to use:**
     - "How many documents?"
     - "Corpus statistics"
     - "Index information"
-    - System/debugging queries
 
-    **Best practices:**
-    - Use 'corpus' for quick document counts
-    - Use 'index' for detailed information
-    - Set include_cache_stats=true for embedding cache info
-    - Fast metadata aggregation (no search required)
-
-    **Method:** Metadata aggregation
-
+    **Method:** Metadata aggregation (fast, no search)
     """
 
     input_schema = GetStatsInput
 
-    def execute_impl(self, stat_scope: str, include_cache_stats: bool = False) -> ToolResult:
+    def execute_impl(self, stat_scope: str) -> ToolResult:
+        if stat_scope not in ("corpus", "index", "document"):
+            return ToolResult(
+                success=False,
+                data=None,
+                error=f"Invalid stat_scope: {stat_scope}. Must be 'corpus', 'index', or 'document'",
+            )
+
         try:
-            stats = {}
+            vs_stats = self.vector_store.get_stats()
+            stats = {"vector_store": vs_stats}
 
-            if stat_scope in ["corpus", "document", "index"]:
-                # Get vector store statistics
-                vs_stats = self.vector_store.get_stats()
-                stats["vector_store"] = vs_stats
+            doc_count = vs_stats.get("documents", 0)
+            stats["unique_documents"] = doc_count
 
-                # Get unique documents count from stats
-                if "documents" in vs_stats:
-                    stats["unique_documents"] = vs_stats["documents"]
-
-                # Try to get document list from PostgreSQL (if available)
-                try:
-                    from src.storage import PostgresVectorStoreAdapter
-                    if isinstance(self.vector_store, PostgresVectorStoreAdapter):
-                        # Get document list from PostgreSQL
-                        doc_list = self.vector_store.get_document_list()
-                        stats["document_list"] = sorted(doc_list) if doc_list else []
-                except Exception as e:
-                    # If we can't get document list, skip it (non-critical)
-                    logger.debug(f"Could not extract document list: {e}")
-                    stats["document_list"] = []
+            doc_list = self.vector_store.get_document_list()
+            stats["document_list"] = sorted(doc_list) if doc_list else []
 
             if stat_scope == "index":
-                # Additional index-specific information
-                stats["hybrid_search_enabled"] = stats.get("vector_store", {}).get(
-                    "hybrid_enabled", False
-                )
-
-                # Embedding model information
-                if self.embedder:
-                    stats["embedding_model"] = {
-                        "model_name": self.embedder.model_name,
-                        "dimensions": self.embedder.dimensions,
-                        "model_type": self.embedder.model_type,
-                    }
-
-                    # Cache statistics if requested
-                    if include_cache_stats and hasattr(self.embedder, "get_cache_stats"):
-                        stats["embedding_cache"] = self.embedder.get_cache_stats()
-
-                # Document info
                 stats["documents"] = {
-                    "count": stats["unique_documents"],
+                    "count": doc_count,
                     "document_ids": stats["document_list"],
                 }
-
-                # System configuration
-                stats["configuration"] = {
-                    "reranking_enabled": hasattr(self, "reranker") and self.reranker is not None,
-                    "context_assembler_enabled": hasattr(self, "context_assembler")
-                    and self.context_assembler is not None,
-                }
-
-            if stat_scope not in ["corpus", "index", "document"]:
-                return ToolResult(
-                    success=False,
-                    data=None,
-                    error=f"Invalid stat_scope: {stat_scope}. Must be 'corpus', 'index', or 'document'",
-                )
+                stats["architecture"] = "vl"
+                stats["embedding_model"] = "jina-embeddings-v4"
+                stats["embedding_dimensions"] = 2048
 
             return ToolResult(
                 success=True,

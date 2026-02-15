@@ -60,7 +60,7 @@ def test_imports():
         from agent.tools._registry import ToolRegistry, get_registry
         print("  ✓ _registry imports successful")
 
-        from agent.tools._utils import format_chunk_result, generate_citation
+        from agent.tools._utils import create_error_result, estimate_tokens_from_vl_result
         print("  ✓ _utils imports successful")
 
         # Test main package import
@@ -79,7 +79,7 @@ def test_imports():
 
 
 def test_registration():
-    """Test 3: Verify all 15 tools are registered."""
+    """Test 3: Verify all 9 tools are registered."""
     print("\n" + "="*60)
     print("TEST 3: Tool Registration Count")
     print("="*60)
@@ -95,11 +95,11 @@ def test_registration():
         for name in sorted(registry._tool_classes.keys()):
             print(f"  - {name}")
 
-        if tool_count == 15:
-            print(f"\n✅ PASSED: All 15 tools registered correctly")
+        if tool_count == 9:
+            print(f"\n✅ PASSED: All 9 tools registered correctly")
             return True
         else:
-            print(f"\n❌ FAILED: Expected 15 tools, found {tool_count}")
+            print(f"\n❌ FAILED: Expected 9 tools, found {tool_count}")
             return False
 
     except Exception as e:
@@ -151,7 +151,7 @@ def test_import_consistency():
             for line_num, line in enumerate(f, 1):
                 # Check for old-style imports (without underscore)
                 if "from .base import" in line or "from .registry import" in line or \
-                   "from .utils import" in line or "from .token_manager import" in line:
+                   "from .utils import" in line:
                     bad_imports.append(f"{file_path.name}:{line_num}: {line.strip()}")
 
     if bad_imports:
@@ -173,12 +173,13 @@ def test_file_structure():
     tools_dir = Path(__file__).parent / "src" / "agent" / "tools"
 
     # Expected infrastructure files
-    expected_infra = ["_base.py", "_registry.py", "_utils.py", "_token_manager.py", "__init__.py"]
+    expected_infra = ["_base.py", "_registry.py", "_utils.py", "__init__.py"]
 
-    # Expected tool files (5)
+    # Expected tool files
     expected_tools = [
         "search.py", "expand_context.py", "get_document_info.py",
-        "get_document_list.py", "get_stats.py",
+        "get_document_list.py", "get_stats.py", "compliance_check.py",
+        "graph_search.py", "graph_context.py", "graph_communities.py",
     ]
 
     # Check infrastructure files

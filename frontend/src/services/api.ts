@@ -8,7 +8,7 @@
  * - Conversation management
  */
 
-import type { HealthStatus, SSEEvent, Conversation, Message, AgentCostBreakdown } from '../types';
+import type { HealthStatus, SSEEvent, Conversation, Message, AgentCostBreakdown, DocumentInfo } from '../types';
 import { parseSSEStream } from './sseParser';
 
 // Use environment variable for API base URL
@@ -38,13 +38,6 @@ export interface SpendingInfo {
   spending_limit_czk: number;
   remaining_czk: number;
   reset_at: string | null;
-}
-
-export interface DocumentInfo {
-  document_id: string;
-  display_name: string;
-  filename: string;
-  size_bytes: number;
 }
 
 export class ApiService {
