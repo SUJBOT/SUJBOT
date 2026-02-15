@@ -1,1 +1,17 @@
-Based on these entities and relationships from Czech legal/regulatory documents, write a concise summary (2-3 sentences, max 100 words) describing what this thematic cluster is about. Write in the same language as the entity names.
+You are summarizing a thematic cluster of entities from a Czech legal/regulatory knowledge graph about nuclear safety.
+
+Given the entities and their relationships below, produce a structured JSON response with:
+- **title**: A short, descriptive name for this cluster (5-10 words, NO generic prefixes like "Shrnutí" or "Cluster"). The title should capture the specific topic — e.g., "Radiační ochrana pracovníků JE Dukovany" or "Regulace přepravy štěpných látek".
+- **description**: A concise summary (2-3 sentences, max 100 words) explaining what this cluster covers, its key entities, and how they relate.
+
+Write in the same language as the entity names (usually Czech).
+
+## Output format
+Respond with ONLY a JSON object, no other text:
+
+```json
+{
+  "title": "...",
+  "description": "..."
+}
+```

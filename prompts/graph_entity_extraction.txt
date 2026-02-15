@@ -33,6 +33,7 @@ Extract all entities and relationships from this page image. This is a Czech leg
 - Normalize regulation names to standard format: "zákon č. NNN/YYYY Sb." or "vyhláška č. NNN/YYYY Sb."
 - Keep entity names concise but unambiguous.
 - Use CONSISTENT names for the same entity — do NOT create variants like "reaktor VR-1" AND "školní reaktor VR-1" for the same thing. Pick one canonical name.
+- Always prefer the FULL name over abbreviations (e.g., use "Státní úřad pro jadernou bezpečnost" instead of "SÚJB", use "školní reaktor VR-1" instead of just "VR-1").
 - Use PERSON for specific named individuals, ROLE for generic positions/functions.
 - Each relationship must reference entities by their exact name as listed in the entities array.
 - Only extract entities and relationships that are explicitly mentioned on this page.

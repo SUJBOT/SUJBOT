@@ -10,6 +10,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+from ..exceptions import GraphStoreError, ProviderError
 from .storage import GraphStorageAdapter, _vec_to_pg
 
 if TYPE_CHECKING:
@@ -55,7 +56,7 @@ async def rebuild_graph_communities(
         try:
             exact_stats = await graph_storage.async_deduplicate_exact()
             stats["exact_dedup"] = exact_stats
-        except Exception as e:
+        except (GraphStoreError, ProviderError) as e:
             logger.error(f"Exact dedup failed, continuing: {e}", exc_info=True)
             stats["exact_dedup"] = {"error": str(e)}
 
@@ -64,7 +65,7 @@ async def rebuild_graph_communities(
         try:
             embed_count = await _embed_new_entities(graph_storage, graph_embedder)
             stats["entities_embedded"] = embed_count
-        except Exception as e:
+        except (GraphStoreError, ProviderError) as e:
             logger.error(f"Entity embedding failed, continuing: {e}", exc_info=True)
             stats["entities_embedded"] = {"error": str(e)}
 
@@ -76,7 +77,7 @@ async def rebuild_graph_communities(
                 llm_provider=llm_provider,
             )
             stats["semantic_dedup"] = sem_stats
-        except Exception as e:
+        except (GraphStoreError, ProviderError) as e:
             logger.error(f"Semantic dedup failed, continuing: {e}", exc_info=True)
             stats["semantic_dedup"] = {"error": str(e)}
 
@@ -84,7 +85,7 @@ async def rebuild_graph_communities(
         try:
             re_embed_count = await _embed_new_entities(graph_storage, graph_embedder)
             stats["entities_re_embedded"] = re_embed_count
-        except Exception as e:
+        except (GraphStoreError, ProviderError) as e:
             logger.error(f"Re-embedding failed, continuing: {e}", exc_info=True)
             stats["entities_re_embedded"] = {"error": str(e)}
 
@@ -93,7 +94,7 @@ async def rebuild_graph_communities(
         entities, relationships = await graph_storage.async_get_all()
         stats["total_entities"] = len(entities)
         stats["total_relationships"] = len(relationships)
-    except Exception as e:
+    except GraphStoreError as e:
         logger.error(f"Failed to fetch graph data for community detection: {e}", exc_info=True)
         stats["error"] = str(e)
         return stats
@@ -146,13 +147,14 @@ async def rebuild_graph_communities(
             ]
 
             try:
-                summary = await asyncio.to_thread(
+                result = await asyncio.to_thread(
                     community_summarizer.summarize, comm_entities, comm_rels
                 )
-                if summary:
-                    comm["summary"] = summary
+                if result:
+                    title, description = result
+                    comm["title"] = title
+                    comm["summary"] = description
                     comm["summary_model"] = model_name
-                    comm["title"] = summary.split(".")[0].strip()[:100]
                     summarized += 1
                 else:
                     comm["title"] = f"Community L{comm['level']}"
@@ -167,7 +169,7 @@ async def rebuild_graph_communities(
         saved = await graph_storage.async_save_communities(communities)
         stats["communities_saved"] = saved
         logger.info(f"Saved {saved} communities")
-    except Exception as e:
+    except GraphStoreError as e:
         logger.error(f"Failed to save communities: {e}", exc_info=True)
         stats["communities_saved"] = {"error": str(e)}
         return stats
@@ -177,7 +179,7 @@ async def rebuild_graph_communities(
         try:
             comm_embed_count = await _embed_new_communities(graph_storage, graph_embedder)
             stats["communities_embedded"] = comm_embed_count
-        except Exception as e:
+        except (GraphStoreError, ProviderError) as e:
             logger.error(f"Community embedding failed: {e}", exc_info=True)
             stats["communities_embedded"] = {"error": str(e)}
 

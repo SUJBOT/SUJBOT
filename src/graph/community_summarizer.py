@@ -1,13 +1,15 @@
 """
 Community Summarizer — LLM summaries for entity communities.
 
-Generates text summaries for clusters of related entities
+Generates structured title + description for clusters of related entities
 using their names, types, descriptions, and relationships.
 """
 
+import json
 import logging
+import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 from ..exceptions import ConfigurationError
 
@@ -20,7 +22,7 @@ _PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "prompts" / "grap
 
 
 class CommunitySummarizer:
-    """Generate text summaries for entity communities via LLM."""
+    """Generate structured title + description for entity communities via LLM."""
 
     def __init__(self, provider: "BaseProvider"):
         self.provider = provider
@@ -35,16 +37,16 @@ class CommunitySummarizer:
         self,
         community_entities: List[Dict],
         community_relationships: List[Dict],
-    ) -> Optional[str]:
+    ) -> Optional[Tuple[str, str]]:
         """
-        Generate a text summary for a community of entities.
+        Generate a structured title and description for a community of entities.
 
         Args:
             community_entities: List of entity dicts (name, entity_type, description)
             community_relationships: List of relationship dicts between community entities
 
         Returns:
-            Summary text, or None if generation fails
+            Tuple of (title, description), or None if generation fails
         """
         if not community_entities:
             return None
@@ -61,19 +63,49 @@ class CommunitySummarizer:
                 parts.append(f"- {r.get('source', '?')} —[{r.get('type', '?')}]→ {r.get('target', '?')}")
 
         context = "\n".join(parts)
-        user_message = f"{self._prompt}\n\n{context}\n\nSummary:"
+        user_message = f"{self._prompt}\n\n{context}"
 
         try:
             response = self.provider.create_message(
                 messages=[{"role": "user", "content": user_message}],
                 tools=[],
                 system="",
-                max_tokens=200,
+                max_tokens=300,
                 temperature=0.0,
             )
-            return response.text.strip() if response.text else None
+            return self._parse_response(response.text)
         except (KeyboardInterrupt, SystemExit, MemoryError):
             raise
         except Exception as e:
             logger.warning(f"Community summarization failed: {e}", exc_info=True)
             return None
+
+    def _parse_response(self, text: str) -> Optional[Tuple[str, str]]:
+        """Parse structured JSON response into (title, description) tuple."""
+        if not text:
+            logger.warning("Empty response from community summarizer LLM")
+            return None
+
+        text = text.strip()
+        # Strip markdown code fences
+        text = re.sub(r"^```(?:json)?\s*\n?", "", text)
+        text = re.sub(r"\n?```\s*$", "", text)
+
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as e:
+            logger.warning(f"Invalid JSON from community summary: {e}. Preview: {text[:200]}")
+            return None
+
+        if not isinstance(data, dict):
+            logger.warning(f"Community summary JSON is not an object: {type(data).__name__}. Preview: {text[:200]}")
+            return None
+
+        title = (data.get("title") or "").strip()
+        description = (data.get("description") or "").strip()
+
+        if not title or not description:
+            logger.warning(f"Missing title or description in community summary: {data}")
+            return None
+
+        return (title[:100], description)
