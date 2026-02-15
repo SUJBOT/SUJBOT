@@ -204,6 +204,8 @@ Checks document compliance against regulations using communities as compliance d
 
 Communities serve as natural "compliance domains" — Leiden clustering groups related OBLIGATION/REQUIREMENT/EVIDENCE/CONTROL entities. Communities with requirements but no evidence indicate compliance gaps.
 
+**Document categories:** When no specific `document_id` is provided, `compliance_check` automatically filters evidence search to the `documentation` category (via `vectors.documents`). Requirements come from legislation through the knowledge graph, so evidence should come from internal documentation — this prevents the tool from finding the requirement text itself as "evidence".
+
 ## Backfill Scripts
 
 ### Build graph from documents

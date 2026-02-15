@@ -33,6 +33,10 @@ class SearchInput(ToolInput):
         None,
         description="Optional document ID to filter results (searches within specific document)",
     )
+    filter_category: Optional[str] = Field(
+        None,
+        description="Filter by document category: 'documentation' or 'legislation'",
+    )
 
 
 @register_tool
@@ -88,6 +92,7 @@ class SearchTool(BaseTool):
         query: str,
         k: int = 10,
         filter_document: Optional[str] = None,
+        filter_category: Optional[str] = None,
     ) -> ToolResult:
         """
         Execute search — dispatches to VL or OCR mode based on architecture config.
@@ -96,6 +101,7 @@ class SearchTool(BaseTool):
             query: Natural language query
             k: Number of results
             filter_document: Optional document ID filter
+            filter_category: Optional category filter ('documentation' or 'legislation')
 
         Returns:
             ToolResult with formatted chunks/pages and citations
@@ -104,7 +110,7 @@ class SearchTool(BaseTool):
             # VL pages are ~1600 tokens each vs ~100 for text chunks;
             # default to 5 unless the caller explicitly requested more
             vl_k = min(k, 5) if k == 10 else k
-            return self._execute_vl(query, vl_k, filter_document)
+            return self._execute_vl(query, vl_k, filter_document, filter_category)
         return self._execute_ocr(query, k, filter_document)
 
     def _execute_vl(
@@ -112,6 +118,7 @@ class SearchTool(BaseTool):
         query: str,
         k: int = 5,
         filter_document: Optional[str] = None,
+        filter_category: Optional[str] = None,
     ) -> ToolResult:
         """
         VL mode: search page embeddings, return page images for multimodal LLM.
@@ -120,13 +127,14 @@ class SearchTool(BaseTool):
         - data: list of {page_id, document_id, page_number, score}
         - metadata.page_images: list of {page_id, base64_data, media_type, page_number, document_id, score}
         """
-        logger.info(f"VL search: '{query[:50]}...' (k={k})")
+        logger.info(f"VL search: '{query[:50]}...' (k={k}, category={filter_category})")
 
         try:
             results = self.vl_retriever.search(
                 query=query,
                 k=k,
                 document_filter=filter_document,
+                category_filter=filter_category,
             )
 
             # Build text data for logging/history
@@ -172,6 +180,7 @@ class SearchTool(BaseTool):
                 "query": query,
                 "k": k,
                 "filter_document": filter_document,
+                "filter_category": filter_category,
                 "search_method": "vl_jina_v4",
                 "final_count": len(formatted),
                 "page_images": page_images,

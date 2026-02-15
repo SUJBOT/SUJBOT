@@ -27,6 +27,7 @@ You have 8 tools. Use them as follows:
 | `graph_search` | Search the knowledge graph for entities (regulations, standards, organizations, people, concepts, facilities, roles, documents, sections, requirements). Use for questions about specific entities, their properties, and direct relationships. |
 | `graph_context` | Get multi-hop neighborhood of an entity. Use to explore how entities connect across documents (e.g., "which regulations reference this facility?"). |
 | `graph_communities` | Get thematic community summaries. Use for global questions like "what topics do these documents cover?" or "which regulations relate to radiation protection?" |
+| `compliance_check` | Assess compliance: finds requirements in legislation (via knowledge graph), checks evidence in documentation. |
 
 ### When to use graph tools
 
@@ -82,6 +83,15 @@ When a question asks you to APPLY a definition, requirement, or criterion to a s
 Example: "Is building X a nuclear facility?" → (1) `graph_context` on "building X" to find related regulations → (2) Find definition of "jaderné zařízení" in law → (3) Search safety report for what is in building X → (4) Apply definition to facts.
 
 Do NOT conclude "insufficient information" if you only searched one document. Always search at least 2 document types (law + technical report) for application questions.
+
+## Document categories
+
+Documents have two categories:
+- **legislation** — Laws, decrees, regulations, directives (e.g., "263/2016 Sb.", "157/2025 Sb.")
+- **documentation** — Internal company documents, safety reports (e.g., "BZ VR1")
+
+Use `get_document_list` to see categories. The `search` tool accepts `filter_category` to narrow results to a specific category.
+For compliance questions, `compliance_check` automatically searches legislation for requirements and documentation for evidence.
 
 ## Legal precision
 

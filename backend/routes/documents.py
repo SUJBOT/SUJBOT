@@ -14,7 +14,7 @@ import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, status
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile, File, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
@@ -477,14 +477,21 @@ def _sanitize_filename(filename: str) -> str:
 async def upload_document(
     request: Request,
     file: UploadFile = File(...),
+    category: str = Form("documentation"),
     user: Dict = Depends(get_current_user),
 ):
     """
     Upload a PDF and index it with VL pipeline, streaming progress via SSE.
 
-    Accepts multipart/form-data with a PDF file.
+    Accepts multipart/form-data with a PDF file and optional category.
     Returns SSE stream with progress events during indexing.
     """
+    # Validate category
+    if category not in ("documentation", "legislation"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Category must be 'documentation' or 'legislation'"
+        )
     # Validate VL components are available
     if not _vl_components:
         raise HTTPException(
@@ -538,6 +545,21 @@ async def upload_document(
                 }),
             }
 
+            # 1b. Register document category
+            display_name = _format_display_name(pdf_path.name)
+            await vector_store._ensure_pool()
+            async with vector_store.pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO vectors.documents (document_id, category, display_name)
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT (document_id) DO UPDATE SET category = $2, display_name = $3
+                    """,
+                    document_id,
+                    category,
+                    display_name,
+                )
+
             # 2-5. Render, embed, summarize, store, extract entities via shared pipeline
             async for event in index_document_pipeline(
                 pdf_path, document_id, jina_client, page_store, vector_store,
@@ -549,7 +571,7 @@ async def upload_document(
 
             logger.info(
                 f"User {user.get('id', 'unknown')} uploaded and indexed "
-                f"{safe_filename} ({pdf_path.stem})"
+                f"{safe_filename} ({pdf_path.stem}, category={category})"
             )
 
         except Exception as e:
@@ -566,6 +588,16 @@ async def upload_document(
             doc_dir = page_store.store_dir / document_id
             if doc_dir.exists():
                 shutil.rmtree(doc_dir, ignore_errors=True)
+            # Clean up document registry entry
+            try:
+                await vector_store._ensure_pool()
+                async with vector_store.pool.acquire() as conn:
+                    await conn.execute(
+                        "DELETE FROM vectors.documents WHERE document_id = $1",
+                        document_id,
+                    )
+            except Exception:
+                pass  # Best-effort cleanup
             yield {
                 "event": "error",
                 "data": json.dumps({

@@ -275,9 +275,18 @@ class ComplianceCheckTool(BaseTool):
         return self._search_evidence_ocr(query, document_id)
 
     def _search_evidence_vl(self, query: str, document_id: Optional[str]) -> tuple:
-        """VL mode: search page embeddings and load page images for multimodal LLM."""
+        """VL mode: search page embeddings and load page images for multimodal LLM.
+
+        When no document_id is specified, automatically filters to 'documentation'
+        category — requirements already come from legislation (via the knowledge graph),
+        so evidence should come from internal documentation.
+        """
         try:
-            results = self.vl_retriever.search(query=query, k=3, document_filter=document_id)
+            # Auto-filter to documentation when searching broadly for evidence
+            category_filter = None if document_id else "documentation"
+            results = self.vl_retriever.search(
+                query=query, k=3, document_filter=document_id, category_filter=category_filter,
+            )
             if not results:
                 return ([], None)
 

@@ -60,6 +60,7 @@ class VLRetriever:
         query: str,
         k: Optional[int] = None,
         document_filter: Optional[str] = None,
+        category_filter: Optional[str] = None,
     ) -> List[VLPageResult]:
         """
         Search for relevant pages using VL embeddings.
@@ -68,6 +69,7 @@ class VLRetriever:
             query: Natural language query text
             k: Number of results (default: self.default_k)
             document_filter: Optional document_id filter
+            category_filter: Optional category filter ('documentation' or 'legislation')
 
         Returns:
             List of VLPageResult sorted by relevance
@@ -82,6 +84,7 @@ class VLRetriever:
             query_embedding=query_embedding,
             k=k,
             document_filter=document_filter,
+            category_filter=category_filter,
         )
 
         # 3. Convert to VLPageResult objects with image paths

@@ -265,7 +265,13 @@
       "summarizing": "Summarizing pages...",
       "uploading": "Saving file...",
       "close": "Close",
-      "notIndexed": "Not indexed"
+      "notIndexed": "Not indexed",
+      "category": "Category",
+      "categoryDocumentation": "Documentation",
+      "categoryLegislation": "Legislation",
+      "selectCategory": "Select document category",
+      "categoryUpdated": "Category updated",
+      "categoryUpdateError": "Failed to update category"
     },
     "conversations": {
       "sectionTitle": "Conversation History",

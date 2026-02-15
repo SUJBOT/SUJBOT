@@ -214,10 +214,11 @@ Do NOT use `content` field in JSON. `PhaseLoaders` use `embedding_text` as Chunk
 
 ### 6.2 PostgreSQL Vector Schema
 
-Vectors in `vectors` schema (NOT `public`). Tables: `layer1` (docs), `layer2` (sections), `layer3` (chunks), `vl_pages`.
+Vectors in `vectors` schema (NOT `public`). Tables: `layer1` (docs), `layer2` (sections), `layer3` (chunks), `vl_pages`, `documents`.
 
 - Embeddings: 4096-dim (Qwen3-Embedding-8B) for OCR, 2048-dim (Jina v4) for VL
 - Cosine similarity: `1 - (embedding <=> query_vector)`
+- `vectors.documents`: Document registry with category (`documentation` | `legislation`). Created at upload, deleted on document removal. Backfill: `scripts/backfill_document_categories.py`.
 
 ### 7. No Cohere Reranking
 
