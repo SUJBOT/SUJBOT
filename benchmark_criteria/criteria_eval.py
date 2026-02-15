@@ -8,16 +8,16 @@ a scored report with confusion matrix, precision, recall, F1.
 
 Usage:
     # Quick smoke test (5 entries)
-    uv run python scripts/criteria_eval.py --limit 5
+    uv run python benchmark_criteria/criteria_eval.py --limit 5
 
     # 50 random entries (representative sample)
-    uv run python scripts/criteria_eval.py --limit 50 --shuffle
+    uv run python benchmark_criteria/criteria_eval.py --limit 50 --shuffle
 
     # Full run (2191 entries, ~9 hours with Sonnet 4.5)
-    uv run python scripts/criteria_eval.py
+    uv run python benchmark_criteria/criteria_eval.py
 
     # Budget run with Haiku 4.5
-    uv run python scripts/criteria_eval.py --model claude-haiku-4-5-20251001
+    uv run python benchmark_criteria/criteria_eval.py --model claude-haiku-4-5-20251001
 """
 
 import argparse
@@ -538,8 +538,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dataset-path",
         type=Path,
-        default=PROJECT_ROOT / "dataset" / "criteria_eval.json",
-        help="Path to criteria_eval.json",
+        default=PROJECT_ROOT / "benchmark_criteria" / "criteria_dataset.json",
+        help="Path to criteria dataset JSON",
     )
     parser.add_argument(
         "--limit",
@@ -562,8 +562,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--judge-model",
         type=str,
-        default="gpt-4o-mini",
-        help="LLM judge model for classification (default: gpt-4o-mini)",
+        default="claude-sonnet-4-5-20250929",
+        help="LLM judge model for classification (default: claude-sonnet-4-5-20250929)",
     )
     parser.add_argument(
         "--prime-document",
@@ -700,7 +700,7 @@ async def main():
     logger.info(f"Time: {total_elapsed / 60:.1f} min")
 
     # Generate reports
-    output_dir = PROJECT_ROOT / "evaluations" / "criteria"
+    output_dir = PROJECT_ROOT / "benchmark_criteria"
     md_path, json_path = generate_report(results, scores, args, total_elapsed, output_dir)
 
     logger.info(f"Reports: {md_path}")
