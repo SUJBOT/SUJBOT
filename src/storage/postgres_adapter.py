@@ -973,6 +973,7 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
 
     async def _async_get_document_list(self, category_filter: Optional[str] = None) -> List[str]:
         """Async get document list — VL reads vl_pages, OCR reads layer1."""
+        await self._ensure_pool()
         async with self.pool.acquire() as conn:
             if self.architecture == "vl":
                 base = "SELECT DISTINCT document_id FROM vectors.vl_pages"
@@ -1309,6 +1310,8 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
     # VL (Vision-Language) Page Embeddings
     # ============================================================================
 
+    _VALID_CATEGORIES = {"documentation", "legislation"}
+
     def search_vl_pages(
         self,
         query_embedding: np.ndarray,
@@ -1355,6 +1358,10 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
             params.append(document_filter)
 
         if category_filter:
+            if category_filter not in self._VALID_CATEGORIES:
+                raise ValueError(
+                    f"Invalid category_filter: {category_filter!r}. Must be one of {self._VALID_CATEGORIES}"
+                )
             param_idx += 1
             where_parts.append(
                 f"document_id IN (SELECT document_id FROM vectors.documents WHERE category = ${param_idx})"

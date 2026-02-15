@@ -25,19 +25,21 @@ class GetDocumentListTool(BaseTool):
     """List all available documents in the corpus."""
 
     name = "get_document_list"
-    description = "Get list of all documents in the vector store"
+    description = "Get list of all documents in the vector store with categories"
     detailed_help = """
-    Returns a list of all document IDs and their summaries from the vector store.
+    Returns a list of all document IDs, categories, and summaries from the vector store.
 
     **Use cases:**
     - Orchestrator routing: understand what documents exist
     - Query scoping: check if relevant documents are indexed
     - Corpus overview: see available document coverage
+    - Category awareness: identify legislation vs documentation
 
     **Returns:**
     - document_ids: List of unique document identifiers
     - document_count: Total number of documents
-    - summaries: Brief description of each document (if available)
+    - documents: List of documents with id, category, and summary
+    - by_category: Documents grouped by category (legislation/documentation)
     """
 
     input_schema = GetDocumentListInput

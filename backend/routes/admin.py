@@ -874,7 +874,7 @@ async def delete_admin_document(
     vl: Dict = Depends(get_vl_components),
 ):
     """
-    Delete a document completely: vectors, page images, and PDF file.
+    Delete a document completely: vectors, page images, PDF file, graph data, and category registry.
 
     Args:
         document_id: Document identifier (PDF stem name)
@@ -982,6 +982,15 @@ async def update_document_category(
         )
 
     vector_store = vl["vector_store"]
+
+    # Verify document exists (prevent orphan entries in vectors.documents)
+    pdf_path = PDF_BASE_DIR / f"{document_id}.pdf"
+    if not pdf_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document not found: {document_id}"
+        )
+
     try:
         await vector_store._ensure_pool()
         async with vector_store.pool.acquire() as conn:
@@ -995,8 +1004,8 @@ async def update_document_category(
                 category,
             )
         logger.info(f"Admin {admin['id']} set {document_id} category to {category}")
-    except Exception as e:
-        logger.error(f"Failed to update category for {document_id}: {e}", exc_info=True)
+    except asyncpg.PostgresError as e:
+        logger.error(f"Database error updating category for {document_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update document category"

@@ -128,6 +128,11 @@ class TestComplianceCheckInput:
         with pytest.raises(ValidationError):
             ComplianceCheckInput(query="test", max_requirements=51)
 
+    def test_empty_query_rejected(self):
+        """Empty query string must be rejected (min_length=1)."""
+        with pytest.raises(ValidationError):
+            ComplianceCheckInput(query="")
+
 
 # ===========================================================================
 # TestComplianceCheckToolNoGraph
@@ -365,7 +370,7 @@ class TestComplianceAssessment:
         assert finding["status"] == "UNCLEAR"
 
     def test_no_llm_provider(self):
-        """Tool works without LLM — uses heuristic (evidence found -> UNCLEAR)."""
+        """Tool works without LLM — falls back to UNCLEAR when evidence is found."""
         tool = self._setup_with_evidence(llm_provider=None)
         result = tool.execute_impl(query="radiation monitoring")
         assert result.success is True
@@ -428,6 +433,28 @@ class TestComplianceVLMode:
             vl_retriever=vl_retriever,
             page_store=page_store,
         )
+
+    def test_vl_auto_filters_to_documentation_when_no_doc_id(self):
+        """When document_id is None, evidence search filters to 'documentation' category."""
+        tool = self._setup_vl_tool()
+        tool._search_evidence_vl("radiation", document_id=None)
+        call_kwargs = tool.vl_retriever.search.call_args
+        assert call_kwargs.kwargs.get("category_filter") == "documentation"
+
+    def test_vl_no_category_filter_when_doc_id_specified(self):
+        """When document_id is specified, no category_filter should be applied."""
+        tool = self._setup_vl_tool()
+        tool._search_evidence_vl("radiation", document_id="BZ_VR1")
+        call_kwargs = tool.vl_retriever.search.call_args
+        assert call_kwargs.kwargs.get("category_filter") is None
+
+    def test_vl_evidence_search_failure_returns_none(self):
+        """VL evidence search failure returns (None, error_msg) not empty list."""
+        tool = self._setup_vl_tool()
+        tool.vl_retriever.search.side_effect = RuntimeError("connection lost")
+        evidence, source = tool._search_evidence_vl("radiation", document_id=None)
+        assert evidence is None
+        assert "failed" in source.lower()
 
     def test_vl_evidence_returns_page_images(self):
         """VL mode evidence search returns page image dicts, not text."""
@@ -508,6 +535,25 @@ class TestComplianceVLMode:
         finding = result.data["findings"][0]
         assert finding["status"] == "UNMET"
         assert finding["evidence"] is None
+
+    def test_vl_search_failure_returns_unclear(self):
+        """VL evidence search failure results in UNCLEAR, not false UNMET."""
+        tool = self._setup_vl_tool()
+        tool.vl_retriever.search.side_effect = RuntimeError("DB down")
+        result = tool.execute_impl(query="radiation monitoring")
+        assert result.success is True
+        finding = result.data["findings"][0]
+        assert finding["status"] == "UNCLEAR"
+        assert "failed" in finding["gap_description"].lower()
+
+    def test_parse_markdown_wrapped_json(self):
+        """Markdown-wrapped JSON from LLM is parsed correctly."""
+        tool = self._setup_vl_tool()
+        status, conf, explanation = tool._parse_assessment_response(
+            '```json\n{"status": "MET", "confidence": 0.9, "explanation": "ok"}\n```'
+        )
+        assert status == "MET"
+        assert conf == 0.9
 
 
 if __name__ == "__main__":

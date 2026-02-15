@@ -8,7 +8,7 @@ Active mode determined by config.json → "architecture".
 """
 
 import logging
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import Field
 
@@ -33,7 +33,7 @@ class SearchInput(ToolInput):
         None,
         description="Optional document ID to filter results (searches within specific document)",
     )
-    filter_category: Optional[str] = Field(
+    filter_category: Optional[Literal["documentation", "legislation"]] = Field(
         None,
         description="Filter by document category: 'documentation' or 'legislation'",
     )
@@ -111,6 +111,8 @@ class SearchTool(BaseTool):
             # default to 5 unless the caller explicitly requested more
             vl_k = min(k, 5) if k == 10 else k
             return self._execute_vl(query, vl_k, filter_document, filter_category)
+        if filter_category:
+            logger.warning("filter_category='%s' ignored in OCR mode (VL-only feature)", filter_category)
         return self._execute_ocr(query, k, filter_document)
 
     def _execute_vl(

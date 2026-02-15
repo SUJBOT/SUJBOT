@@ -464,7 +464,7 @@ export const DocumentsPage = () => {
                       <TableCell>
                         <Select
                           size="small"
-                          value={doc.category || 'documentation'}
+                          value={doc.category}
                           onChange={(e) => handleCategoryChange(doc.document_id, e.target.value as DocumentCategory)}
                           disabled={actionInProgress !== null}
                           sx={{ minWidth: 130, fontSize: '0.8rem' }}

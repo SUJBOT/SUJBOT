@@ -165,6 +165,16 @@ class TestVLRetrieverSearch:
         results = retriever.search("query")
         assert results[0].score >= results[1].score
 
+    def test_category_filter_passed_through(self, retriever, mock_vector_store):
+        retriever.search("query", category_filter="legislation")
+        call_kwargs = mock_vector_store.search_vl_pages.call_args
+        assert call_kwargs.kwargs["category_filter"] == "legislation"
+
+    def test_category_filter_none_by_default(self, retriever, mock_vector_store):
+        retriever.search("query")
+        call_kwargs = mock_vector_store.search_vl_pages.call_args
+        assert call_kwargs.kwargs["category_filter"] is None
+
     def test_query_embedding_passed_to_vector_store(self, retriever, mock_jina, mock_vector_store):
         fake_embedding = np.ones(2048, dtype=np.float32)
         mock_jina.embed_query.return_value = fake_embedding

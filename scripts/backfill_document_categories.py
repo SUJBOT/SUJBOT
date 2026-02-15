@@ -25,6 +25,10 @@ load_dotenv()
 # Use production port 5432, not dev 5433
 DATABASE_URL = os.getenv("DATABASE_URL", "").replace(":5433/", ":5432/")
 
+if not DATABASE_URL:
+    print("ERROR: DATABASE_URL environment variable not set. Check .env file.")
+    raise SystemExit(1)
+
 
 def classify_document(document_id: str) -> str:
     """Classify document_id as 'legislation' or 'documentation'."""
@@ -63,26 +67,32 @@ async def main():
         print(f"Found {len(rows)} documents in vectors.vl_pages")
 
         inserted = 0
+        failed = 0
         for row in rows:
             doc_id = row["document_id"]
             category = classify_document(doc_id)
             display_name = format_display_name(doc_id)
 
-            result = await conn.execute(
-                """
-                INSERT INTO vectors.documents (document_id, category, display_name)
-                VALUES ($1, $2, $3)
-                ON CONFLICT (document_id) DO NOTHING
-                """,
-                doc_id,
-                category,
-                display_name,
-            )
-            if result == "INSERT 0 1":
-                inserted += 1
-                print(f"  {doc_id} → {category} ({display_name})")
+            try:
+                result = await conn.execute(
+                    """
+                    INSERT INTO vectors.documents (document_id, category, display_name)
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT (document_id) DO NOTHING
+                    """,
+                    doc_id,
+                    category,
+                    display_name,
+                )
+                if result == "INSERT 0 1":
+                    inserted += 1
+                    print(f"  {doc_id} → {category} ({display_name})")
+            except asyncpg.PostgresError as e:
+                print(f"  ERROR: {doc_id} failed: {e}")
+                failed += 1
 
-        print(f"\nInserted {inserted} new rows, {len(rows) - inserted} already existed")
+        skipped = len(rows) - inserted - failed
+        print(f"\nInserted {inserted} new rows, {skipped} already existed, {failed} failed")
 
         # Show final state
         final = await conn.fetch(

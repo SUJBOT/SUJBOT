@@ -22,7 +22,7 @@ PDF Pages (images)
   --> igraph Leiden community detection
   --> LLM community summarization
        - graph.communities
-  --> Agent tools (graph_search, graph_context, graph_communities)
+  --> Agent tools (graph_search, graph_context, graph_communities, compliance_check)
 ```
 
 ### Pipeline Steps

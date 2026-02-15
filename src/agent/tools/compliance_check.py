@@ -3,8 +3,9 @@ Compliance Check Tool — regulatory requirement assessment.
 
 Searches knowledge graph communities for compliance requirements
 (OBLIGATION, PROHIBITION, PERMISSION, REQUIREMENT), gathers evidence
-from the document corpus (VL or OCR mode), and optionally calls an LLM
-to assess each requirement's compliance status.
+from the document corpus (VL or OCR mode), and uses an LLM to assess
+each requirement's compliance status. Falls back to UNCLEAR status
+when no LLM provider is configured.
 """
 
 import json
@@ -33,7 +34,7 @@ _STATUS_WEIGHTS: Dict[str, float] = {
 # Max evidence text length per finding
 _MAX_EVIDENCE_CHARS = 500
 
-# Assessment prompt template path (relative to project root)
+# Assessment prompt template path (resolved from this file's location to project root)
 _ASSESSMENT_PROMPT_PATH = (
     Path(__file__).resolve().parent.parent.parent.parent / "prompts" / "compliance_assessment.txt"
 )
@@ -42,10 +43,10 @@ _ASSESSMENT_PROMPT_PATH = (
 class ComplianceCheckInput(ToolInput):
     """Input for compliance check tool."""
 
-    query: str = Field(..., description="Compliance question or topic to check")
+    query: str = Field(..., description="Compliance question or topic to check", min_length=1)
     document_id: Optional[str] = Field(
         None,
-        description="Document ID to check compliance against (if omitted, searches all documents)",
+        description="Document ID to check compliance against (if omitted, searches documentation-category documents only)",
     )
     regulation_filter: Optional[str] = Field(
         None,
@@ -221,8 +222,20 @@ class ComplianceCheckTool(BaseTool):
         req_description = requirement.get("description", req_name)
         req_entity_id = requirement.get("entity_id", 0)
 
-        # Search for evidence (returns images list in VL mode, text string in OCR mode)
         evidence, evidence_source = self._search_evidence(req_description, document_id)
+
+        # Distinguish "search failed" (None) from "no results" (empty)
+        if evidence is None:
+            return {
+                "requirement": req_name,
+                "requirement_type": req_type,
+                "source_entity_id": req_entity_id,
+                "status": "UNCLEAR",
+                "confidence": 0.0,
+                "evidence": None,
+                "evidence_source": evidence_source,
+                "gap_description": f"Evidence search failed for: {req_name}",
+            }
 
         # No evidence found
         if not evidence:
@@ -280,6 +293,10 @@ class ComplianceCheckTool(BaseTool):
         When no document_id is specified, automatically filters to 'documentation'
         category — requirements already come from legislation (via the knowledge graph),
         so evidence should come from internal documentation.
+
+        Returns:
+            (page_images_list, source) on success, ([], None) when no results,
+            (None, error_message) when search fails.
         """
         try:
             # Auto-filter to documentation when searching broadly for evidence
@@ -305,15 +322,29 @@ class ComplianceCheckTool(BaseTool):
                         "page_number": getattr(r, "page_number", 0) or r.get("page_number", 0),
                     })
                 except Exception as e:
-                    logger.warning(f"Failed to load image for {page_id}: {e}")
+                    logger.warning(f"Failed to load image for {page_id}: {e}", exc_info=True)
+
+            if results and not page_images:
+                logger.error(
+                    "VL evidence search found %d results but all page images failed to load",
+                    len(results),
+                )
 
             return (page_images, source)
         except Exception as e:
-            logger.warning(f"VL evidence search failed: {e}", exc_info=True)
-            return ([], None)
+            logger.error(f"VL evidence search failed: {e}", exc_info=True)
+            return (None, f"VL evidence search failed: {e}")
 
     def _search_evidence_ocr(self, query: str, document_id: Optional[str]) -> tuple:
-        """OCR mode: search text chunks via vector store."""
+        """OCR mode: search text chunks via vector store.
+
+        Note: Unlike VL mode, OCR does not auto-filter by category. This may return
+        chunks from legislation documents, which could match the requirement text itself.
+
+        Returns:
+            (text, source) on success, ("", None) when no results,
+            (None, error_message) when search fails.
+        """
         try:
             results = self.vector_store.similarity_search(query, k=3)
             if not results:
@@ -354,8 +385,8 @@ class ComplianceCheckTool(BaseTool):
             evidence = "\n\n".join(texts) if texts else ""
             return (evidence, source)
         except Exception as e:
-            logger.warning(f"OCR evidence search failed: {e}", exc_info=True)
-            return ("", None)
+            logger.error(f"OCR evidence search failed: {e}", exc_info=True)
+            return (None, f"OCR evidence search failed: {e}")
 
     def _run_assessment(
         self,
@@ -364,9 +395,12 @@ class ComplianceCheckTool(BaseTool):
         evidence_source: Optional[str],
         assessment_prompt: Optional[str],
     ) -> tuple:
-        """Run LLM assessment or fall back to heuristic. Evidence is images (list) or text (str)."""
-        if not self.llm_provider or not assessment_prompt:
+        """Run LLM assessment. Returns UNCLEAR fallback if LLM or prompt is unavailable. Evidence is images (list) or text (str)."""
+        if not self.llm_provider:
             return ("UNCLEAR", 0.25, "LLM provider not available for assessment")
+
+        if not assessment_prompt:
+            return ("UNCLEAR", 0.25, "Assessment prompt template not found — check prompts/compliance_assessment.txt")
 
         req_name = requirement.get("name", "Unknown")
         req_type = requirement.get("entity_type", "REQUIREMENT")
@@ -460,7 +494,7 @@ class ComplianceCheckTool(BaseTool):
             logger.warning(f"Assessment prompt not found: {_ASSESSMENT_PROMPT_PATH}")
             return None
         except Exception as e:
-            logger.error(f"Failed to load assessment prompt: {e}")
+            logger.error(f"Failed to load assessment prompt: {e}", exc_info=True)
             return None
 
     @staticmethod

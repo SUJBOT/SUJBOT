@@ -596,8 +596,11 @@ async def upload_document(
                         "DELETE FROM vectors.documents WHERE document_id = $1",
                         document_id,
                     )
-            except Exception:
-                pass  # Best-effort cleanup
+            except Exception as cleanup_err:
+                logger.warning(
+                    "Failed to clean up document registry entry for %s: %s",
+                    document_id, cleanup_err,
+                )
             yield {
                 "event": "error",
                 "data": json.dumps({
