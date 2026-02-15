@@ -17,6 +17,10 @@
     "storing": "Ukládám do databáze...",
     "uploadComplete": "Dokument úspěšně indexován",
     "uploadError": "Nahrávání selhalo",
+    "selectCategory": "Vyberte kategorii dokumentu",
+    "startUpload": "Nahrát",
+    "summarizing": "Generuji shrnutí stránek...",
+    "graph_extraction": "Extrakce entit...",
     "pdfOnly": "Jsou podporovány pouze PDF soubory",
     "fileTooLarge": "Soubor je příliš velký (max 100 MB)",
     "alreadyExists": "Dokument již existuje"
@@ -140,7 +144,8 @@
     "error": "Chyba",
     "verifyingSession": "Ověřuji relaci...",
     "justNow": "Právě teď",
-    "ok": "OK"
+    "ok": "OK",
+    "cancel": "Zrušit"
   },
   "language": {
     "switchTo": "Přepnout jazyk",

@@ -217,7 +217,6 @@ async def async_main(args):
     vector_store = PostgresVectorStoreAdapter(
         connection_string=db_url,
         dimensions=dimensions,
-        architecture="vl",
     )
     await vector_store.initialize()
 

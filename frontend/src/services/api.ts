@@ -322,10 +322,12 @@ export class ApiService {
    */
   async *uploadDocument(
     file: File,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    category?: string
   ): AsyncGenerator<SSEEvent, void, unknown> {
     const formData = new FormData();
     formData.append('file', file);
+    if (category) formData.append('category', category);
 
     let response;
     try {
@@ -349,7 +351,9 @@ export class ApiService {
       try {
         const errorData = await response.json();
         detail = errorData.detail || detail;
-      } catch { /* use default */ }
+      } catch (e) {
+        console.warn('Failed to parse upload error response:', e);
+      }
       yield {
         event: 'error',
         data: { error: detail, type: 'HTTPError', status: response.status },
