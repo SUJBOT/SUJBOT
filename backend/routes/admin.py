@@ -48,7 +48,12 @@ from backend.models import (
     AdminConversationResponse,
     AdminMessageResponse,
 )
-from backend.routes.documents import _format_display_name, index_document_pipeline, DIRECT_ID_PATTERN
+from backend.routes.documents import (
+    _format_display_name,
+    _schedule_graph_rebuild,
+    index_document_pipeline,
+    DIRECT_ID_PATTERN,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,11 +71,7 @@ _admin_queries: Optional[AdminQueries] = None
 _vl_components: Dict[str, Any] = {}
 
 
-def set_admin_dependencies(
-    auth_manager: AuthManager,
-    auth_queries: AuthQueries,
-    postgres_adapter
-):
+def set_admin_dependencies(auth_manager: AuthManager, auth_queries: AuthQueries, postgres_adapter):
     """
     Set global admin dependencies (called from main.py).
 
@@ -92,6 +93,9 @@ def set_admin_vl_components(
     summary_provider: Any = None,
     entity_extractor: Any = None,
     graph_storage: Any = None,
+    community_detector: Any = None,
+    community_summarizer: Any = None,
+    graph_embedder: Any = None,
 ) -> None:
     """Set VL components for document management endpoints (called from main.py lifespan)."""
     _vl_components["jina_client"] = jina_client
@@ -100,14 +104,16 @@ def set_admin_vl_components(
     _vl_components["summary_provider"] = summary_provider
     _vl_components["entity_extractor"] = entity_extractor
     _vl_components["graph_storage"] = graph_storage
+    _vl_components["community_detector"] = community_detector
+    _vl_components["community_summarizer"] = community_summarizer
+    _vl_components["graph_embedder"] = graph_embedder
 
 
 def get_vl_components() -> Dict[str, Any]:
     """Dependency that ensures VL components are initialized."""
     if not _vl_components:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="VL pipeline not initialized"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="VL pipeline not initialized"
         )
     return _vl_components
 
@@ -137,6 +143,7 @@ def get_admin_queries() -> AdminQueries:
 # Helper Functions
 # =============================================================================
 
+
 def _format_user_response(user: Dict) -> AdminUserResponse:
     """Format user dict to AdminUserResponse."""
     return AdminUserResponse(
@@ -152,7 +159,9 @@ def _format_user_response(user: Dict) -> AdminUserResponse:
         # Spending fields
         spending_limit_czk=float(user.get("spending_limit_czk", 500.0) or 500.0),
         total_spent_czk=float(user.get("total_spent_czk", 0.0) or 0.0),
-        spending_reset_at=user["spending_reset_at"].isoformat() if user.get("spending_reset_at") else None,
+        spending_reset_at=(
+            user["spending_reset_at"].isoformat() if user.get("spending_reset_at") else None
+        ),
     )
 
 
@@ -160,12 +169,13 @@ def _format_user_response(user: Dict) -> AdminUserResponse:
 # Admin Login
 # =============================================================================
 
+
 @router.post("/login")
 async def admin_login(
     credentials: AdminLoginRequest,
     response: Response,
     auth_manager: AuthManager = Depends(get_auth_manager),
-    auth_queries: AuthQueries = Depends(get_auth_queries)
+    auth_queries: AuthQueries = Depends(get_auth_queries),
 ):
     """
     Admin-only login.
@@ -185,32 +195,26 @@ async def admin_login(
     if not user:
         logger.warning(f"Admin login attempt for non-existent user: {credentials.email}")
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password"
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
         )
 
     # Verify password FIRST (prevent timing attacks on is_admin check)
     if not auth_manager.verify_password(credentials.password, user["password_hash"]):
         logger.warning(f"Failed admin login attempt for user: {credentials.email}")
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password"
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
         )
 
     # Check if account is active
     if not user["is_active"]:
         logger.warning(f"Admin login attempt for inactive user: {credentials.email}")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account is inactive"
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is inactive")
 
     # Check admin privileges
     if not user.get("is_admin", False):
         logger.warning(f"Non-admin login attempt on /admin/login: {credentials.email}")
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin privileges required"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin privileges required"
         )
 
     # Generate JWT token
@@ -243,7 +247,7 @@ async def admin_login(
             "created_at": user["created_at"].isoformat(),
             "last_login_at": user["last_login_at"].isoformat() if user["last_login_at"] else None,
         },
-        "message": "Admin login successful"
+        "message": "Admin login successful",
     }
 
 
@@ -251,12 +255,13 @@ async def admin_login(
 # User CRUD Endpoints
 # =============================================================================
 
+
 @router.get("/users", response_model=AdminUserListResponse)
 async def list_users(
     limit: int = 50,
     offset: int = 0,
     admin: Dict = Depends(get_current_admin_user),
-    auth_queries: AuthQueries = Depends(get_auth_queries)
+    auth_queries: AuthQueries = Depends(get_auth_queries),
 ):
     """
     List all users with pagination.
@@ -272,10 +277,7 @@ async def list_users(
     total = await auth_queries.count_users()
 
     return AdminUserListResponse(
-        users=[_format_user_response(u) for u in users],
-        total=total,
-        limit=limit,
-        offset=offset
+        users=[_format_user_response(u) for u in users], total=total, limit=limit, offset=offset
     )
 
 
@@ -283,7 +285,7 @@ async def list_users(
 async def get_user(
     user_id: int,
     admin: Dict = Depends(get_current_admin_user),
-    admin_queries: AdminQueries = Depends(get_admin_queries)
+    admin_queries: AdminQueries = Depends(get_admin_queries),
 ):
     """
     Get user details by ID.
@@ -300,10 +302,7 @@ async def get_user(
     user = await admin_queries.get_user_full(user_id)
 
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     return _format_user_response(user)
 
@@ -314,7 +313,7 @@ async def create_user(
     admin: Dict = Depends(get_current_admin_user),
     auth_manager: AuthManager = Depends(get_auth_manager),
     auth_queries: AuthQueries = Depends(get_auth_queries),
-    admin_queries: AdminQueries = Depends(get_admin_queries)
+    admin_queries: AdminQueries = Depends(get_admin_queries),
 ):
     """
     Create new user.
@@ -332,10 +331,7 @@ async def create_user(
     # Check if email already exists
     existing_user = await auth_queries.get_user_by_email(user_data.email)
     if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Email already registered"
-        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
     # Admin can set any password - no strength validation
     # Hash password
@@ -347,7 +343,7 @@ async def create_user(
             email=user_data.email,
             password_hash=password_hash,
             full_name=user_data.full_name,
-            is_active=user_data.is_active
+            is_active=user_data.is_active,
         )
 
         # Set admin flag if requested (requires separate update since create_user doesn't support it)
@@ -362,27 +358,24 @@ async def create_user(
         return _format_user_response(user)
 
     except asyncpg.PostgresConnectionError as e:
-        logger.error(f"Database connection failed creating user {user_data.email}: {sanitize_error(e)}")
+        logger.error(
+            f"Database connection failed creating user {user_data.email}: {sanitize_error(e)}"
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database temporarily unavailable. Please try again."
+            detail="Database temporarily unavailable. Please try again.",
         )
     except asyncpg.UniqueViolationError:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Email already exists"
-        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already exists")
     except asyncpg.PostgresError as e:
         logger.error(f"Database error creating user {user_data.email}: {sanitize_error(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
         )
     except Exception as e:
         logger.error(f"Unexpected error creating user {user_data.email}: {sanitize_error(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create user"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create user"
         )
 
 
@@ -393,7 +386,7 @@ async def update_user(
     admin: Dict = Depends(get_current_admin_user),
     auth_manager: AuthManager = Depends(get_auth_manager),
     auth_queries: AuthQueries = Depends(get_auth_queries),
-    admin_queries: AdminQueries = Depends(get_admin_queries)
+    admin_queries: AdminQueries = Depends(get_admin_queries),
 ):
     """
     Update user.
@@ -413,22 +406,18 @@ async def update_user(
     # Check if user exists
     existing_user = await admin_queries.get_user_full(user_id)
     if not existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     # Self-protection checks
     if user_id == admin["id"]:
         if user_data.is_admin is False:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot remove your own admin privileges"
+                detail="Cannot remove your own admin privileges",
             )
         if user_data.is_active is False:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot deactivate your own account"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot deactivate your own account"
             )
 
     # Last-admin protection
@@ -436,7 +425,7 @@ async def update_user(
         if await admin_queries.is_last_admin(user_id):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot demote or deactivate the last admin"
+                detail="Cannot demote or deactivate the last admin",
             )
 
     # Check email uniqueness if changing
@@ -444,8 +433,7 @@ async def update_user(
         email_check = await auth_queries.get_user_by_email(user_data.email)
         if email_check:
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Email already in use by another user"
+                status_code=status.HTTP_409_CONFLICT, detail="Email already in use by another user"
             )
 
     # Update password if provided (admin can set any password, no validation)
@@ -463,7 +451,7 @@ async def update_user(
             is_admin=user_data.is_admin,
             is_active=user_data.is_active,
             agent_variant=user_data.agent_variant,
-            spending_limit_czk=user_data.spending_limit_czk
+            spending_limit_czk=user_data.spending_limit_czk,
         )
 
         # Retrieve updated user
@@ -474,27 +462,22 @@ async def update_user(
         return _format_user_response(user)
 
     except asyncpg.UniqueViolationError:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Email already in use"
-        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already in use")
     except asyncpg.PostgresConnectionError as e:
         logger.error(f"Database connection failed updating user {user_id}: {sanitize_error(e)}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database temporarily unavailable. Please try again."
+            detail="Database temporarily unavailable. Please try again.",
         )
     except asyncpg.PostgresError as e:
         logger.error(f"Database error updating user {user_id}: {sanitize_error(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
         )
     except Exception as e:
         logger.error(f"Unexpected error updating user {user_id}: {sanitize_error(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update user"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update user"
         )
 
 
@@ -502,7 +485,7 @@ async def update_user(
 async def delete_user(
     user_id: int,
     admin: Dict = Depends(get_current_admin_user),
-    admin_queries: AdminQueries = Depends(get_admin_queries)
+    admin_queries: AdminQueries = Depends(get_admin_queries),
 ):
     """
     Delete user.
@@ -517,23 +500,18 @@ async def delete_user(
     # Self-protection
     if user_id == admin["id"]:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot delete your own account"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot delete your own account"
         )
 
     # Check if user exists
     existing_user = await admin_queries.get_user_full(user_id)
     if not existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     # Last-admin protection
     if await admin_queries.is_last_admin(user_id):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot delete the last admin"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot delete the last admin"
         )
 
     # Delete user
@@ -549,24 +527,21 @@ async def delete_user(
         logger.error(f"Database connection failed deleting user {user_id}: {sanitize_error(e)}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database temporarily unavailable. Please try again."
+            detail="Database temporarily unavailable. Please try again.",
         )
     except asyncpg.ForeignKeyViolationError:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Cannot delete user with associated data"
+            status_code=status.HTTP_409_CONFLICT, detail="Cannot delete user with associated data"
         )
     except asyncpg.PostgresError as e:
         logger.error(f"Database error deleting user {user_id}: {sanitize_error(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
         )
     except Exception as e:
         logger.error(f"Unexpected error deleting user {user_id}: {sanitize_error(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete user"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete user"
         )
 
 
@@ -574,10 +549,11 @@ async def delete_user(
 # Health & Stats Endpoints
 # =============================================================================
 
+
 @router.get("/health", response_model=AdminHealthResponse)
 async def admin_health_check(
     admin: Dict = Depends(get_current_admin_user),
-    admin_queries: AdminQueries = Depends(get_admin_queries)
+    admin_queries: AdminQueries = Depends(get_admin_queries),
 ):
     """
     Detailed health check for admin dashboard.
@@ -594,12 +570,14 @@ async def admin_health_check(
 
     # Check PostgreSQL
     db_health = await admin_queries.check_database_health()
-    services.append(ServiceHealthDetail(
-        name="PostgreSQL",
-        status=db_health["status"],
-        latency_ms=db_health.get("latency_ms"),
-        message=db_health.get("message")
-    ))
+    services.append(
+        ServiceHealthDetail(
+            name="PostgreSQL",
+            status=db_health["status"],
+            latency_ms=db_health.get("latency_ms"),
+            message=db_health.get("message"),
+        )
+    )
 
     if db_health["status"] == "unhealthy":
         overall_status = "unhealthy"
@@ -607,24 +585,19 @@ async def admin_health_check(
         overall_status = "degraded"
 
     # Backend is healthy if we got here
-    services.append(ServiceHealthDetail(
-        name="Backend API",
-        status="healthy",
-        latency_ms=None,
-        message=None
-    ))
+    services.append(
+        ServiceHealthDetail(name="Backend API", status="healthy", latency_ms=None, message=None)
+    )
 
     return AdminHealthResponse(
-        status=overall_status,
-        services=services,
-        timestamp=datetime.now(timezone.utc).isoformat()
+        status=overall_status, services=services, timestamp=datetime.now(timezone.utc).isoformat()
     )
 
 
 @router.get("/stats", response_model=AdminStatsResponse)
 async def get_system_stats(
     admin: Dict = Depends(get_current_admin_user),
-    admin_queries: AdminQueries = Depends(get_admin_queries)
+    admin_queries: AdminQueries = Depends(get_admin_queries),
 ):
     """
     Get system statistics for admin dashboard.
@@ -644,7 +617,7 @@ async def get_system_stats(
         total_spent_czk=stats.get("total_spent_czk", 0.0),
         avg_spent_per_message_czk=stats.get("avg_spent_per_message_czk", 0.0),
         avg_spent_per_conversation_czk=stats.get("avg_spent_per_conversation_czk", 0.0),
-        timestamp=datetime.now(timezone.utc).isoformat()
+        timestamp=datetime.now(timezone.utc).isoformat(),
     )
 
 
@@ -652,12 +625,13 @@ async def get_system_stats(
 # Spending Management Endpoints
 # =============================================================================
 
+
 @router.post("/users/{user_id}/spending/reset", status_code=status.HTTP_200_OK)
 async def reset_user_spending(
     user_id: int,
     admin: Dict = Depends(get_current_admin_user),
     auth_queries: AuthQueries = Depends(get_auth_queries),
-    admin_queries: AdminQueries = Depends(get_admin_queries)
+    admin_queries: AdminQueries = Depends(get_admin_queries),
 ):
     """
     Reset user's spending counter to zero.
@@ -674,10 +648,7 @@ async def reset_user_spending(
     # Check if user exists
     user = await admin_queries.get_user_full(user_id)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     # Reset spending
     await auth_queries.reset_user_spending(user_id)
@@ -687,7 +658,7 @@ async def reset_user_spending(
     return {
         "message": "Spending reset successfully",
         "user_id": user_id,
-        "reset_at": datetime.now(timezone.utc).isoformat()
+        "reset_at": datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -701,7 +672,7 @@ async def list_user_conversations(
     user_id: int,
     limit: int = Query(default=50, ge=1, le=200),
     admin: Dict = Depends(get_current_admin_user),
-    admin_queries: AdminQueries = Depends(get_admin_queries)
+    admin_queries: AdminQueries = Depends(get_admin_queries),
 ):
     """
     List all conversations for a specific user (admin view).
@@ -721,10 +692,7 @@ async def list_user_conversations(
     # Verify user exists
     user = await admin_queries.get_user_full(user_id)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     # Get conversations
     conversations = await admin_queries.get_user_conversations(user_id, limit=limit)
@@ -735,7 +703,7 @@ async def list_user_conversations(
             title=conv["title"] or "New Conversation",
             message_count=conv.get("message_count", 0),
             created_at=conv["created_at"].isoformat(),
-            updated_at=conv["updated_at"].isoformat()
+            updated_at=conv["updated_at"].isoformat(),
         )
         for conv in conversations
     ]
@@ -743,14 +711,14 @@ async def list_user_conversations(
 
 @router.get(
     "/users/{user_id}/conversations/{conversation_id}/messages",
-    response_model=List[AdminMessageResponse]
+    response_model=List[AdminMessageResponse],
 )
 async def get_user_conversation_messages(
     user_id: int,
     conversation_id: str,
     limit: int = Query(default=200, ge=1, le=1000),
     admin: Dict = Depends(get_current_admin_user),
-    admin_queries: AdminQueries = Depends(get_admin_queries)
+    admin_queries: AdminQueries = Depends(get_admin_queries),
 ):
     """
     Get all messages for a specific conversation (admin view).
@@ -771,17 +739,11 @@ async def get_user_conversation_messages(
     # Verify user exists
     user = await admin_queries.get_user_full(user_id)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     # Verify conversation belongs to user
     if not await admin_queries.verify_conversation_ownership(conversation_id, user_id):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Conversation not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
 
     # Get messages
     messages = await admin_queries.get_conversation_history(conversation_id, limit=limit)
@@ -792,7 +754,7 @@ async def get_user_conversation_messages(
             role=msg["role"],
             content=msg["content"],
             metadata=msg.get("metadata"),
-            created_at=msg["created_at"].isoformat()
+            created_at=msg["created_at"].isoformat(),
         )
         for msg in messages
     ]
@@ -836,7 +798,7 @@ async def list_admin_documents(
         logger.error(f"Database error listing documents: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to query document metadata"
+            detail="Failed to query document metadata",
         )
 
     doc_meta = {row["document_id"]: row for row in rows}
@@ -847,20 +809,24 @@ async def list_admin_documents(
         for pdf_path in PDF_BASE_DIR.glob("*.pdf"):
             doc_id = pdf_path.stem
             meta = doc_meta.get(doc_id)
-            documents.append({
-                "document_id": doc_id,
-                "display_name": _format_display_name(pdf_path.name),
-                "filename": pdf_path.name,
-                "size_bytes": pdf_path.stat().st_size,
-                "page_count": meta["page_count"] if meta else 0,
-                "created_at": meta["created_at"].isoformat() if meta and meta["created_at"] else None,
-                "category": meta["category"] if meta else "documentation",
-            })
+            documents.append(
+                {
+                    "document_id": doc_id,
+                    "display_name": _format_display_name(pdf_path.name),
+                    "filename": pdf_path.name,
+                    "size_bytes": pdf_path.stat().st_size,
+                    "page_count": meta["page_count"] if meta else 0,
+                    "created_at": (
+                        meta["created_at"].isoformat() if meta and meta["created_at"] else None
+                    ),
+                    "category": meta["category"] if meta else "documentation",
+                }
+            )
     except OSError as e:
         logger.error(f"Filesystem error listing documents: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to scan document directory"
+            detail="Failed to scan document directory",
         )
 
     documents.sort(key=lambda d: d["display_name"])
@@ -882,8 +848,7 @@ async def delete_admin_document(
     # Validate document_id format (prevent path traversal)
     if not DIRECT_ID_PATTERN.match(document_id):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid document ID format"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid document ID format"
         )
 
     vector_store = vl["vector_store"]
@@ -893,8 +858,7 @@ async def delete_admin_document(
     pdf_path = PDF_BASE_DIR / f"{document_id}.pdf"
     if not pdf_path.is_file():
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Document not found: {document_id}"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Document not found: {document_id}"
         )
 
     try:
@@ -938,17 +902,20 @@ async def delete_admin_document(
             )
         logger.info(f"Admin {admin['id']} deleted document {document_id} ({deleted_count})")
 
+        # Schedule debounced graph rebuild (communities reference deleted entities)
+        _schedule_graph_rebuild(f"deleted:{document_id}")
+
     except OSError as e:
         logger.error(f"Filesystem error deleting {document_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete document files"
+            detail="Failed to delete document files",
         )
     except asyncpg.PostgresError as e:
         logger.error(f"Database error deleting {document_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete document vectors"
+            detail="Failed to delete document vectors",
         )
 
     return None
@@ -970,15 +937,14 @@ async def update_document_category(
     """
     if not DIRECT_ID_PATTERN.match(document_id):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid document ID format"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid document ID format"
         )
 
     category = body.get("category")
     if category not in ("documentation", "legislation"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Category must be 'documentation' or 'legislation'"
+            detail="Category must be 'documentation' or 'legislation'",
         )
 
     vector_store = vl["vector_store"]
@@ -987,8 +953,7 @@ async def update_document_category(
     pdf_path = PDF_BASE_DIR / f"{document_id}.pdf"
     if not pdf_path.is_file():
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Document not found: {document_id}"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Document not found: {document_id}"
         )
 
     try:
@@ -1008,7 +973,7 @@ async def update_document_category(
         logger.error(f"Database error updating category for {document_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update document category"
+            detail="Failed to update document category",
         )
 
     return {"document_id": document_id, "category": category}
@@ -1028,15 +993,13 @@ async def reindex_admin_document(
     # Validate document_id format (prevent path traversal)
     if not DIRECT_ID_PATTERN.match(document_id):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid document ID format"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid document ID format"
         )
 
     pdf_path = PDF_BASE_DIR / f"{document_id}.pdf"
     if not pdf_path.is_file():
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Document not found: {document_id}"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Document not found: {document_id}"
         )
 
     jina_client = vl["jina_client"]
@@ -1053,7 +1016,11 @@ async def reindex_admin_document(
             # replaced in-place — no need to delete upfront.
             # Images are overwritten naturally (same filenames).
             async for event in index_document_pipeline(
-                pdf_path, document_id, jina_client, page_store, vector_store,
+                pdf_path,
+                document_id,
+                jina_client,
+                page_store,
+                vector_store,
                 summary_provider=summary_provider,
                 entity_extractor=entity_extractor,
                 graph_storage=graph_storage,
@@ -1066,23 +1033,33 @@ async def reindex_admin_document(
             async with vector_store.pool.acquire() as conn:
                 # Get current page count from the just-rendered images
                 doc_dir = page_store.store_dir / document_id
-                current_page_count = len(list(doc_dir.glob(f"*.{page_store.image_format}"))) if doc_dir.exists() else 0
+                current_page_count = (
+                    len(list(doc_dir.glob(f"*.{page_store.image_format}")))
+                    if doc_dir.exists()
+                    else 0
+                )
                 if current_page_count > 0:
                     await conn.execute(
                         "DELETE FROM vectors.vl_pages WHERE document_id = $1 AND page_number > $2",
-                        document_id, current_page_count,
+                        document_id,
+                        current_page_count,
                     )
 
             logger.info(f"Admin {admin['id']} reindexed document {document_id}")
+
+            # Schedule debounced graph rebuild (new entities from reindex)
+            _schedule_graph_rebuild(document_id)
 
         except Exception as e:
             logger.error(f"Reindex failed for {document_id}: {e}", exc_info=True)
             yield {
                 "event": "error",
-                "data": json.dumps({
-                    "message": str(e),
-                    "stage": "reindex",
-                }),
+                "data": json.dumps(
+                    {
+                        "message": str(e),
+                        "stage": "reindex",
+                    }
+                ),
             }
 
     return EventSourceResponse(event_generator())

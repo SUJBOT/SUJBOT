@@ -20,14 +20,17 @@ Security features:
 # (prevents IndexError: pop from empty deque in asyncio)
 try:
     import nest_asyncio
+
     nest_asyncio.apply()
 except ImportError as e:
     import sys
+
     print(f"FATAL: nest_asyncio is required but not installed: {e}", file=sys.stderr)
     print("Install with: pip install nest_asyncio", file=sys.stderr)
     sys.exit(1)
 except Exception as e:
     import sys
+
     print(f"FATAL: Failed to apply nest_asyncio: {e}", file=sys.stderr)
     sys.exit(1)
 
@@ -55,12 +58,23 @@ from backend.middleware.auth import AuthMiddleware, get_current_user, set_auth_i
 from backend.middleware.rate_limit import RateLimitMiddleware
 from backend.middleware.security_headers import SecurityHeadersMiddleware
 from backend.routes.auth import router as auth_router, set_dependencies
-from backend.routes.conversations import router as conversations_router, set_postgres_adapter, get_postgres_adapter
-from backend.routes.feedback import router as feedback_router, set_postgres_adapter as set_feedback_postgres_adapter
+from backend.routes.conversations import (
+    router as conversations_router,
+    set_postgres_adapter,
+    get_postgres_adapter,
+)
+from backend.routes.feedback import (
+    router as feedback_router,
+    set_postgres_adapter as set_feedback_postgres_adapter,
+)
 from backend.routes.citations import router as citations_router
 from backend.routes.documents import router as documents_router, set_vl_components
 from backend.routes.settings import router as settings_router
-from backend.routes.admin import router as admin_router, set_admin_dependencies, set_admin_vl_components
+from backend.routes.admin import (
+    router as admin_router,
+    set_admin_dependencies,
+    set_admin_vl_components,
+)
 
 # Import PostgreSQL adapter for user/conversation storage
 from src.storage.postgres_adapter import PostgreSQLStorageAdapter
@@ -76,8 +90,7 @@ from backend.services.exchange_rate import get_usd_to_czk_rate, usd_to_czk
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -154,10 +167,7 @@ async def lifespan(app: FastAPI):
         # =====================================================================
 
         logger.info("Initializing authentication system...")
-        auth_manager = AuthManager(
-            secret_key=auth_secret,
-            token_expiry_hours=24
-        )
+        auth_manager = AuthManager(secret_key=auth_secret, token_expiry_hours=24)
         auth_queries = AuthQueries(postgres_adapter)
 
         # Set dependencies for auth routes and middleware
@@ -189,11 +199,13 @@ async def lifespan(app: FastAPI):
 
         try:
             from src.config import get_config
+
             config = get_config()
             vl_cfg = config.vl
             from src.vl.jina_client import JinaClient
             from src.vl.page_store import PageStore
             from src.storage.postgres_adapter import PostgresVectorStoreAdapter
+
             if vl_cfg:
                 jina_client = JinaClient(
                     model=vl_cfg.jina_model,
@@ -216,11 +228,14 @@ async def lifespan(app: FastAPI):
                 try:
                     from backend.constants import get_variant_model
                     from src.agent.providers.factory import create_provider
+
                     summary_model = get_variant_model("remote")
                     summary_provider = create_provider(summary_model)
                     logger.info(f"✓ Summary provider initialized: {summary_model}")
                 except Exception as e:
-                    logger.error(f"Summary provider init failed (summaries disabled): {e}", exc_info=True)
+                    logger.error(
+                        f"Summary provider init failed (summaries disabled): {e}", exc_info=True
+                    )
 
                 # Initialize VL vector store pool (needed before sharing with graph storage)
                 await vl_vector_store.initialize()
@@ -237,6 +252,9 @@ async def lifespan(app: FastAPI):
                     GraphEmbedder = None
                     EntityExtractor = None
 
+                community_detector = None
+                community_summarizer = None
+
                 if GraphStorageAdapter is not None:
                     try:
                         # Share VL vector store pool (avoids duplicate connections
@@ -249,17 +267,47 @@ async def lifespan(app: FastAPI):
                             entity_extractor = EntityExtractor(summary_provider)
                             logger.info("✓ Graph components initialized for entity extraction")
                         else:
-                            logger.info("Graph storage initialized (entity extractor requires summary provider)")
+                            logger.info(
+                                "Graph storage initialized (entity extractor requires summary provider)"
+                            )
+
+                        # Create community detection + summarization components
+                        from src.graph.community_detector import CommunityDetector
+                        from src.graph.community_summarizer import CommunitySummarizer
+
+                        community_detector = CommunityDetector()
+                        community_summarizer = (
+                            CommunitySummarizer(summary_provider) if summary_provider else None
+                        )
+                        logger.info(
+                            "✓ Graph community components initialized "
+                            "(detector=yes, summarizer=%s)",
+                            "yes" if community_summarizer else "no",
+                        )
                     except Exception as e:
                         logger.error(f"Graph component initialization failed: {e}", exc_info=True)
 
                 set_vl_components(
-                    jina_client, page_store, vl_vector_store, summary_provider,
-                    entity_extractor=entity_extractor, graph_storage=graph_storage,
+                    jina_client,
+                    page_store,
+                    vl_vector_store,
+                    summary_provider,
+                    entity_extractor=entity_extractor,
+                    graph_storage=graph_storage,
+                    community_detector=community_detector,
+                    community_summarizer=community_summarizer,
+                    graph_embedder=graph_embedder if graph_storage else None,
                 )
                 set_admin_vl_components(
-                    jina_client, page_store, vl_vector_store, summary_provider,
-                    entity_extractor=entity_extractor, graph_storage=graph_storage,
+                    jina_client,
+                    page_store,
+                    vl_vector_store,
+                    summary_provider,
+                    entity_extractor=entity_extractor,
+                    graph_storage=graph_storage,
+                    community_detector=community_detector,
+                    community_summarizer=community_summarizer,
+                    graph_embedder=graph_embedder if graph_storage else None,
                 )
                 logger.info("✓ VL components initialized for document upload")
             else:
@@ -273,6 +321,7 @@ async def lifespan(app: FastAPI):
 
         try:
             from src.config import get_config
+
             config = get_config()
             missing_pricing = validate_pricing_coverage(config)
             if missing_pricing:
@@ -283,7 +332,9 @@ async def lifespan(app: FastAPI):
                     logger.warning(f"  - {model}")
                 logger.warning("")
                 logger.warning("Fix: Add pricing to config.json model_registry.llm_models")
-                logger.warning("Or run: uv run python scripts/fetch_deepinfra_pricing.py --config-format --update")
+                logger.warning(
+                    "Or run: uv run python scripts/fetch_deepinfra_pricing.py --config-format --update"
+                )
                 logger.warning("=" * 60)
             else:
                 logger.info("✓ All configured models have pricing data")
@@ -307,11 +358,11 @@ async def lifespan(app: FastAPI):
 
     if agent_adapter:
         # Shutdown cached variant runners (closes connection pools)
-        if hasattr(agent_adapter, 'shutdown_variant_runners'):
+        if hasattr(agent_adapter, "shutdown_variant_runners"):
             await agent_adapter.shutdown_variant_runners()
 
         # Shutdown main runner
-        if hasattr(agent_adapter, 'runner'):
+        if hasattr(agent_adapter, "runner"):
             agent_adapter.runner.shutdown()
 
     # Note: graph_storage shares vl_vector_store pool (_owns_pool=False),
@@ -329,7 +380,7 @@ app = FastAPI(
     title="SUJBOT Web API",
     description="Web interface for SUJBOT RAG system with authentication",
     version="2.0.0",  # Incremented for security update
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # =========================================================================
@@ -340,8 +391,9 @@ app = FastAPI(
 app.add_middleware(
     SecurityHeadersMiddleware,
     environment=os.getenv("BUILD_TARGET", "development"),
-    enable_hsts=True  # HSTS only enabled in production
+    enable_hsts=True,  # HSTS only enabled in production
 )
+
 
 # 2. CORS (cross-origin resource sharing)
 # Build CORS origins list dynamically to support any rootless Docker user
@@ -393,16 +445,12 @@ app.add_middleware(
         "X-Mx-ReqToken",
         "Keep-Alive",
         "If-Modified-Since",
-        "X-CSRF-Token"
+        "X-CSRF-Token",
     ],
 )
 
 # 3. Rate Limiting (prevents abuse at network level)
-app.add_middleware(
-    RateLimitMiddleware,
-    requests_per_minute=60,
-    burst_size=10
-)
+app.add_middleware(RateLimitMiddleware, requests_per_minute=60, burst_size=10)
 
 # Note: Authentication is handled via FastAPI dependencies (Depends(get_current_user))
 # rather than global middleware, because auth_manager is initialized in lifespan.
@@ -444,18 +492,12 @@ async def health_check():
     # Hot reload test: Modified to verify development mode works
     """
     if agent_adapter is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Agent not initialized"
-        )
+        raise HTTPException(status_code=503, detail="Agent not initialized")
 
     health_status = agent_adapter.get_health_status()
 
     if health_status["status"] == "error":
-        raise HTTPException(
-            status_code=503,
-            detail=health_status["message"]
-        )
+        raise HTTPException(status_code=503, detail=health_status["message"])
 
     return HealthResponse(**health_status)
 
@@ -477,18 +519,16 @@ def _create_fallback_title(user_message: str, max_length: int = 50) -> str:
         return message
 
     # Try to truncate at word boundary
-    truncated = message[:max_length].rsplit(' ', 1)[0]
+    truncated = message[:max_length].rsplit(" ", 1)[0]
     if len(truncated) < max_length // 2:
         # Word boundary too far back, just truncate
-        truncated = message[:max_length - 3]
+        truncated = message[: max_length - 3]
 
     return truncated + "..."
 
 
 async def _maybe_generate_title(
-    conversation_id: str,
-    user_message: str,
-    adapter: PostgreSQLStorageAdapter
+    conversation_id: str, user_message: str, adapter: PostgreSQLStorageAdapter
 ) -> Optional[str]:
     """
     Generate title for new conversation with DB lock (multi-worker safe).
@@ -515,12 +555,14 @@ async def _maybe_generate_title(
                   AND (SELECT COUNT(*) FROM auth.messages WHERE conversation_id = $1) <= 1
                 RETURNING id
                 """,
-                conversation_id
+                conversation_id,
             )
 
             if not result:
                 # Either already generating, or not first message
-                logger.debug(f"Skipping title generation for {conversation_id}: not first message or already generating")
+                logger.debug(
+                    f"Skipping title generation for {conversation_id}: not first message or already generating"
+                )
                 return None
 
         logger.debug(f"Acquired title generation lock for {conversation_id}")
@@ -531,7 +573,9 @@ async def _maybe_generate_title(
         if not title:
             # LLM failed - use fallback
             title = _create_fallback_title(user_message)
-            logger.info(f"LLM title generation failed for {conversation_id}, using fallback: {title}")
+            logger.info(
+                f"LLM title generation failed for {conversation_id}, using fallback: {title}"
+            )
 
         # Update title and release lock
         async with adapter.pool.acquire() as conn:
@@ -541,7 +585,8 @@ async def _maybe_generate_title(
                 SET title = $1, is_title_generating = false, updated_at = NOW()
                 WHERE id = $2
                 """,
-                title, conversation_id
+                title,
+                conversation_id,
             )
         logger.info(f"Saved title for {conversation_id}: {title}")
         return title
@@ -551,7 +596,9 @@ async def _maybe_generate_title(
     except ConnectionError as e:
         logger.warning(f"Connection error during title generation for {conversation_id}: {e}")
     except Exception as e:
-        logger.error(f"Unexpected error in title generation for {conversation_id}: {e}", exc_info=True)
+        logger.error(
+            f"Unexpected error in title generation for {conversation_id}: {e}", exc_info=True
+        )
 
     # On any error, try to save fallback title and release lock
     try:
@@ -563,7 +610,8 @@ async def _maybe_generate_title(
                 SET title = $1, is_title_generating = false, updated_at = NOW()
                 WHERE id = $2
                 """,
-                fallback_title, conversation_id
+                fallback_title,
+                conversation_id,
             )
         logger.info(f"Saved fallback title after error for {conversation_id}: {fallback_title}")
         return fallback_title
@@ -580,7 +628,7 @@ async def _maybe_generate_title(
 async def chat_stream(
     request: ChatRequest,
     user: Dict = Depends(get_current_user),
-    adapter: PostgreSQLStorageAdapter = Depends(get_postgres_adapter)
+    adapter: PostgreSQLStorageAdapter = Depends(get_postgres_adapter),
 ):
     """
     Stream chat response using Server-Sent Events (SSE).
@@ -621,10 +669,7 @@ async def chat_stream(
     which tools are being invoked.
     """
     if agent_adapter is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Agent not initialized"
-        )
+        raise HTTPException(status_code=503, detail="Agent not initialized")
 
     # Check spending limit before processing
     if auth_queries:
@@ -638,8 +683,8 @@ async def chat_stream(
                     "total_spent_czk": spending["total_spent_czk"],
                     "spending_limit_czk": spending["spending_limit_czk"],
                     "message_cs": "Byl dosažen limit výdajů. Kontaktujte administrátora.",
-                    "message_en": "Spending limit reached. Contact administrator."
-                }
+                    "message_en": "Spending limit reached. Contact administrator.",
+                },
             )
 
     # Get exchange rate for cost conversion (cached for 24h)
@@ -654,7 +699,9 @@ async def chat_stream(
             user_metadata = None
             if request.selected_context:
                 # Calculate line count same way as frontend: non-empty lines, min 1
-                line_count = len([l for l in request.selected_context.text.split('\n') if l.strip()]) or 1
+                line_count = (
+                    len([l for l in request.selected_context.text.split("\n") if l.strip()]) or 1
+                )
                 user_metadata = {
                     "selected_context": {
                         "document_id": request.selected_context.document_id,
@@ -669,7 +716,7 @@ async def chat_stream(
                 conversation_id=request.conversation_id,
                 role="user",
                 content=request.message,
-                metadata=user_metadata
+                metadata=user_metadata,
             )
             logger.debug(f"Saved user message to conversation {request.conversation_id}")
 
@@ -678,7 +725,7 @@ async def chat_stream(
             generated_title = await _maybe_generate_title(
                 conversation_id=request.conversation_id,
                 user_message=request.message,
-                adapter=adapter
+                adapter=adapter,
             )
         except Exception as e:
             logger.error(f"Failed to save user message: {e}", exc_info=True)
@@ -691,7 +738,7 @@ async def chat_stream(
         if generated_title:
             yield {
                 "event": "title_update",
-                "data": json.dumps({"title": generated_title}, ensure_ascii=False)
+                "data": json.dumps({"title": generated_title}, ensure_ascii=False),
             }
 
         # Collect assistant response for database storage
@@ -703,8 +750,7 @@ async def chat_stream(
             message_history = None
             if request.messages:
                 message_history = [
-                    {"role": msg.role, "content": msg.content}
-                    for msg in request.messages
+                    {"role": msg.role, "content": msg.content} for msg in request.messages
                 ]
 
             # Format query with selected context (if provided)
@@ -722,13 +768,15 @@ async def chat_stream(
                     f"---\n{ctx.text}\n---]\n\n"
                 )
                 query = context_prefix + request.message
-                logger.debug(f"Added selected context from {ctx.document_name} ({len(ctx.text)} chars)")
+                logger.debug(
+                    f"Added selected context from {ctx.document_name} ({len(ctx.text)} chars)"
+                )
 
             async for event in agent_adapter.stream_response(
                 query=query,
                 conversation_id=request.conversation_id,
                 user_id=user["id"],
-                messages=message_history
+                messages=message_history,
             ):
                 # Format as SSE event
                 event_type = event["event"]
@@ -748,7 +796,7 @@ async def chat_stream(
                     logger.error(
                         f"Failed to serialize SSE event data with UTF-8: {e}. "
                         f"Event type: {event.get('event')}. Falling back to ASCII.",
-                        exc_info=True
+                        exc_info=True,
                     )
                     # Fall back to ASCII encoding (escapes non-ASCII as \uXXXX)
                     try:
@@ -758,18 +806,18 @@ async def chat_stream(
                         # Send error event instead of crashing entire stream
                         yield {
                             "event": "error",
-                            "data": json.dumps({
-                                "error": f"Server failed to encode response data: {type(e).__name__}",
-                                "type": "EncodingError",
-                                "event_type": event.get("event")
-                            }, ensure_ascii=True)
+                            "data": json.dumps(
+                                {
+                                    "error": f"Server failed to encode response data: {type(e).__name__}",
+                                    "type": "EncodingError",
+                                    "event_type": event.get("event"),
+                                },
+                                ensure_ascii=True,
+                            ),
                         }
                         continue
 
-                yield {
-                    "event": event_type,
-                    "data": event_data
-                }
+                yield {"event": event_type, "data": event_data}
 
             # Stream completed successfully - save assistant message to database
             saved_message_id = None
@@ -779,21 +827,26 @@ async def chat_stream(
                         conversation_id=request.conversation_id,
                         role="assistant",
                         content=collected_response,
-                        metadata=collected_metadata if collected_metadata else None
+                        metadata=collected_metadata if collected_metadata else None,
                     )
-                    logger.debug(f"Saved assistant message {saved_message_id} to conversation {request.conversation_id}")
+                    logger.debug(
+                        f"Saved assistant message {saved_message_id} to conversation {request.conversation_id}"
+                    )
 
                     # Send message_saved event with database ID for feedback functionality
                     yield {
                         "event": "message_saved",
-                        "data": json.dumps({"message_id": saved_message_id}, ensure_ascii=False)
+                        "data": json.dumps({"message_id": saved_message_id}, ensure_ascii=False),
                     }
                 except Exception as e:
                     logger.error(f"Failed to save assistant message: {e}", exc_info=True)
                     # Inform frontend that save failed - feedback won't work for this message
                     yield {
                         "event": "message_saved",
-                        "data": json.dumps({"message_id": None, "error": "Failed to save message"}, ensure_ascii=False)
+                        "data": json.dumps(
+                            {"message_id": None, "error": "Failed to save message"},
+                            ensure_ascii=False,
+                        ),
                     }
 
             # Record spending for this message
@@ -810,9 +863,7 @@ async def chat_stream(
                                 f"${cost_usd:.6f} = {cost_czk:.2f} CZK"
                             )
                         else:
-                            logger.warning(
-                                f"User {user['id']} hit spending limit during request"
-                            )
+                            logger.warning(f"User {user['id']} hit spending limit during request")
 
                         # Add CZK cost to metadata for frontend display
                         collected_metadata["cost"]["total_cost_czk"] = cost_czk
@@ -825,8 +876,8 @@ async def chat_stream(
                             "user_id": user["id"],
                             "cost_usd": cost_usd,
                             "cost_czk": cost_czk,
-                            "exchange_rate": exchange_rate
-                        }
+                            "exchange_rate": exchange_rate,
+                        },
                     )
                     # Don't crash stream if spending recording fails
 
@@ -836,7 +887,10 @@ async def chat_stream(
             if request.conversation_id and collected_response:
                 try:
                     # Mark response as interrupted so user knows it's incomplete
-                    partial_response = collected_response + "\n\n---\n*[Response interrupted - page was refreshed]*"
+                    partial_response = (
+                        collected_response
+                        + "\n\n---\n*[Response interrupted - page was refreshed]*"
+                    )
                     await adapter.append_message(
                         conversation_id=request.conversation_id,
                         role="assistant",
@@ -844,8 +898,8 @@ async def chat_stream(
                         metadata={
                             **(collected_metadata if collected_metadata else {}),
                             "interrupted": True,
-                            "interrupt_reason": "client_disconnect"
-                        }
+                            "interrupt_reason": "client_disconnect",
+                        },
                     )
                     logger.info(
                         f"Saved partial response ({len(collected_response)} chars) "
@@ -868,19 +922,21 @@ async def chat_stream(
             logger.critical(f"OUT OF MEMORY during streaming: {e}", exc_info=True)
             yield {
                 "event": "error",
-                "data": json.dumps({
-                    "error": "Server out of memory. Please contact administrator.",
-                    "type": "MemoryError"
-                }, ensure_ascii=True)
+                "data": json.dumps(
+                    {
+                        "error": "Server out of memory. Please contact administrator.",
+                        "type": "MemoryError",
+                    },
+                    ensure_ascii=True,
+                ),
             }
         except Exception as e:
             logger.error(f"Error in event generator: {e}", exc_info=True)
             yield {
                 "event": "error",
-                "data": json.dumps({
-                    "error": str(e),
-                    "type": type(e).__name__
-                }, ensure_ascii=True)  # Use ASCII for error messages (defensive)
+                "data": json.dumps(
+                    {"error": str(e), "type": type(e).__name__}, ensure_ascii=True
+                ),  # Use ASCII for error messages (defensive)
             }
 
     return EventSourceResponse(event_generator())
@@ -960,9 +1016,7 @@ async def chat_clarify(request: ClarificationRequest, user: Dict = Depends(get_c
             logger.error(f"Error in clarification event generator: {e}", exc_info=True)
             yield {
                 "event": "error",
-                "data": json.dumps(
-                    {"error": str(e), "type": type(e).__name__}, ensure_ascii=True
-                ),
+                "data": json.dumps({"error": str(e), "type": type(e).__name__}, ensure_ascii=True),
             }
 
     return EventSourceResponse(event_generator())
@@ -978,12 +1032,7 @@ async def delete_message(conversation_id: str, message_id: str):
 @app.get("/")
 async def root():
     """Root endpoint with API info."""
-    return {
-        "name": "SUJBOT Web API",
-        "version": "1.0.0",
-        "status": "running",
-        "docs": "/docs"
-    }
+    return {"name": "SUJBOT Web API", "version": "1.0.0", "status": "running", "docs": "/docs"}
 
 
 if __name__ == "__main__":
@@ -994,5 +1043,5 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=8000,
         reload=True,  # Auto-reload on code changes
-        log_level="info"
+        log_level="info",
     )

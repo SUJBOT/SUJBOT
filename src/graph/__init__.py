@@ -13,6 +13,7 @@ from .community_detector import CommunityDetector
 from .community_summarizer import CommunitySummarizer
 from .embedder import GraphEmbedder
 from .entity_extractor import EntityExtractor
+from .post_processor import rebuild_graph_communities
 from .storage import GraphStorageAdapter
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,7 @@ __all__ = [
     "EntityExtractor",
     "CommunityDetector",
     "CommunitySummarizer",
+    "rebuild_graph_communities",
     "create_graph_components",
 ]
 
