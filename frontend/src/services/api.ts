@@ -190,7 +190,12 @@ export class ApiService {
       document_name: string;
       page_start: number;
       page_end: number;
-    } | null
+    } | null,
+    attachments?: Array<{
+      filename: string;
+      mime_type: string;
+      base64_data: string;
+    }> | null
   ): AsyncGenerator<SSEEvent, void, unknown> {
     let response;
     try {
@@ -204,6 +209,7 @@ export class ApiService {
           skip_save_user_message: skipSaveUserMessage || false,
           messages: messageHistory,  // Conversation history for context
           selected_context: selectedContext || null,  // Selected text from PDF
+          attachments: attachments || null,  // File attachments for multimodal context
         }),
         signal: abortSignal,  // Allow cancellation on page refresh/unmount
       });
@@ -605,6 +611,16 @@ export class ApiService {
         }
       }
 
+      // Extract attachment metadata from persisted user messages
+      let attachments = undefined;
+      if (msg.role === 'user' && msg.metadata?.attachments && Array.isArray(msg.metadata.attachments)) {
+        attachments = msg.metadata.attachments.map((att: any) => ({
+          filename: att.filename,
+          mimeType: att.mime_type,
+          sizeBytes: att.size_bytes,
+        }));
+      }
+
       return {
         id: msg.id,
         role: msg.role,
@@ -614,6 +630,7 @@ export class ApiService {
         cost, // Transformed cost data
         toolCalls: msg.metadata?.tool_calls, // Map toolCalls from metadata if present
         selectedContext, // Persisted PDF selection indicator
+        attachments, // Persisted attachment metadata
       };
     });
   }

@@ -15,7 +15,8 @@ Exception Hierarchy:
     │                ToolHallucinationError, AgentTimeoutError, MaxIterationsError
     ├── EvaluationError → JudgeError, TrajectoryError, FeedbackSubmissionError
     ├── RetrievalError → EmbeddingError, SearchError
-    └── VLError → JinaAPIError, PageRenderError
+    ├── VLError → JinaAPIError, PageRenderError
+    └── ConversionError
 
 Usage:
     from src.exceptions import (
@@ -278,6 +279,15 @@ class JinaAPIError(VLError):
 
 class PageRenderError(VLError):
     """PDF page rendering error."""
+    pass
+
+
+# =============================================================================
+# Conversion Errors
+# =============================================================================
+
+class ConversionError(SujbotError):
+    """Document format conversion failed."""
     pass
 
 

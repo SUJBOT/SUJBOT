@@ -24,6 +24,9 @@ export function useDocumentUpload() {
   const [result, setResult] = useState<UploadResult | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
+  // Note: upload reconnect (surviving page refresh) is not yet supported
+  // by the backend. For now, a refresh during upload loses progress.
+
   const startUpload = useCallback(async (file: File, category?: string) => {
     setIsUploading(true);
     setProgress(null);
@@ -54,8 +57,10 @@ export function useDocumentUpload() {
     }
   }, []);
 
-  const cancelUpload = useCallback(() => {
+  const cancelUpload = useCallback(async () => {
+    // Abort local SSE stream (backend cancellation handled by SSE disconnect)
     abortRef.current?.abort();
+    // Reset local state
     setIsUploading(false);
     setProgress(null);
     setError(null);

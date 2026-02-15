@@ -317,7 +317,26 @@ async def lifespan(app: FastAPI):
             logger.warning(f"VL components not available (upload disabled): {e}")
 
         # =====================================================================
-        # 6. Validate Pricing Coverage for Configured Models
+        # 6. Check Document Conversion Dependencies
+        # =====================================================================
+
+        try:
+            from src.vl.document_converter import DocumentConverter
+
+            deps = DocumentConverter.check_dependencies()
+            if not deps["libreoffice"]:
+                logger.warning("LibreOffice not found — DOCX upload will fail")
+            else:
+                logger.info("✓ LibreOffice available for DOCX conversion")
+            if not deps["pdflatex"]:
+                logger.warning("pdflatex not found — LaTeX upload will fail")
+            else:
+                logger.info("✓ pdflatex available for LaTeX conversion")
+        except Exception as e:
+            logger.warning(f"Could not check document conversion dependencies: {e}")
+
+        # =====================================================================
+        # 7. Validate Pricing Coverage for Configured Models
         # =====================================================================
 
         try:
@@ -509,62 +528,123 @@ async def health_check():
 # Note: Authentication endpoints are in routes/auth.py (/auth/login, /auth/logout, etc.)
 
 
-def _pdf_to_page_images(
-    base64_pdf: str, filename: str, max_pages: int = 10, dpi: int = 150
-) -> List[Dict]:
-    """Convert PDF to page images in memory using PyMuPDF.
+def _pdf_to_page_images(pdf_bytes: bytes, max_pages: int = 10, dpi: int = 150) -> list:
+    """Render PDF bytes to PNG page images for multimodal LLM context."""
+    import fitz
 
-    Returns list of dicts with page_number and base64_data (PNG).
-    Reuses same DPI as PageStore.render_pdf_pages() for consistency.
+    try:
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    except Exception as e:
+        logger.error("Failed to open PDF attachment (%d bytes): %s", len(pdf_bytes), e)
+        raise ValueError(f"Cannot open PDF: {e}") from e
+
+    images = []
+    try:
+        zoom = dpi / 72.0
+        matrix = fitz.Matrix(zoom, zoom)
+        for page_num in range(min(len(doc), max_pages)):
+            page = doc[page_num]
+            pix = page.get_pixmap(matrix=matrix)
+            png_bytes = pix.tobytes("png")
+            images.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": base64.b64encode(png_bytes).decode("ascii"),
+                },
+            })
+    finally:
+        doc.close()
+    return images
+
+
+def _build_attachment_blocks(attachments: list) -> list:
     """
-    import fitz  # PyMuPDF
+    Convert validated AttachmentData list into multimodal content blocks
+    for the agent runner.
 
-    pdf_bytes = base64.b64decode(base64_pdf)
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    pages = []
-    matrix = fitz.Matrix(dpi / 72.0, dpi / 72.0)
-    for i in range(min(len(doc), max_pages)):
-        pix = doc[i].get_pixmap(matrix=matrix)
-        pages.append({
-            "page_number": i + 1,
-            "base64_data": base64.b64encode(pix.tobytes("png")).decode(),
-        })
-    total_pages = len(doc)
-    doc.close()
-    return pages, total_pages
+    Processing by MIME type:
+    - Images → pass through as base64 image blocks
+    - PDF → render pages to PNG images (max 10 pages)
+    - Text documents → extract text content (max 30K chars)
+    """
+    from src.vl.document_converter import DocumentConverter, SUPPORTED_EXTENSIONS
 
-
-def _build_attachment_blocks(attachments) -> List[Dict]:
-    """Convert attachments into Anthropic multimodal content blocks."""
     blocks = []
+    converter = DocumentConverter()
+
+    # Text-based MIME types
+    text_mime_types = {
+        "text/plain", "text/markdown", "text/html",
+        "application/x-tex", "text/x-tex", "application/x-latex",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    }
+
     for att in attachments:
-        if att.mime_type == "application/pdf":
-            pages, total_pages = _pdf_to_page_images(att.base64_data, att.filename)
-            truncated = total_pages > len(pages)
-            for page in pages:
-                blocks.append({
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "image/png",
-                        "data": page["base64_data"],
-                    },
-                })
-                label = f"[Attached PDF: {att.filename}, page {page['page_number']}"
-                if truncated and page["page_number"] == len(pages):
-                    label += f" (showing {len(pages)}/{total_pages} pages)"
-                label += "]"
-                blocks.append({"type": "text", "text": label})
-        else:
+        mime = att.mime_type
+        raw_bytes = base64.b64decode(att.base64_data)
+
+        if mime.startswith("image/"):
+            # Pass image through directly
             blocks.append({
                 "type": "image",
                 "source": {
                     "type": "base64",
-                    "media_type": att.mime_type,
+                    "media_type": mime,
                     "data": att.base64_data,
                 },
             })
-            blocks.append({"type": "text", "text": f"[Attached image: {att.filename}]"})
+            blocks.append({
+                "type": "text",
+                "text": f"[Attached image: {att.filename}]",
+            })
+
+        elif mime == "application/pdf":
+            # Render PDF pages to images (with per-page labels for tool access)
+            try:
+                page_images = _pdf_to_page_images(raw_bytes)
+                for page_num, img_block in enumerate(page_images, 1):
+                    blocks.append(img_block)
+                    blocks.append({
+                        "type": "text",
+                        "text": f"[Attached PDF: {att.filename}, page {page_num}]",
+                    })
+            except Exception as e:
+                logger.warning(f"Failed to render PDF attachment {att.filename}: {e}")
+                blocks.append({
+                    "type": "text",
+                    "text": f"[Attached PDF: {att.filename} — could not render]",
+                })
+
+        elif mime in text_mime_types:
+            # Extract text from document
+            ext = Path(att.filename).suffix.lower()
+            if ext not in SUPPORTED_EXTENSIONS:
+                ext = ".txt"  # Fallback
+
+            try:
+                text = converter.extract_text(raw_bytes, ext)
+                # Truncate very long documents
+                max_chars = 30_000
+                if len(text) > max_chars:
+                    text = text[:max_chars] + f"\n\n... [truncated, {len(text)} total chars]"
+                blocks.append({
+                    "type": "text",
+                    "text": f"[Attached document: {att.filename}]\n\n{text}",
+                })
+            except Exception as e:
+                logger.warning(f"Failed to extract text from {att.filename}: {e}")
+                blocks.append({
+                    "type": "text",
+                    "text": f"[Attached document: {att.filename} — could not extract text]",
+                })
+        else:
+            blocks.append({
+                "type": "text",
+                "text": f"[Attached file: {att.filename} — unsupported type for preview]",
+            })
+
     return blocks
 
 
@@ -772,7 +852,7 @@ async def chat_stream(
                     }
                 }
 
-            # Add attachment metadata (NOT the base64 data — just filenames/sizes)
+            # Add attachment metadata (filenames/types only, NOT base64 data)
             if request.attachments:
                 if user_metadata is None:
                     user_metadata = {}
@@ -780,7 +860,7 @@ async def chat_stream(
                     {
                         "filename": att.filename,
                         "mime_type": att.mime_type,
-                        "size_bytes": len(base64.b64decode(att.base64_data)),
+                        "size_bytes": len(att.base64_data) * 3 // 4,
                     }
                     for att in request.attachments
                 ]
@@ -845,25 +925,28 @@ async def chat_stream(
                     f"Added selected context from {ctx.document_name} ({len(ctx.text)} chars)"
                 )
 
-            # Process attachments into multimodal content blocks
+            # Build multimodal attachment blocks for agent
             attachment_blocks = None
             if request.attachments:
                 try:
                     attachment_blocks = _build_attachment_blocks(request.attachments)
                     logger.info(
-                        f"Processed {len(request.attachments)} attachment(s) "
-                        f"into {len(attachment_blocks)} content blocks"
+                        f"Built {len(attachment_blocks)} attachment blocks from "
+                        f"{len(request.attachments)} attachments"
                     )
                 except Exception as e:
                     logger.error(f"Failed to process attachments: {e}", exc_info=True)
+                    # Notify user that attachments could not be processed
                     yield {
                         "event": "error",
                         "data": json.dumps(
-                            {"error": f"Failed to process attachments: {e}", "type": "AttachmentError"},
+                            {
+                                "error": "Attachments could not be processed. Continuing without them.",
+                                "type": "AttachmentError",
+                            },
                             ensure_ascii=True,
                         ),
                     }
-                    return
 
             async for event in agent_adapter.stream_response(
                 query=query,

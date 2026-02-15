@@ -8,6 +8,7 @@ LLM that decides which tools to call and when to stop.
 import asyncio
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
@@ -284,6 +285,7 @@ class SingleAgentRunner:
         model: str = "",
         stream_progress: bool = False,
         conversation_history: Optional[List[Dict[str, str]]] = None,
+        attachment_blocks: Optional[List[Dict[str, Any]]] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Run query through single agent with autonomous tool loop.
@@ -293,6 +295,7 @@ class SingleAgentRunner:
             model: LLM model to use (overrides config default)
             stream_progress: If True, yields intermediate progress events
             conversation_history: Previous messages for context
+            attachment_blocks: Multimodal content blocks from user attachments
 
         Yields:
             Dict events. Final event has type='final'.
@@ -342,6 +345,12 @@ class SingleAgentRunner:
 
         logger.info(f"Running query with model={model_name}, tools={len(tool_schemas)}")
 
+        # Build user message content (text or multimodal with attachments)
+        if attachment_blocks:
+            user_content = attachment_blocks + [{"type": "text", "text": query}]
+        else:
+            user_content = query
+
         # Build messages
         messages = []
         if conversation_history:
@@ -354,13 +363,14 @@ class SingleAgentRunner:
             if (
                 messages
                 and messages[-1]["role"] == "user"
+                and isinstance(messages[-1]["content"], str)
                 and messages[-1]["content"].strip() == query.strip()
             ):
                 pass  # query already in history
             else:
-                messages.append({"role": "user", "content": query})
+                messages.append({"role": "user", "content": user_content})
         else:
-            messages.append({"role": "user", "content": query})
+            messages.append({"role": "user", "content": user_content})
 
         # Prepare system prompt (with caching only for providers that support it)
         system = self.system_prompt
@@ -372,6 +382,12 @@ class SingleAgentRunner:
                     "cache_control": {"type": "ephemeral"},
                 }
             ]
+
+        # Extract attachment images for tool access (image search)
+        attachment_images = self._extract_attachment_images(attachment_blocks)
+        self.tool_adapter.registry.set_request_context(
+            attachment_images=attachment_images,
+        )
 
         tool_call_history = []
         total_tool_cost = 0.0
@@ -597,6 +613,67 @@ class SingleAgentRunner:
                 "final_answer": f"Query processing failed: {type(e).__name__}: {e}",
                 "errors": [str(e)],
             }
+        finally:
+            # Clear per-request context (attachment images)
+            self.tool_adapter.registry.clear_request_context()
+
+    @staticmethod
+    def _extract_attachment_images(
+        attachment_blocks: Optional[List[Dict[str, Any]]],
+    ) -> List[Dict[str, Any]]:
+        """
+        Extract image entries from attachment blocks for tool access.
+
+        Builds a flat list of images with metadata (filename, page number)
+        so the search tool can reference them by index.
+
+        Returns:
+            List of dicts with keys: index, base64_data, filename, page, media_type
+        """
+        if not attachment_blocks:
+            return []
+
+        images: List[Dict[str, Any]] = []
+        pending_image: Optional[Dict[str, Any]] = None
+
+        for block in attachment_blocks:
+            if block.get("type") == "image":
+                source = block.get("source", {})
+                pending_image = {
+                    "base64_data": source.get("data", ""),
+                    "media_type": source.get("media_type", "image/png"),
+                    "filename": None,
+                    "page": None,
+                }
+            elif block.get("type") == "text" and pending_image is not None:
+                # Parse label: "[Attached PDF: doc.pdf, page 1]" or "[Attached image: photo.jpg]"
+                text = block.get("text", "")
+                pdf_match = re.match(
+                    r"\[Attached PDF: (.+?), page (\d+)\]", text
+                )
+                img_match = re.match(r"\[Attached image: (.+?)\]", text)
+
+                if pdf_match:
+                    pending_image["filename"] = pdf_match.group(1)
+                    pending_image["page"] = int(pdf_match.group(2))
+                elif img_match:
+                    pending_image["filename"] = img_match.group(1)
+
+                pending_image["index"] = len(images)
+                images.append(pending_image)
+                pending_image = None
+
+        # Handle trailing image without a text label
+        if pending_image is not None:
+            pending_image["index"] = len(images)
+            images.append(pending_image)
+
+        if images:
+            logger.info(
+                "Extracted %d attachment images for tool context", len(images)
+            )
+
+        return images
 
     def _should_stop_early(self, tool_call_history: List[Dict]) -> bool:
         """Check if we should stop (2+ consecutive failed searches)."""

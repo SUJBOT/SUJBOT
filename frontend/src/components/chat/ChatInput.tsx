@@ -1,17 +1,46 @@
 /**
- * ChatInput Component - Message input textarea with send/stop button
+ * ChatInput Component - Message input textarea with send/stop button and file attachments
  */
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Square, FileText, X } from 'lucide-react';
+import { Send, Square, FileText, X, Paperclip, Image, File } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../design-system/utils/cn';
 import { useAuth } from '../../contexts/AuthContext';
 import { apiService, type SpendingInfo } from '../../services/api';
-import type { TextSelection } from '../../types';
+import type { TextSelection, Attachment } from '../../types';
+
+const ALLOWED_MIME_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'text/plain',
+  'text/markdown',
+  'text/html',
+  'application/x-tex',
+  'text/x-tex',
+  'application/x-latex',
+]);
+
+// Browsers often misidentify file types — use extension as fallback
+const EXTENSION_MIME_MAP: Record<string, string> = {
+  '.md': 'text/markdown',
+  '.tex': 'application/x-tex',
+  '.latex': 'application/x-latex',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.txt': 'text/plain',
+  '.html': 'text/html',
+  '.htm': 'text/html',
+};
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+const MAX_ATTACHMENTS = 5;
 
 interface ChatInputProps {
-  onSend: (message: string) => void;
+  onSend: (message: string, attachments?: Attachment[]) => void;
   onCancel?: () => void;  // Cancel streaming
   isStreaming: boolean;   // Whether currently streaming
   disabled: boolean;      // Disabled for other reasons (not streaming)
@@ -29,12 +58,18 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled, refreshSpen
     ? selectedText.text.split('\n').filter(line => line.trim()).length || 1
     : 0;
   const [message, setMessage] = useState('');
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [spending, setSpending] = useState<SpendingInfo | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Backend limit: 50,000 characters (see backend/models.py ChatRequest)
   const MAX_MESSAGE_LENGTH = 50000;
   const isMessageTooLong = message.length > MAX_MESSAGE_LENGTH;
+
+  // Can send if there's text OR attachments
+  const hasContent = message.trim().length > 0 || attachments.length > 0;
 
   // Calculate spending status for color coding
   const spendingPercentage = spending
@@ -75,12 +110,84 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled, refreshSpen
     }
   }, [message]);
 
+  // Clear attachment error after 5 seconds
+  useEffect(() => {
+    if (attachmentError) {
+      const timer = setTimeout(() => setAttachmentError(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [attachmentError]);
+
+  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Snapshot files BEFORE resetting input — FileList is a live DOM reference
+    // that gets emptied when input.value is cleared
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+
+    // Reset file input for re-selection of same file
+    e.target.value = '';
+
+    const remainingSlots = MAX_ATTACHMENTS - attachments.length;
+    if (remainingSlots <= 0) {
+      setAttachmentError(t('attachments.tooManyFiles'));
+      return;
+    }
+
+    const filesToProcess = files.slice(0, remainingSlots);
+    if (files.length > remainingSlots) {
+      setAttachmentError(t('attachments.tooManyFiles'));
+    }
+
+    for (const file of filesToProcess) {
+      // Resolve MIME type with extension fallback (browsers misidentify .md, .tex, etc.)
+      let mimeType = file.type;
+      const ext = '.' + file.name.split('.').pop()?.toLowerCase();
+      if (!ALLOWED_MIME_TYPES.has(mimeType) && ext && EXTENSION_MIME_MAP[ext]) {
+        mimeType = EXTENSION_MIME_MAP[ext];
+      }
+
+      // Validate type
+      if (!ALLOWED_MIME_TYPES.has(mimeType)) {
+        setAttachmentError(t('attachments.unsupportedType'));
+        continue;
+      }
+
+      // Validate size
+      if (file.size > MAX_FILE_SIZE) {
+        setAttachmentError(t('attachments.fileTooLarge'));
+        continue;
+      }
+
+      // Read as base64
+      try {
+        const base64 = await readFileAsBase64(file);
+        const attachment: Attachment = {
+          id: `att_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          filename: file.name,
+          mimeType: mimeType,
+          base64Data: base64,
+          sizeBytes: file.size,
+        };
+        setAttachments(prev => [...prev, attachment]);
+        setAttachmentError(null);
+      } catch (err) {
+        console.error('Failed to read file:', err);
+        setAttachmentError(t('attachments.unsupportedType'));
+      }
+    }
+  }, [attachments.length, t]);
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments(prev => prev.filter(a => a.id !== id));
+  }, []);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (message.trim() && !disabled && !isStreaming && !isMessageTooLong) {
-      onSend(message.trim());
+    if (hasContent && !disabled && !isStreaming && !isMessageTooLong) {
+      onSend(message.trim(), attachments.length > 0 ? attachments : undefined);
       setMessage('');
+      setAttachments([]);
     }
   };
 
@@ -97,9 +204,65 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled, refreshSpen
     }
   };
 
+  const handleAttachClick = () => {
+    fileInputRef.current?.click();
+  };
+
   return (
     <form onSubmit={handleSubmit} className="p-6">
       <div className="max-w-4xl mx-auto">
+        {/* Attachment preview chips */}
+        {attachments.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-2" style={{ animation: 'chipIn 0.15s ease-out' }}>
+            {attachments.map(att => (
+              <div
+                key={att.id}
+                className={cn(
+                  'inline-flex items-center gap-1.5 px-2.5 py-1',
+                  'bg-blue-50 dark:bg-blue-900/30',
+                  'text-blue-700 dark:text-blue-300',
+                  'rounded-lg',
+                  'border border-blue-200 dark:border-blue-800',
+                  'text-xs'
+                )}
+              >
+                {att.mimeType.startsWith('image/') ? (
+                  <Image size={12} />
+                ) : (
+                  <File size={12} />
+                )}
+                <span className="truncate max-w-[150px]" title={att.filename}>
+                  {att.filename}
+                </span>
+                <span className="text-blue-400 dark:text-blue-500">
+                  ({(att.sizeBytes / 1024).toFixed(0)} KB)
+                </span>
+                <button
+                  type="button"
+                  onClick={() => removeAttachment(att.id)}
+                  className={cn(
+                    'p-0.5 rounded-full -mr-0.5',
+                    'text-blue-400 dark:text-blue-500',
+                    'hover:bg-blue-200 dark:hover:bg-blue-800',
+                    'hover:text-blue-600 dark:hover:text-blue-300',
+                    'transition-colors duration-150'
+                  )}
+                  title={t('attachments.remove')}
+                >
+                  <X size={10} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Attachment error */}
+        {attachmentError && (
+          <div className="mb-2 text-xs text-red-600 dark:text-red-400" style={{ animation: 'chipIn 0.15s ease-out' }}>
+            {attachmentError}
+          </div>
+        )}
+
         <div
           className={cn(
             'flex gap-3 p-2',
@@ -112,6 +275,41 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled, refreshSpen
             !disabled && 'hover:border-accent-300 dark:hover:border-accent-700'
           )}
         >
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,.docx,.txt,.md,.html,.htm,.tex,.latex"
+            multiple
+            onChange={handleFileSelect}
+            className="hidden"
+          />
+
+          {/* Attach button */}
+          {!isStreaming && (
+            <button
+              type="button"
+              onClick={handleAttachClick}
+              disabled={disabled || attachments.length >= MAX_ATTACHMENTS}
+              className={cn(
+                'flex-shrink-0 self-center',
+                'w-10 h-10 rounded-xl',
+                'flex items-center justify-center',
+                'transition-all duration-200',
+                disabled || attachments.length >= MAX_ATTACHMENTS
+                  ? 'text-accent-300 dark:text-accent-700 cursor-not-allowed'
+                  : cn(
+                      'text-accent-500 dark:text-accent-400',
+                      'hover:text-accent-700 dark:hover:text-accent-200',
+                      'hover:bg-accent-100 dark:hover:bg-accent-800',
+                    )
+              )}
+              title={t('attachments.attach')}
+            >
+              <Paperclip size={18} />
+            </button>
+          )}
+
           <textarea
             ref={textareaRef}
             value={message}
@@ -136,7 +334,7 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled, refreshSpen
               type="button"
               onClick={handleCancel}
               className={cn(
-                'flex-shrink-0 self-end',
+                'flex-shrink-0 self-center',
                 'w-12 h-12 rounded-xl',
                 'bg-red-600 dark:bg-red-500',
                 'text-white',
@@ -154,13 +352,13 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled, refreshSpen
             /* Send button - shown when not streaming */
             <button
               type="submit"
-              disabled={disabled || !message.trim() || isMessageTooLong}
+              disabled={disabled || !hasContent || isMessageTooLong}
               className={cn(
-                'flex-shrink-0 self-end',
+                'flex-shrink-0 self-center',
                 'w-12 h-12 rounded-xl',
                 'flex items-center justify-center',
                 'transition-all duration-200',
-                disabled || !message.trim() || isMessageTooLong
+                disabled || !hasContent || isMessageTooLong
                   ? 'text-accent-400 dark:text-accent-600 opacity-50 cursor-not-allowed'
                   : cn(
                       'bg-accent-900 dark:bg-accent-100',
@@ -256,4 +454,25 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled, refreshSpen
       </div>
     </form>
   );
+}
+
+/**
+ * Read file as base64 string (without data URL prefix).
+ */
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      // Remove data URL prefix (e.g., "data:image/png;base64,")
+      const base64 = result.split(',')[1];
+      if (!base64) {
+        reject(new Error('Failed to extract base64 data'));
+        return;
+      }
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }

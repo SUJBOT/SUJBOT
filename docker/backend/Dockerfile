@@ -22,6 +22,13 @@ RUN apt-get update && apt-get install -y \
     tesseract-ocr-eng \
     # Poppler for PDF processing
     poppler-utils \
+    # DOCX→PDF conversion
+    libreoffice-writer \
+    # LaTeX→PDF compilation
+    texlive-latex-base \
+    texlive-latex-extra \
+    texlive-fonts-recommended \
+    texlive-lang-czechslovak \
     # libpq for PostgreSQL psycopg2
     libpq-dev \
     # OpenGL libraries for OpenCV (cv2)

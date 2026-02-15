@@ -32,6 +32,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from backend.config import PDF_BASE_DIR
 from backend.middleware.auth import get_current_user
+from src.exceptions import ConversionError
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 logger = logging.getLogger(__name__)
@@ -62,6 +63,7 @@ class UploadState:
     user_id: int
     category: str
     pdf_path: Path
+    file_ext: str = ".pdf"
     task: Optional[asyncio.Task] = None
     events: list = field(default_factory=list)
     done: bool = False
@@ -755,9 +757,41 @@ async def _run_pipeline_task(state: UploadState, content: bytes) -> None:
     document_id = state.document_id
 
     try:
-        # 1. Save file to disk
-        state.pdf_path.write_bytes(content)
-        del content  # free memory
+        # 1. Convert to PDF if needed
+        file_content = content
+        del content  # free original memory
+        if state.file_ext != ".pdf":
+            from src.vl.document_converter import DocumentConverter
+            state.events.append(
+                {
+                    "event": "progress",
+                    "data": json.dumps(
+                        {
+                            "stage": "converting",
+                            "percent": 0,
+                            "message": f"Converting {state.file_ext} to PDF...",
+                        }
+                    ),
+                }
+            )
+            converter = DocumentConverter()
+            file_content = await converter.convert_to_pdf(file_content, state.file_ext)
+            state.events.append(
+                {
+                    "event": "progress",
+                    "data": json.dumps(
+                        {
+                            "stage": "converting",
+                            "percent": 100,
+                            "message": "Conversion complete",
+                        }
+                    ),
+                }
+            )
+
+        # 1b. Save PDF to disk
+        state.pdf_path.write_bytes(file_content)
+        del file_content  # free memory
         state.events.append(
             {
                 "event": "progress",
@@ -819,6 +853,23 @@ async def _run_pipeline_task(state: UploadState, content: bytes) -> None:
             {
                 "event": "error",
                 "data": json.dumps({"message": "Upload cancelled", "stage": "cancelled"}),
+            }
+        )
+
+    except ConversionError as e:
+        logger.error(
+            "Document conversion failed for %s (user %d): %s",
+            state.filename,
+            state.user_id,
+            e,
+            exc_info=True,
+        )
+        _cleanup_upload_files(state.pdf_path, page_store, document_id)
+        state.error = str(e)
+        state.events.append(
+            {
+                "event": "error",
+                "data": json.dumps({"message": str(e), "stage": "converting"}),
             }
         )
 
@@ -899,9 +950,18 @@ async def upload_document(
         )
 
     # Validate file type
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
+    from src.exceptions import ConversionError
+    from src.vl.document_converter import SUPPORTED_EXTENSIONS, DocumentConverter
+
+    if not file.filename:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Only PDF files are supported"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Filename is required"
+        )
+    file_ext = Path(file.filename).suffix.lower()
+    if file_ext not in SUPPORTED_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported format: {file_ext}. Supported: {', '.join(sorted(SUPPORTED_EXTENSIONS))}",
         )
 
     # Read and validate size
@@ -912,8 +972,9 @@ async def upload_document(
             detail="File too large (max 100 MB)",
         )
 
-    safe_filename = _sanitize_filename(file.filename)
-    pdf_path = PDF_BASE_DIR / safe_filename
+    # Always save as PDF (convert non-PDF formats before indexing)
+    safe_stem = _sanitize_filename(Path(file.filename).stem)
+    pdf_path = PDF_BASE_DIR / f"{safe_stem}.pdf"
 
     # Check for duplicate file on disk
     if pdf_path.exists():
@@ -931,10 +992,11 @@ async def upload_document(
     # Create upload state and start background task
     state = UploadState(
         document_id=pdf_path.stem,
-        filename=safe_filename,
+        filename=f"{safe_stem}{file_ext}",
         user_id=user_id,
         category=category,
         pdf_path=pdf_path,
+        file_ext=file_ext,
     )
     task = asyncio.create_task(_run_pipeline_task(state, content))
     state.task = task

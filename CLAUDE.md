@@ -148,11 +148,18 @@ VL flow: Query → Jina v4 embed_query() → PostgreSQL exact cosine (vectors.vl
 ```
 
 - Jina v4 embeddings (2048-dim), stored in `vectors.vl_pages`
+- Jina v4 supports multimodal: `embed_query()` for text, `embed_image()` for image-based retrieval
 - No HNSW index — ~500 pages, exact cosine scan <50ms, 100% recall
 - `"local"` variant: `Qwen/Qwen3-VL-235B-A22B-Instruct` (DeepInfra, vision)
 - `"remote"` variant: Haiku 4.5 (vision natively)
 - DeepInfra provider converts Anthropic image blocks → OpenAI `image_url` format
 - ~1600 tokens/page
+
+**Image search:** `search` tool accepts `image_attachment_index` (user attachment) or `image_page_id` (existing page) for image-based queries via `VLRetriever.search_by_image()`.
+
+**Chat attachments:** Users can attach images, PDFs, and documents (DOCX, TXT, Markdown, HTML, LaTeX) to messages (base64 in JSON body, 10MB/file, max 5). Images pass through as multimodal blocks. PDFs rendered to page images via PyMuPDF (max 10 pages). Text documents have text extracted via `DocumentConverter.extract_text()` (max 30K chars). Attachments passed to agent as multimodal content blocks, NOT indexed into vector store. Per-request context (`ToolRegistry.set_request_context()`) makes attachment images available to tools.
+
+**Multi-format upload:** Document upload accepts PDF, DOCX, TXT, Markdown, HTML, LaTeX. Non-PDF formats are converted to PDF first via `src/vl/document_converter.py`, then the unchanged VL pipeline processes the PDF. DOCX uses LibreOffice headless, LaTeX uses pdflatex, text/MD/HTML use PyMuPDF's `fitz.Story`.
 
 **Graph search** uses `intfloat/multilingual-e5-small` (384-dim) for cross-language semantic search on entities/communities. Falls back to PostgreSQL FTS when embedder not configured.
 

@@ -14,6 +14,7 @@ import {
   Activity,
   LayoutDashboard,
   FileText,
+  Network,
 } from 'lucide-react';
 
 import { dataProvider } from './dataProvider';
@@ -23,6 +24,7 @@ import { Dashboard } from './pages/Dashboard';
 import { HealthPage } from './pages/HealthPage';
 import { DocumentsPage } from './pages/DocumentsPage';
 import { AdminLoginPage } from './pages/AdminLoginPage';
+import { GraphPage } from './pages/GraphPage';
 
 // Custom menu with icons
 const AdminMenu = () => (
@@ -30,6 +32,7 @@ const AdminMenu = () => (
     <Menu.DashboardItem primaryText="Dashboard" leftIcon={<LayoutDashboard size={20} />} />
     <Menu.ResourceItem name="users" primaryText="Users" leftIcon={<Users size={20} />} />
     <Menu.Item to="/documents" primaryText="Documents" leftIcon={<FileText size={20} />} />
+    <Menu.Item to="/graph" primaryText="Knowledge Graph" leftIcon={<Network size={20} />} />
     <Menu.Item to="/health" primaryText="Health" leftIcon={<Activity size={20} />} />
   </Menu>
 );
@@ -62,6 +65,7 @@ export function AdminApp() {
 
       <CustomRoutes>
         <Route path="/documents" element={<DocumentsPage />} />
+        <Route path="/graph" element={<GraphPage />} />
         <Route path="/health" element={<HealthPage />} />
       </CustomRoutes>
     </Admin>

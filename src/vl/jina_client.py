@@ -174,6 +174,60 @@ class JinaClient:
 
         return embedding
 
+    def embed_image(self, base64_data: str) -> np.ndarray:
+        """
+        Embed a single image for retrieval query (image-to-page search).
+
+        Uses retrieval.query task so the image is treated as a query,
+        not a passage. This enables "find pages similar to this image".
+
+        Args:
+            base64_data: Base64-encoded image data (without data URI prefix)
+
+        Returns:
+            L2-normalized embedding array of shape (dimensions,)
+        """
+        # Build data URI if not already present
+        if base64_data.startswith("data:"):
+            data_uri = base64_data
+        else:
+            data_uri = f"data:image/png;base64,{base64_data}"
+
+        payload = {
+            "model": self.model,
+            "task": "retrieval.query",
+            "dimensions": self.dimensions,
+            "input": [{"image": data_uri}],
+        }
+
+        try:
+            data = self._post_with_retry(payload, timeout=60.0, context="image_query")
+        except httpx.HTTPStatusError as e:
+            raise JinaAPIError(
+                f"Jina API returned {e.response.status_code} for image query",
+                details={"status": e.response.status_code, "body": e.response.text[:500]},
+                cause=e,
+            )
+        except httpx.RequestError as e:
+            raise JinaAPIError(
+                f"Jina API image query request failed: {e}",
+                cause=e,
+            )
+
+        if "data" not in data or not data["data"]:
+            raise JinaAPIError(
+                "Jina API returned unexpected response for image query: missing 'data'",
+                details={"response_keys": list(data.keys())},
+            )
+        if "embedding" not in data["data"][0]:
+            raise JinaAPIError(
+                "Jina API image query response missing 'embedding'",
+                details={"data_keys": list(data["data"][0].keys())},
+            )
+
+        embedding = np.array(data["data"][0]["embedding"], dtype=np.float32)
+        return self._l2_normalize(embedding)
+
     def embed_pages(self, page_images: List[bytes]) -> np.ndarray:
         """
         Embed page images using retrieval.passage task.

@@ -10,8 +10,9 @@
     "noDocuments": "Žádné dokumenty nejsou k dispozici",
     "legislation": "Legislativa",
     "documentation": "Dokumentace",
-    "upload": "Nahrát PDF",
+    "upload": "Nahrát dokument",
     "uploading": "Nahrávám...",
+    "converting": "Převádím do PDF...",
     "rendering": "Renderuji stránky...",
     "embedding": "Vytvářím embeddingy...",
     "storing": "Ukládám do databáze...",
@@ -21,7 +22,8 @@
     "startUpload": "Nahrát",
     "summarizing": "Generuji shrnutí stránek...",
     "graph_extraction": "Extrakce entit...",
-    "pdfOnly": "Jsou podporovány pouze PDF soubory",
+    "reconnecting": "Připojuji se k nahrávání...",
+    "unsupportedFormat": "Nepodporovaný formát. Podporováno: PDF, DOCX, TXT, Markdown, HTML, LaTeX",
     "fileTooLarge": "Soubor je příliš velký (max 100 MB)",
     "alreadyExists": "Dokument již existuje"
   },
@@ -255,7 +257,7 @@
       "pages": "Stran",
       "created": "Indexováno",
       "actions": "Akce",
-      "upload": "Nahrát PDF",
+      "upload": "Nahrát dokument",
       "reindex": "Reindexovat",
       "delete": "Smazat",
       "deleteConfirm": "Opravdu chcete smazat \"{{name}}\"? Budou odstraněny PDF, obrázky stránek a všechny vektory.",
@@ -292,6 +294,26 @@
       "loadMessagesError": "Nepodařilo se načíst zprávy",
       "readOnly": "Pouze ke čtení",
       "selectConversation": "Vyberte konverzaci k zobrazení"
+    },
+    "graph": {
+      "title": "Znalostní graf",
+      "subtitle": "Interaktivní vizualizace entit a vztahů",
+      "entities": "entit",
+      "relationships": "vztahů",
+      "communitiesLabel": "komunit",
+      "filters": "Filtry",
+      "filterByDocument": "Filtrovat podle dokumentu",
+      "filterByCommunity": "Filtrovat podle komunity",
+      "filterByType": "Filtrovat podle typu entity",
+      "loadGraph": "Načíst graf",
+      "loading": "Načítám graf...",
+      "noData": "Vyberte filtry a klikněte na Načíst graf pro vizualizaci",
+      "noResults": "Žádné entity neodpovídají vybraným filtrům",
+      "limitWarning": "Zobrazeno {{shown}} z {{total}} odpovídajících entit. Zúžte filtry pro kompletní zobrazení.",
+      "searchPlaceholder": "Hledat uzly...",
+      "tabNodes": "Uzly",
+      "tabCommunities": "Komunity",
+      "noCommunities": "Žádné komunity v aktuálním zobrazení"
     }
   },
   "feedback": {
@@ -305,6 +327,17 @@
     "submitted": "Zpětná vazba odeslána",
     "thankYou": "Děkujeme za vaši zpětnou vazbu!",
     "error": "Nepodařilo se odeslat zpětnou vazbu"
+  },
+  "attachments": {
+    "attach": "Připojit soubor",
+    "remove": "Odebrat",
+    "fileTooLarge": "Soubor je příliš velký (max 10 MB)",
+    "unsupportedType": "Nepodporovaný typ souboru. Podporováno: obrázky, PDF, DOCX, TXT, Markdown, HTML, LaTeX",
+    "tooManyFiles": "Maximálně 5 souborů",
+    "pdfTruncated": "PDF zkráceno na prvních {{max}} stran",
+    "filesAttached_one": "{{count}} soubor připojen",
+    "filesAttached_few": "{{count}} soubory připojeny",
+    "filesAttached_other": "{{count}} souborů připojeno"
   },
   "citation": {
     "preview": "Náhled",

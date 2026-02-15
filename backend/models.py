@@ -4,8 +4,9 @@ Pydantic models for API request/response validation.
 These models define the contract between frontend and backend.
 """
 
+import base64
 from typing import Any, Dict, List, Literal, Optional
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 
 class ChatMessage(BaseModel):
@@ -34,12 +35,66 @@ class SelectedContext(BaseModel):
     page_end: int = Field(..., ge=1, description="Ending page number (1-indexed)")
 
 
+ALLOWED_ATTACHMENT_MIME_TYPES = {
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",  # .docx
+    "text/plain",  # .txt
+    "text/markdown",  # .md
+    "text/html",  # .html
+    "application/x-tex",  # .tex
+    "text/x-tex",  # .tex (alt)
+    "application/x-latex",  # .latex
+}
+
+MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
+MAX_ATTACHMENTS_PER_MESSAGE = 5
+
+
+class AttachmentData(BaseModel):
+    """File attachment for a chat message (image or PDF).
+
+    Attachments are sent as base64-encoded data in the JSON body.
+    They become part of the agent's multimodal context but are NOT indexed.
+    """
+
+    filename: str = Field(..., max_length=255)
+    mime_type: str = Field(...)
+    base64_data: str = Field(...)
+
+    @field_validator("mime_type")
+    @classmethod
+    def validate_mime_type(cls, v: str) -> str:
+        if v not in ALLOWED_ATTACHMENT_MIME_TYPES:
+            raise ValueError(
+                f"Unsupported file type: {v}. "
+                f"Allowed: {', '.join(sorted(ALLOWED_ATTACHMENT_MIME_TYPES))}"
+            )
+        return v
+
+    @field_validator("base64_data")
+    @classmethod
+    def validate_base64_size(cls, v: str) -> str:
+        try:
+            decoded = base64.b64decode(v)
+        except Exception:
+            raise ValueError("Invalid base64 data")
+        if len(decoded) > MAX_ATTACHMENT_SIZE_BYTES:
+            size_mb = len(decoded) / (1024 * 1024)
+            raise ValueError(
+                f"File too large: {size_mb:.1f} MB (max {MAX_ATTACHMENT_SIZE_BYTES // (1024 * 1024)} MB)"
+            )
+        return v
+
+
 class ChatRequest(BaseModel):
     """Request to send a message to the agent."""
 
     message: str = Field(
         ...,
-        min_length=1,
         max_length=50000,
         description="User message (max 50K chars to prevent abuse)",
     )
@@ -56,6 +111,27 @@ class ChatRequest(BaseModel):
         None,
         description="Selected text from PDF viewer for additional context",
     )
+    attachments: Optional[List[AttachmentData]] = Field(
+        None,
+        description="File attachments (images/PDFs) for multimodal context",
+    )
+
+    @field_validator("attachments")
+    @classmethod
+    def validate_attachment_count(
+        cls, v: Optional[List[AttachmentData]],
+    ) -> Optional[List[AttachmentData]]:
+        if v and len(v) > MAX_ATTACHMENTS_PER_MESSAGE:
+            raise ValueError(
+                f"Too many attachments: {len(v)} (max {MAX_ATTACHMENTS_PER_MESSAGE})"
+            )
+        return v
+
+    @model_validator(mode="after")
+    def validate_message_or_attachments(self) -> "ChatRequest":
+        if not self.message.strip() and not self.attachments:
+            raise ValueError("Either message or attachments must be provided")
+        return self
 
 
 class HealthResponse(BaseModel):
