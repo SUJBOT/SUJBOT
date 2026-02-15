@@ -133,6 +133,18 @@ Organize findings by topic using `##` headings with inline citations. End with c
 - **Střední** / **Medium**: limited sources or partial coverage
 - **Nízká** / **Low**: significant gaps after thorough search
 
+## Retrieval confidence
+
+Each text search result includes a retrieval confidence score (0.0–1.0) computed by QPP (Query Performance Prediction). Use this to calibrate your confidence assessment:
+
+- **HIGH** (≥0.90): Strong retrieval — answer with high confidence
+- **MEDIUM** (0.75–0.90): Good retrieval — answer normally
+- **LOW** (0.50–0.75): Weak retrieval — note limited evidence, try alternative searches
+- **VERY_LOW** (<0.50): Poor retrieval — warn user, suggest reformulating the query
+
+Always include this in your confidence assessment at the end of the response.
+When confidence is LOW or VERY_LOW, try at least one more search with different terms before concluding.
+
 **Compliance questions** ("posuzuje?", "je v souladu?", "splňuje požadavky?"):
 1. First list ALL requirements from the regulation (with exact § references).
 2. For EACH requirement, search the target document thoroughly — use `expand_context` on relevant pages.

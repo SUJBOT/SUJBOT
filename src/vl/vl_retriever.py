@@ -11,7 +11,9 @@ asymmetry that HyDE addresses for text-only embeddings.
 
 import logging
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Tuple
+
+import numpy as np
 
 from .jina_client import JinaClient
 from .page_store import PageStore
@@ -69,8 +71,7 @@ class VLRetriever:
         """
         Search for relevant pages using VL embeddings.
 
-        When adaptive retrieval is enabled, fetches a larger candidate pool
-        and uses Otsu/GMM thresholding to find the natural score cutoff.
+        Delegates to search_with_embedding() and discards the embedding.
 
         Args:
             query: Natural language query text
@@ -81,15 +82,43 @@ class VLRetriever:
         Returns:
             List of VLPageResult sorted by relevance
         """
+        results, _ = self.search_with_embedding(
+            query=query, k=k, document_filter=document_filter, category_filter=category_filter
+        )
+        return results
+
+    def search_with_embedding(
+        self,
+        query: str,
+        k: Optional[int] = None,
+        document_filter: Optional[str] = None,
+        category_filter: Optional[str] = None,
+    ) -> Tuple[List[VLPageResult], np.ndarray]:
+        """
+        Search for relevant pages and return the query embedding.
+
+        Identical to search() but also returns the Jina query embedding,
+        allowing callers to reuse it (e.g., for QPP confidence scoring)
+        without a redundant Jina API call.
+
+        Args:
+            query: Natural language query text
+            k: Number of results (default: self.default_k)
+            document_filter: Optional document_id filter
+            category_filter: Optional category filter
+
+        Returns:
+            Tuple of (results, query_embedding) where query_embedding is
+            the raw Jina v4 embedding as np.ndarray.
+        """
         k = k or self.default_k
 
-        # Determine how many candidates to fetch from DB
         if self.adaptive_config.enabled:
             fetch_k = max(self.adaptive_config.fetch_k, k)
         else:
             fetch_k = k
 
-        # 1. Embed query using Jina v4 (retrieval.query task)
+        # 1. Embed query using Jina v4
         query_embedding = self.jina_client.embed_query(query)
 
         # 2. Search PostgreSQL vl_pages table
@@ -100,7 +129,7 @@ class VLRetriever:
             category_filter=category_filter,
         )
 
-        # 3. Convert to VLPageResult objects with image paths
+        # 3. Convert to VLPageResult objects
         results = []
         for row in raw_results:
             page_id = row["page_id"]
@@ -154,7 +183,7 @@ class VLRetriever:
         else:
             logger.info("VL search: '%s...' -> 0 pages", query[:50])
 
-        return results
+        return results, query_embedding
 
     def search_by_image(
         self,

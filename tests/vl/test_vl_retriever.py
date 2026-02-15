@@ -282,3 +282,44 @@ class TestAdaptiveKIntegration:
         call_kwargs = vs.search_vl_pages.call_args
         assert call_kwargs.kwargs["k"] == 5
         assert len(results) == 6  # all DB results returned
+
+
+# ---------------------------------------------------------------------------
+# search_with_embedding() tests
+# ---------------------------------------------------------------------------
+
+
+class TestSearchWithEmbedding:
+    """Test that search_with_embedding() returns results AND query embedding."""
+
+    def test_returns_tuple(self, retriever, mock_jina):
+        """search_with_embedding returns (results, embedding) tuple."""
+        fake_embedding = np.ones(2048, dtype=np.float32) * 0.5
+        mock_jina.embed_query.return_value = fake_embedding
+
+        results, embedding = retriever.search_with_embedding("test query")
+
+        assert len(results) == 2
+        assert all(isinstance(r, VLPageResult) for r in results)
+        assert np.array_equal(embedding, fake_embedding)
+
+    def test_search_delegates_to_search_with_embedding(self, retriever, mock_jina):
+        """search() should return same results as search_with_embedding()."""
+        results_plain = retriever.search("test query")
+        mock_jina.embed_query.return_value = np.zeros(2048, dtype=np.float32)
+        results_with_emb, _ = retriever.search_with_embedding("test query")
+
+        assert len(results_plain) == len(results_with_emb)
+        for r1, r2 in zip(results_plain, results_with_emb):
+            assert r1.page_id == r2.page_id
+            assert r1.score == r2.score
+
+    def test_embedding_shape(self, retriever, mock_jina):
+        """Returned embedding should match Jina output shape."""
+        emb = np.random.default_rng(42).random(2048).astype(np.float32)
+        mock_jina.embed_query.return_value = emb
+
+        _, returned_emb = retriever.search_with_embedding("query")
+
+        assert returned_emb.shape == (2048,)
+        assert returned_emb.dtype == np.float32

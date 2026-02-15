@@ -162,6 +162,8 @@ VL flow: Query → Jina v4 embed_query() → PostgreSQL exact cosine (vectors.vl
 
 **Multi-format upload:** Document upload accepts PDF, DOCX, TXT, Markdown, HTML, LaTeX. Non-PDF formats are converted to PDF first via `src/vl/document_converter.py`, then the unchanged VL pipeline processes the PDF. DOCX uses LibreOffice headless, LaTeX uses pdflatex, text/MD/HTML use PyMuPDF's `fitz.Story`.
 
+**Retrieval confidence (QPP):** Text searches include a QPP-based confidence score (0.0–1.0) from `rag_confidence.score_retrieval_general()`. The model uses 24 language-agnostic features from the full similarity distribution (all pages vs query). Bands: HIGH (≥0.90), MEDIUM (0.75–0.90), LOW (0.50–0.75), VERY_LOW (<0.50). Image searches skip QPP (no text query). The agent uses confidence to calibrate its answer and may retry with different terms on LOW/VERY_LOW.
+
 **Graph search** uses `intfloat/multilingual-e5-small` (384-dim) for cross-language semantic search on entities/communities. Falls back to PostgreSQL FTS when embedder not configured.
 
 ## Critical Constraints (DO NOT CHANGE)

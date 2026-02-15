@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 from pydantic import ValidationError
 
@@ -50,6 +51,10 @@ def _mock_results(count=2):
         )
         for i in range(count)
     ]
+
+
+# Dummy embedding returned by search_with_embedding
+_DUMMY_EMBEDDING = np.zeros(2048, dtype=np.float32)
 
 
 # ===========================================================================
@@ -100,37 +105,44 @@ class TestSearchExecution:
     def test_successful_search(self):
         """Basic search returns formatted results with page images."""
         vl = MagicMock()
-        vl.search.return_value = _mock_results(2)
+        vl.search_with_embedding.return_value = (_mock_results(2), _DUMMY_EMBEDDING)
+        vs = MagicMock()
+        vs.get_all_vl_similarities.return_value = np.array([], dtype=np.float32)
         ps = MagicMock()
         ps.get_image_base64.return_value = "base64data"
 
-        tool = _make_tool(vl_retriever=vl, page_store=ps)
+        tool = _make_tool(vl_retriever=vl, page_store=ps, vector_store=vs)
         result = tool.execute_impl(query="safety margins")
 
         assert result.success is True
         assert len(result.data) == 2
         assert result.data[0]["page_id"] == "doc1_p001"
         assert result.data[0]["score"] == 0.9
-        assert len(result.citations) == 2
+        # 2 page citations (confidence skipped because empty similarities)
+        assert len([c for c in result.citations if "doc1" in c]) == 2
 
     def test_retriever_called_with_filters(self):
         """Filters are passed through to VL retriever."""
         vl = MagicMock()
-        vl.search.return_value = []
-        tool = _make_tool(vl_retriever=vl)
+        vl.search_with_embedding.return_value = ([], _DUMMY_EMBEDDING)
+        vs = MagicMock()
+        vs.get_all_vl_similarities.return_value = np.array([], dtype=np.float32)
+        tool = _make_tool(vl_retriever=vl, vector_store=vs)
 
         tool.execute_impl(
             query="test", k=3, filter_document="BZ_VR1", filter_category="legislation"
         )
-        vl.search.assert_called_once_with(
+        vl.search_with_embedding.assert_called_once_with(
             query="test", k=3, document_filter="BZ_VR1", category_filter="legislation"
         )
 
     def test_empty_results(self):
         """Empty search returns success with empty data."""
         vl = MagicMock()
-        vl.search.return_value = []
-        tool = _make_tool(vl_retriever=vl)
+        vl.search_with_embedding.return_value = ([], _DUMMY_EMBEDDING)
+        vs = MagicMock()
+        vs.get_all_vl_similarities.return_value = np.array([], dtype=np.float32)
+        tool = _make_tool(vl_retriever=vl, vector_store=vs)
 
         result = tool.execute_impl(query="nonexistent topic")
         assert result.success is True
@@ -139,11 +151,13 @@ class TestSearchExecution:
     def test_page_images_in_metadata(self):
         """Page images are included in metadata for multimodal injection."""
         vl = MagicMock()
-        vl.search.return_value = _mock_results(1)
+        vl.search_with_embedding.return_value = (_mock_results(1), _DUMMY_EMBEDDING)
+        vs = MagicMock()
+        vs.get_all_vl_similarities.return_value = np.array([], dtype=np.float32)
         ps = MagicMock()
         ps.get_image_base64.return_value = "img_b64"
 
-        tool = _make_tool(vl_retriever=vl, page_store=ps)
+        tool = _make_tool(vl_retriever=vl, page_store=ps, vector_store=vs)
         result = tool.execute_impl(query="test")
 
         images = result.metadata["page_images"]
@@ -154,11 +168,13 @@ class TestSearchExecution:
     def test_partial_image_failure(self):
         """When some images fail, remaining succeed."""
         vl = MagicMock()
-        vl.search.return_value = _mock_results(3)
+        vl.search_with_embedding.return_value = (_mock_results(3), _DUMMY_EMBEDDING)
+        vs = MagicMock()
+        vs.get_all_vl_similarities.return_value = np.array([], dtype=np.float32)
         ps = MagicMock()
         ps.get_image_base64.side_effect = ["ok1", Exception("disk"), "ok3"]
 
-        tool = _make_tool(vl_retriever=vl, page_store=ps)
+        tool = _make_tool(vl_retriever=vl, page_store=ps, vector_store=vs)
         result = tool.execute_impl(query="test")
 
         assert result.success is True
@@ -168,11 +184,13 @@ class TestSearchExecution:
     def test_all_images_fail(self):
         """When ALL images fail, returns error."""
         vl = MagicMock()
-        vl.search.return_value = _mock_results(2)
+        vl.search_with_embedding.return_value = (_mock_results(2), _DUMMY_EMBEDDING)
+        vs = MagicMock()
+        vs.get_all_vl_similarities.return_value = np.array([], dtype=np.float32)
         ps = MagicMock()
         ps.get_image_base64.side_effect = Exception("disk error")
 
-        tool = _make_tool(vl_retriever=vl, page_store=ps)
+        tool = _make_tool(vl_retriever=vl, page_store=ps, vector_store=vs)
         result = tool.execute_impl(query="test")
 
         assert result.success is False
@@ -181,7 +199,7 @@ class TestSearchExecution:
     def test_retriever_exception(self):
         """VL retriever exception returns error with type info."""
         vl = MagicMock()
-        vl.search.side_effect = ConnectionError("DB down")
+        vl.search_with_embedding.side_effect = ConnectionError("DB down")
         tool = _make_tool(vl_retriever=vl)
 
         result = tool.execute_impl(query="test")
@@ -191,11 +209,13 @@ class TestSearchExecution:
     def test_citation_format(self):
         """Citations include document_id, page_number, and score."""
         vl = MagicMock()
-        vl.search.return_value = _mock_results(1)
+        vl.search_with_embedding.return_value = (_mock_results(1), _DUMMY_EMBEDDING)
+        vs = MagicMock()
+        vs.get_all_vl_similarities.return_value = np.array([], dtype=np.float32)
         ps = MagicMock()
         ps.get_image_base64.return_value = "b64"
 
-        tool = _make_tool(vl_retriever=vl, page_store=ps)
+        tool = _make_tool(vl_retriever=vl, page_store=ps, vector_store=vs)
         result = tool.execute_impl(query="test")
 
         assert "doc1" in result.citations[0]
