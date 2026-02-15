@@ -12,6 +12,7 @@ Endpoints:
 - GET /admin/stats - System statistics
 - GET /admin/documents - List all documents with metadata
 - DELETE /admin/documents/{document_id} - Delete document completely
+- PATCH /admin/documents/{document_id}/category - Update document category
 - POST /admin/documents/{document_id}/reindex - Reindex document (SSE)
 
 All endpoints (except /admin/login) require admin JWT token.
@@ -815,18 +816,20 @@ async def list_admin_documents(
     """
     vector_store = vl["vector_store"]
 
-    # Query vector metadata from DB
+    # Query vector metadata + category from DB
     try:
         await vector_store._ensure_pool()
         async with vector_store.pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT document_id,
+                SELECT vp.document_id,
                        COUNT(*) AS page_count,
-                       MIN(created_at) AS created_at
-                FROM vectors.vl_pages
-                GROUP BY document_id
-                ORDER BY document_id
+                       MIN(vp.created_at) AS created_at,
+                       COALESCE(d.category, 'documentation') AS category
+                FROM vectors.vl_pages vp
+                LEFT JOIN vectors.documents d ON d.document_id = vp.document_id
+                GROUP BY vp.document_id, d.category
+                ORDER BY vp.document_id
                 """
             )
     except asyncpg.PostgresError as e:
@@ -851,6 +854,7 @@ async def list_admin_documents(
                 "size_bytes": pdf_path.stat().st_size,
                 "page_count": meta["page_count"] if meta else 0,
                 "created_at": meta["created_at"].isoformat() if meta and meta["created_at"] else None,
+                "category": meta["category"] if meta else "documentation",
             })
     except OSError as e:
         logger.error(f"Filesystem error listing documents: {e}", exc_info=True)
@@ -870,7 +874,7 @@ async def delete_admin_document(
     vl: Dict = Depends(get_vl_components),
 ):
     """
-    Delete a document completely: vectors, page images, and PDF file.
+    Delete a document completely: vectors, page images, PDF file, graph data, and category registry.
 
     Args:
         document_id: Document identifier (PDF stem name)
@@ -927,6 +931,11 @@ async def delete_admin_document(
                 "DELETE FROM vectors.vl_pages WHERE document_id = $1",
                 document_id,
             )
+            # 5. Delete document registry entry
+            await conn.execute(
+                "DELETE FROM vectors.documents WHERE document_id = $1",
+                document_id,
+            )
         logger.info(f"Admin {admin['id']} deleted document {document_id} ({deleted_count})")
 
     except OSError as e:
@@ -935,7 +944,7 @@ async def delete_admin_document(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete document files"
         )
-    except Exception as e:
+    except asyncpg.PostgresError as e:
         logger.error(f"Database error deleting {document_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -943,6 +952,66 @@ async def delete_admin_document(
         )
 
     return None
+
+
+@router.patch("/documents/{document_id}/category")
+async def update_document_category(
+    document_id: str,
+    body: Dict,
+    admin: Dict = Depends(get_current_admin_user),
+    vl: Dict = Depends(get_vl_components),
+):
+    """
+    Update document category (documentation or legislation).
+
+    Args:
+        document_id: Document identifier
+        body: JSON with 'category' field
+    """
+    if not DIRECT_ID_PATTERN.match(document_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid document ID format"
+        )
+
+    category = body.get("category")
+    if category not in ("documentation", "legislation"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Category must be 'documentation' or 'legislation'"
+        )
+
+    vector_store = vl["vector_store"]
+
+    # Verify document exists (prevent orphan entries in vectors.documents)
+    pdf_path = PDF_BASE_DIR / f"{document_id}.pdf"
+    if not pdf_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document not found: {document_id}"
+        )
+
+    try:
+        await vector_store._ensure_pool()
+        async with vector_store.pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                INSERT INTO vectors.documents (document_id, category)
+                VALUES ($1, $2)
+                ON CONFLICT (document_id) DO UPDATE SET category = $2
+                """,
+                document_id,
+                category,
+            )
+        logger.info(f"Admin {admin['id']} set {document_id} category to {category}")
+    except asyncpg.PostgresError as e:
+        logger.error(f"Database error updating category for {document_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update document category"
+        )
+
+    return {"document_id": document_id, "category": category}
 
 
 @router.post("/documents/{document_id}/reindex")

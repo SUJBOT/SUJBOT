@@ -22,7 +22,11 @@ class GraphSearchInput(ToolInput):
     query: str = Field(..., description="Entity name or search term (cross-language: English queries find Czech entities)")
     entity_type: Optional[str] = Field(
         None,
-        description="Filter by entity type: REGULATION, STANDARD, ORGANIZATION, PERSON, CONCEPT, FACILITY, ROLE, DOCUMENT, SECTION, REQUIREMENT",
+        description=(
+            "Filter by entity type: REGULATION, STANDARD, ORGANIZATION, PERSON, "
+            "CONCEPT, FACILITY, ROLE, DOCUMENT, SECTION, REQUIREMENT, "
+            "OBLIGATION, PROHIBITION, PERMISSION, EVIDENCE, CONTROL"
+        ),
     )
     limit: int = Field(10, description="Maximum results", ge=1, le=50)
 
@@ -34,7 +38,8 @@ class GraphSearchTool(BaseTool):
     name = "graph_search"
     description = (
         "Search knowledge graph for entities (regulations, standards, organizations, persons, "
-        "concepts, facilities, roles, documents, sections, requirements). "
+        "concepts, facilities, roles, documents, sections, requirements, "
+        "obligations, prohibitions, permissions, evidence, controls). "
         "Returns matching entities with their relationships."
     )
     input_schema = GraphSearchInput

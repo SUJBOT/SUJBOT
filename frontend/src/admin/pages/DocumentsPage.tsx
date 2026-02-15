@@ -1,8 +1,9 @@
 /**
  * Admin Document Management Page
  *
- * Lists all documents with metadata (page count, size, indexed date).
- * Supports upload, delete, and reindex with SSE progress streaming.
+ * Lists all documents with metadata (page count, size, indexed date, category).
+ * Supports upload (with category selection), delete, reindex, and category editing.
+ * SSE progress streaming for upload and reindex operations.
  */
 
 import { useEffect, useState, useRef, useCallback } from 'react';
@@ -12,14 +13,22 @@ import {
   Button,
   Card,
   CardContent,
+  Chip,
   CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
   DialogContentText,
   DialogTitle,
+  FormControl,
+  FormControlLabel,
+  FormLabel,
   IconButton,
   LinearProgress,
+  Radio,
+  RadioGroup,
+  Select,
+  MenuItem,
   Table,
   TableBody,
   TableCell,
@@ -35,6 +44,8 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL !== undefined
   ? import.meta.env.VITE_API_BASE_URL
   : 'http://localhost:8000';
 
+type DocumentCategory = 'documentation' | 'legislation';
+
 interface AdminDocument {
   document_id: string;
   display_name: string;
@@ -42,6 +53,7 @@ interface AdminDocument {
   size_bytes: number;
   page_count: number;
   created_at: string | null;
+  category: DocumentCategory;
 }
 
 function formatBytes(bytes: number): string {
@@ -129,8 +141,11 @@ export const DocumentsPage = () => {
   const [progressDone, setProgressDone] = useState(false);
   const [progressError, setProgressError] = useState<string | null>(null);
 
-  // Upload
+  // Upload dialog
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+  const [uploadCategory, setUploadCategory] = useState<DocumentCategory>('documentation');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   const fetchDocuments = useCallback(async () => {
     try {
@@ -250,7 +265,7 @@ export const DocumentsPage = () => {
   };
 
   // --- Upload ---
-  const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -266,6 +281,17 @@ export const DocumentsPage = () => {
       return;
     }
 
+    setSelectedFile(file);
+    setUploadDialogOpen(true);
+  };
+
+  const handleUploadConfirm = async () => {
+    if (!selectedFile) return;
+    const file = selectedFile;
+    const category = uploadCategory;
+
+    setUploadDialogOpen(false);
+    setSelectedFile(null);
     setActionInProgress('upload');
     setProgressOpen(true);
     setProgressDone(false);
@@ -277,6 +303,7 @@ export const DocumentsPage = () => {
     try {
       const formData = new FormData();
       formData.append('file', file);
+      formData.append('category', category);
 
       const response = await fetch(`${API_BASE_URL}/documents/upload`, {
         method: 'POST',
@@ -326,6 +353,32 @@ export const DocumentsPage = () => {
     }
   };
 
+  // --- Category change ---
+  const handleCategoryChange = async (docId: string, newCategory: DocumentCategory) => {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/admin/documents/${docId}/category`,
+        {
+          method: 'PATCH',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ category: newCategory }),
+        },
+      );
+
+      if (!response.ok) throw new Error('Category update failed');
+
+      // Update local state
+      setDocuments(prev =>
+        prev.map(doc =>
+          doc.document_id === docId ? { ...doc, category: newCategory } : doc
+        )
+      );
+    } catch {
+      setError(t('admin.documents.categoryUpdateError'));
+    }
+  };
+
   if (loading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
@@ -352,7 +405,7 @@ export const DocumentsPage = () => {
             type="file"
             accept=".pdf"
             hidden
-            onChange={handleUpload}
+            onChange={handleFileSelected}
           />
           <Button
             variant="contained"
@@ -392,6 +445,7 @@ export const DocumentsPage = () => {
                 <TableHead>
                   <TableRow>
                     <TableCell>{t('admin.documents.name')}</TableCell>
+                    <TableCell>{t('admin.documents.category')}</TableCell>
                     <TableCell>{t('admin.documents.filename')}</TableCell>
                     <TableCell align="right">{t('admin.documents.size')}</TableCell>
                     <TableCell align="right">{t('admin.documents.pages')}</TableCell>
@@ -406,6 +460,22 @@ export const DocumentsPage = () => {
                         <Typography variant="body2" fontWeight={500}>
                           {doc.display_name}
                         </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Select
+                          size="small"
+                          value={doc.category}
+                          onChange={(e) => handleCategoryChange(doc.document_id, e.target.value as DocumentCategory)}
+                          disabled={actionInProgress !== null}
+                          sx={{ minWidth: 130, fontSize: '0.8rem' }}
+                        >
+                          <MenuItem value="documentation">
+                            <Chip label={t('admin.documents.categoryDocumentation')} size="small" />
+                          </MenuItem>
+                          <MenuItem value="legislation">
+                            <Chip label={t('admin.documents.categoryLegislation')} size="small" color="primary" />
+                          </MenuItem>
+                        </Select>
                       </TableCell>
                       <TableCell>
                         <Typography variant="body2" color="textSecondary" sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
@@ -458,6 +528,47 @@ export const DocumentsPage = () => {
           )}
         </CardContent>
       </Card>
+
+      {/* Upload Category Dialog */}
+      <Dialog
+        open={uploadDialogOpen}
+        onClose={() => { setUploadDialogOpen(false); setSelectedFile(null); }}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>{t('admin.documents.upload')}</DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ mb: 2 }}>
+            {selectedFile?.name}
+          </DialogContentText>
+          <FormControl>
+            <FormLabel>{t('admin.documents.selectCategory')}</FormLabel>
+            <RadioGroup
+              value={uploadCategory}
+              onChange={(e) => setUploadCategory(e.target.value as DocumentCategory)}
+            >
+              <FormControlLabel
+                value="documentation"
+                control={<Radio />}
+                label={t('admin.documents.categoryDocumentation')}
+              />
+              <FormControlLabel
+                value="legislation"
+                control={<Radio />}
+                label={t('admin.documents.categoryLegislation')}
+              />
+            </RadioGroup>
+          </FormControl>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setUploadDialogOpen(false); setSelectedFile(null); }}>
+            {t('feedback.cancel')}
+          </Button>
+          <Button onClick={handleUploadConfirm} variant="contained">
+            {t('admin.documents.upload')}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={deleteTarget !== null} onClose={() => setDeleteTarget(null)}>

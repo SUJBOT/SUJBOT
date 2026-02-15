@@ -967,19 +967,43 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
 
             return results
 
-    def get_document_list(self) -> List[str]:
-        """Get list of unique document IDs."""
-        return _run_async_safe(self._async_get_document_list())
+    def get_document_list(self, category_filter: Optional[str] = None) -> List[str]:
+        """Get list of unique document IDs, optionally filtered by category."""
+        return _run_async_safe(self._async_get_document_list(category_filter))
 
-    async def _async_get_document_list(self) -> List[str]:
+    async def _async_get_document_list(self, category_filter: Optional[str] = None) -> List[str]:
         """Async get document list — VL reads vl_pages, OCR reads layer1."""
+        await self._ensure_pool()
         async with self.pool.acquire() as conn:
             if self.architecture == "vl":
-                query = "SELECT DISTINCT document_id FROM vectors.vl_pages ORDER BY document_id"
+                base = "SELECT DISTINCT document_id FROM vectors.vl_pages"
             else:
-                query = "SELECT DISTINCT document_id FROM vectors.layer1 ORDER BY document_id"
-            rows = await conn.fetch(query)
+                base = "SELECT DISTINCT document_id FROM vectors.layer1"
+
+            if category_filter:
+                query = (
+                    f"{base} WHERE document_id IN "
+                    f"(SELECT document_id FROM vectors.documents WHERE category = $1) "
+                    f"ORDER BY document_id"
+                )
+                rows = await conn.fetch(query, category_filter)
+            else:
+                rows = await conn.fetch(f"{base} ORDER BY document_id")
+
             return [row["document_id"] for row in rows]
+
+    def get_document_categories(self) -> Dict[str, str]:
+        """Get mapping of document_id → category from vectors.documents."""
+        return _run_async_safe(self._async_get_document_categories())
+
+    async def _async_get_document_categories(self) -> Dict[str, str]:
+        """Async get document categories."""
+        await self._ensure_pool()
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT document_id, category FROM vectors.documents"
+            )
+            return {row["document_id"]: row["category"] for row in rows}
 
     def get_stats(self) -> Dict[str, Any]:
         """Get vector store statistics."""
@@ -987,6 +1011,7 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
 
     async def _async_get_stats(self) -> Dict[str, Any]:
         """Async get stats."""
+        await self._ensure_pool()
         async with self.pool.acquire() as conn:
             stats_row = await conn.fetchrow(
                 "SELECT * FROM metadata.vector_store_stats WHERE id = 1"
@@ -1286,11 +1311,14 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
     # VL (Vision-Language) Page Embeddings
     # ============================================================================
 
+    _VALID_CATEGORIES = {"documentation", "legislation"}
+
     def search_vl_pages(
         self,
         query_embedding: np.ndarray,
         k: int = 5,
         document_filter: Optional[str] = None,
+        category_filter: Optional[str] = None,
     ) -> List[Dict]:
         """
         Search VL page embeddings (2048-dim Jina v4) by cosine similarity.
@@ -1299,12 +1327,13 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
             query_embedding: Query embedding (2048-dim, L2-normalized)
             k: Number of results
             document_filter: Optional document ID filter
+            category_filter: Optional category filter ('documentation' or 'legislation')
 
         Returns:
             List of dicts with page_id, document_id, page_number, score, image_path, metadata
         """
         return _run_async_safe(
-            self._async_search_vl_pages(query_embedding, k, document_filter),
+            self._async_search_vl_pages(query_embedding, k, document_filter, category_filter),
             operation_name="search_vl_pages",
         )
 
@@ -1313,6 +1342,7 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
         query_embedding: np.ndarray,
         k: int,
         document_filter: Optional[str],
+        category_filter: Optional[str] = None,
     ) -> List[Dict]:
         """Async VL page search."""
         await self._ensure_pool()
@@ -1327,6 +1357,17 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
             param_idx += 1
             where_parts.append(f"document_id = ${param_idx}")
             params.append(document_filter)
+
+        if category_filter:
+            if category_filter not in self._VALID_CATEGORIES:
+                raise ValueError(
+                    f"Invalid category_filter: {category_filter!r}. Must be one of {self._VALID_CATEGORIES}"
+                )
+            param_idx += 1
+            where_parts.append(
+                f"document_id IN (SELECT document_id FROM vectors.documents WHERE category = ${param_idx})"
+            )
+            params.append(category_filter)
 
         where_clause = ""
         if where_parts:

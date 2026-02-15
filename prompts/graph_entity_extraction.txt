@@ -7,10 +7,15 @@ Extract all entities and relationships from this page image. This is a Czech leg
 - ORGANIZATION: Institutions, authorities, companies (e.g., "SÚJB", "ČEZ", "IAEA")
 - PERSON: Named individuals with their titles (e.g., "doc. Ing. Ľubomír Sklenka, Ph.D.")
 - CONCEPT: Legal/technical concepts defined in the text (e.g., "jaderné zařízení", "radiační ochrana")
-- REQUIREMENT: Specific obligations or prohibitions (e.g., "povinnost hlášení", "limit dávky")
+- REQUIREMENT: Specific technical or procedural requirements — measurable criteria (e.g., "limit dávky 20 mSv/rok", "minimální tloušťka stěny 5 mm")
 - FACILITY: Physical facilities, buildings, equipment (e.g., "JE Dukovany", "reaktor VVER-440")
 - ROLE: Roles or positions — NOT specific people (e.g., "dozimetrista", "inspektor", "držitel povolení")
 - DOCUMENT: Referenced documents, reports (e.g., "bezpečnostní zpráva", "havarijní plán")
+- OBLIGATION: Duties imposed by regulation — what someone MUST do (e.g., "správce musí vést záznamy", "povinnost hlášení")
+- PROHIBITION: Bans or restrictions — what is FORBIDDEN (e.g., "zakazuje se zpracování zvláštních kategorií", "nesmí odmítnout")
+- PERMISSION: Rights, exceptions, allowances (e.g., "zpracování je povoleno se souhlasem", "oprávnění k výkonu")
+- EVIDENCE: Proof of compliance found in documents — chapters, sections, or statements that demonstrate compliance (e.g., "Kapitola 5 popisuje záznamy o zpracování")
+- CONTROL: Mechanisms, measures, or procedures for compliance (e.g., "šifrování dat v klidu", "pravidelný audit", "systém řízení jakosti")
 
 ## Relationship types to extract
 - DEFINES: Entity defines/specifies another (regulation defines concept)

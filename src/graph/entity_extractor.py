@@ -35,6 +35,11 @@ ENTITY_TYPES = {
     "FACILITY",
     "ROLE",
     "DOCUMENT",
+    "OBLIGATION",
+    "PROHIBITION",
+    "PERMISSION",
+    "EVIDENCE",
+    "CONTROL",
 }
 RELATIONSHIP_TYPES = {
     "DEFINES",

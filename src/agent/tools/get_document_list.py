@@ -25,19 +25,21 @@ class GetDocumentListTool(BaseTool):
     """List all available documents in the corpus."""
 
     name = "get_document_list"
-    description = "Get list of all documents in the vector store"
+    description = "Get list of all documents in the vector store with categories"
     detailed_help = """
-    Returns a list of all document IDs and their summaries from the vector store.
+    Returns a list of all document IDs, categories, and summaries from the vector store.
 
     **Use cases:**
     - Orchestrator routing: understand what documents exist
     - Query scoping: check if relevant documents are indexed
     - Corpus overview: see available document coverage
+    - Category awareness: identify legislation vs documentation
 
     **Returns:**
     - document_ids: List of unique document identifiers
     - document_count: Total number of documents
-    - summaries: Brief description of each document (if available)
+    - documents: List of documents with id, category, and summary
+    - by_category: Documents grouped by category (legislation/documentation)
     """
 
     input_schema = GetDocumentListInput
@@ -45,15 +47,16 @@ class GetDocumentListTool(BaseTool):
 
     def execute_impl(self) -> ToolResult:
         """
-        Get list of all documents in vector store.
+        Get list of all documents in vector store, grouped by category.
 
         Returns:
-            ToolResult with document list and summaries
+            ToolResult with document list, summaries, and categories
         """
         try:
             # Get document list from vector store
             document_ids: List[str] = []
             summaries: dict = {}
+            categories: dict = {}
 
             # Try PostgreSQL adapter method first
             if hasattr(self.vector_store, 'get_document_list'):
@@ -63,17 +66,26 @@ class GetDocumentListTool(BaseTool):
             if hasattr(self.vector_store, 'get_document_summaries'):
                 summaries = self.vector_store.get_document_summaries() or {}
 
+            # Get document categories
+            if hasattr(self.vector_store, 'get_document_categories'):
+                categories = self.vector_store.get_document_categories() or {}
+
             # Sort for consistent output
             document_ids = sorted(document_ids)
 
-            # Build response with summaries
+            # Build response with summaries and categories
             documents = []
             for doc_id in document_ids:
                 doc_info = {
                     "id": doc_id,
-                    "summary": summaries.get(doc_id, "No summary available")
+                    "category": categories.get(doc_id, "documentation"),
+                    "summary": summaries.get(doc_id, "No summary available"),
                 }
                 documents.append(doc_info)
+
+            # Group by category for clarity
+            legislation = [d for d in documents if d["category"] == "legislation"]
+            documentation = [d for d in documents if d["category"] == "documentation"]
 
             return ToolResult(
                 success=True,
@@ -81,10 +93,15 @@ class GetDocumentListTool(BaseTool):
                     "document_count": len(document_ids),
                     "document_ids": document_ids,
                     "documents": documents,
+                    "by_category": {
+                        "legislation": [d["id"] for d in legislation],
+                        "documentation": [d["id"] for d in documentation],
+                    },
                 },
                 metadata={
                     "source": "vector_store",
                     "has_summaries": bool(summaries),
+                    "has_categories": bool(categories),
                 },
             )
 

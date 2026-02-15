@@ -267,7 +267,13 @@
       "summarizing": "Sumarizace stránek...",
       "uploading": "Ukládání souboru...",
       "close": "Zavřít",
-      "notIndexed": "Neindexováno"
+      "notIndexed": "Neindexováno",
+      "category": "Kategorie",
+      "categoryDocumentation": "Dokumentace",
+      "categoryLegislation": "Legislativa",
+      "selectCategory": "Vyberte kategorii dokumentu",
+      "categoryUpdated": "Kategorie aktualizována",
+      "categoryUpdateError": "Nepodařilo se aktualizovat kategorii"
     },
     "conversations": {
       "sectionTitle": "Historie konverzací",
