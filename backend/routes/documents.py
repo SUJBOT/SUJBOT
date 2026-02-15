@@ -14,7 +14,7 @@ import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile, File, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
@@ -29,6 +29,9 @@ logger = logging.getLogger(__name__)
 _vl_components: Dict[str, Any] = {}
 
 MAX_UPLOAD_SIZE = 100 * 1024 * 1024  # 100 MB
+
+# Strong references for fire-and-forget cleanup tasks (prevents GC before completion)
+_background_tasks: set = set()
 
 
 def set_vl_components(
@@ -50,6 +53,7 @@ def set_vl_components(
 
 class DocumentInfo(BaseModel):
     """Document metadata for listing available PDFs."""
+
     document_id: str
     display_name: str
     filename: str
@@ -98,11 +102,13 @@ async def index_document_pipeline(
             percent = int((page_number / total_pages) * 100)
             yield {
                 "event": "progress",
-                "data": json.dumps({
-                    "stage": "rendering",
-                    "percent": percent,
-                    "message": f"Rendering page {page_number}/{total_pages}",
-                }),
+                "data": json.dumps(
+                    {
+                        "stage": "rendering",
+                        "percent": percent,
+                        "message": f"Rendering page {page_number}/{total_pages}",
+                    }
+                ),
             }
             await asyncio.sleep(0)
     finally:
@@ -111,7 +117,7 @@ async def index_document_pipeline(
     # Run embedding and summarization concurrently (different API providers).
     # Entity extraction must run AFTER store — graph.entities has FK to vl_pages.
     # Progress events are funneled through an asyncio.Queue.
-    progress_queue: asyncio.Queue = asyncio.Queue()
+    progress_queue: asyncio.Queue[dict] = asyncio.Queue()
 
     async def embed_task() -> np.ndarray:
         """Embed all pages via Jina API."""
@@ -124,33 +130,53 @@ async def index_document_pipeline(
             end = min(start + batch_size, len(page_ids))
             batch_page_ids = page_ids[start:end]
 
-            page_images = [page_store.get_image_bytes(pid) for pid in batch_page_ids]
-            batch_embeddings = await asyncio.to_thread(
-                jina_client.embed_pages, page_images
-            )
+            try:
+                page_images = [page_store.get_image_bytes(pid) for pid in batch_page_ids]
+            except (FileNotFoundError, OSError) as e:
+                raise RuntimeError(
+                    f"Failed to read page images for batch {batch_idx + 1}: {e}"
+                ) from e
+
+            try:
+                batch_embeddings = await asyncio.to_thread(jina_client.embed_pages, page_images)
+            except Exception as e:
+                raise RuntimeError(
+                    f"Embedding API failed on batch {batch_idx + 1}/{total_batches}: {e}"
+                ) from e
             all_embeds.append(batch_embeddings)
 
             percent = int(((batch_idx + 1) / total_batches) * 100)
-            await progress_queue.put({
-                "stage": "embedding",
-                "percent": percent,
-                "message": f"Embedding batch {batch_idx + 1}/{total_batches}",
-            })
+            await progress_queue.put(
+                {
+                    "stage": "embedding",
+                    "percent": percent,
+                    "message": f"Embedding batch {batch_idx + 1}/{total_batches}",
+                }
+            )
 
             if batch_idx + 1 < total_batches:
                 await asyncio.sleep(3)
 
         return np.vstack(all_embeds)
 
-    async def summarize_task() -> tuple:
+    async def summarize_task() -> tuple[dict, str | None]:
         """Summarize pages via LLM. Returns (summaries_dict, model_name)."""
         sums: dict = {}
         try:
-            prompt_path = Path(__file__).resolve().parent.parent.parent / "prompts" / "vl_page_summary.txt"
+            prompt_path = (
+                Path(__file__).resolve().parent.parent.parent / "prompts" / "vl_page_summary.txt"
+            )
             prompt_text = prompt_path.read_text(encoding="utf-8")
             m_name = summary_provider.get_model_name()
-        except Exception as e:
+        except (FileNotFoundError, PermissionError, UnicodeDecodeError, AttributeError) as e:
             logger.error(f"Summary setup failed, skipping summarization: {e}")
+            await progress_queue.put(
+                {
+                    "stage": "summarizing",
+                    "percent": 100,
+                    "message": "Summarization skipped: setup failed",
+                }
+            )
             return sums, None
 
         max_consecutive_failures = 3
@@ -177,8 +203,11 @@ async def index_document_pipeline(
                 ]
                 response = await asyncio.to_thread(
                     summary_provider.create_message,
-                    messages=messages, tools=[], system="",
-                    max_tokens=500, temperature=0.0,
+                    messages=messages,
+                    tools=[],
+                    system="",
+                    max_tokens=500,
+                    temperature=0.0,
                 )
                 text = response.text.strip() if response.text else None
                 if text:
@@ -198,19 +227,19 @@ async def index_document_pipeline(
                 break
 
             percent = int(((i + 1) / len(page_ids)) * 100)
-            await progress_queue.put({
-                "stage": "summarizing",
-                "percent": percent,
-                "message": f"Summarizing page {i + 1}/{len(page_ids)}",
-            })
+            await progress_queue.put(
+                {
+                    "stage": "summarizing",
+                    "percent": percent,
+                    "message": f"Summarizing page {i + 1}/{len(page_ids)}",
+                }
+            )
 
         return sums, m_name
 
     # Launch embed + summarize concurrently
     embed_future = asyncio.create_task(embed_task())
-    summarize_future = (
-        asyncio.create_task(summarize_task()) if summary_provider else None
-    )
+    summarize_future = asyncio.create_task(summarize_task()) if summary_provider else None
 
     tasks = [t for t in [embed_future, summarize_future] if t is not None]
     done_event = asyncio.Event()
@@ -234,8 +263,11 @@ async def index_document_pipeline(
                 continue
 
         # Drain remaining queue items
-        while not progress_queue.empty():
-            item = progress_queue.get_nowait()
+        while True:
+            try:
+                item = progress_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
             yield {
                 "event": "progress",
                 "data": json.dumps(item),
@@ -248,27 +280,39 @@ async def index_document_pipeline(
         logger.info("Indexing pipeline cancelled by client disconnect")
         raise
 
-    # Check for task failures
-    for t in tasks:
-        exc = t.exception() if t.done() and not t.cancelled() else None
-        if exc:
-            logger.error(f"Pipeline task failed: {exc}", exc_info=exc)
-
-    # Get results
+    # Get results — embedding is mandatory, summarization is optional
+    embed_exc = (
+        embed_future.exception() if embed_future.done() and not embed_future.cancelled() else None
+    )
+    if embed_exc:
+        raise RuntimeError(f"Embedding failed: {embed_exc}") from embed_exc
     embeddings = embed_future.result()
+
     summaries: dict = {}
     model_name = None
     if summarize_future:
-        summaries, model_name = summarize_future.result()
+        sum_exc = (
+            summarize_future.exception()
+            if summarize_future.done() and not summarize_future.cancelled()
+            else None
+        )
+        if sum_exc:
+            logger.error(
+                f"Summarization failed, continuing without summaries: {sum_exc}", exc_info=sum_exc
+            )
+        else:
+            summaries, model_name = summarize_future.result()
 
     # Store in PostgreSQL (needs embeddings + summaries)
     yield {
         "event": "progress",
-        "data": json.dumps({
-            "stage": "storing",
-            "percent": 50,
-            "message": "Storing embeddings",
-        }),
+        "data": json.dumps(
+            {
+                "stage": "storing",
+                "percent": 50,
+                "message": "Storing embeddings",
+            }
+        ),
     }
 
     pages = []
@@ -278,13 +322,15 @@ async def index_document_pipeline(
         if summaries.get(page_id) and model_name:
             metadata["page_summary"] = summaries[page_id]
             metadata["summary_model"] = model_name
-        pages.append({
-            "page_id": page_id,
-            "document_id": doc_id,
-            "page_number": page_num_val,
-            "image_path": page_store.get_image_path(page_id),
-            "metadata": metadata,
-        })
+        pages.append(
+            {
+                "page_id": page_id,
+                "document_id": doc_id,
+                "page_number": page_num_val,
+                "image_path": page_store.get_image_path(page_id),
+                "metadata": metadata,
+            }
+        )
 
     vector_store.add_vl_pages(pages, embeddings)
 
@@ -303,11 +349,15 @@ async def index_document_pipeline(
 
                 if entities:
                     await graph_storage.async_add_entities(
-                        entities, document_id, source_page_id=page_id,
+                        entities,
+                        document_id,
+                        source_page_id=page_id,
                     )
                 if relationships:
                     await graph_storage.async_add_relationships(
-                        relationships, document_id, source_page_id=page_id,
+                        relationships,
+                        document_id,
+                        source_page_id=page_id,
                     )
                 consecutive_failures = 0
 
@@ -324,32 +374,39 @@ async def index_document_pipeline(
                 )
                 yield {
                     "event": "warning",
-                    "data": json.dumps({
-                        "stage": "graph_extraction",
-                        "message": f"Entity extraction aborted after {max_consecutive_failures} consecutive failures",
-                    }),
+                    "data": json.dumps(
+                        {
+                            "stage": "graph_extraction",
+                            "message": f"Entity extraction aborted after {max_consecutive_failures} consecutive failures",
+                        }
+                    ),
                 }
                 break
 
             percent = int(((i + 1) / len(page_ids)) * 100)
             yield {
                 "event": "progress",
-                "data": json.dumps({
-                    "stage": "graph_extraction",
-                    "percent": percent,
-                    "message": f"Extracting entities from page {i + 1}/{len(page_ids)}",
-                }),
+                "data": json.dumps(
+                    {
+                        "stage": "graph_extraction",
+                        "percent": percent,
+                        "message": f"Extracting entities from page {i + 1}/{len(page_ids)}",
+                    }
+                ),
             }
             await asyncio.sleep(0)
 
     yield {
         "event": "complete",
-        "data": json.dumps({
-            "document_id": document_id,
-            "pages": total_pages,
-            "display_name": _format_display_name(pdf_path.name),
-        }),
+        "data": json.dumps(
+            {
+                "document_id": document_id,
+                "pages": total_pages,
+                "display_name": _format_display_name(pdf_path.name),
+            }
+        ),
     }
+
 
 # Valid document_id patterns
 # Direct format: alphanumeric, underscore, hyphen (e.g., "BZ_VR1")
@@ -379,9 +436,7 @@ def _format_display_name(filename: str) -> str:
 
 
 @router.get("/", response_model=List[DocumentInfo])
-async def list_documents(
-    user: Dict = Depends(get_current_user)
-) -> List[DocumentInfo]:
+async def list_documents(user: Dict = Depends(get_current_user)) -> List[DocumentInfo]:
     """
     List all available PDF documents.
 
@@ -401,9 +456,7 @@ async def list_documents(
         try:
             await vector_store._ensure_pool()
             async with vector_store.pool.acquire() as conn:
-                rows = await conn.fetch(
-                    "SELECT document_id, category FROM vectors.documents"
-                )
+                rows = await conn.fetch("SELECT document_id, category FROM vectors.documents")
                 categories = {row["document_id"]: row["category"] for row in rows}
         except Exception as e:
             logger.warning(f"Failed to fetch document categories: {e}", exc_info=True)
@@ -413,18 +466,19 @@ async def list_documents(
             filename = pdf_path.name
             doc_id = pdf_path.stem  # Filename without .pdf
 
-            documents.append(DocumentInfo(
-                document_id=doc_id,
-                display_name=_format_display_name(filename),
-                filename=filename,
-                size_bytes=pdf_path.stat().st_size,
-                category=categories.get(doc_id, "documentation"),
-            ))
+            documents.append(
+                DocumentInfo(
+                    document_id=doc_id,
+                    display_name=_format_display_name(filename),
+                    filename=filename,
+                    size_bytes=pdf_path.stat().st_size,
+                    category=categories.get(doc_id, "documentation"),
+                )
+            )
     except Exception as e:
         logger.error(f"Error listing documents: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to list documents"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list documents"
         )
 
     # Sort by display name
@@ -466,10 +520,7 @@ def _find_pdf_for_document(document_id: str) -> Optional[Path]:
 
 
 @router.get("/{document_id:path}/pdf")
-async def get_pdf(
-    document_id: str,
-    user: Dict = Depends(get_current_user)
-) -> FileResponse:
+async def get_pdf(document_id: str, user: Dict = Depends(get_current_user)) -> FileResponse:
     """
     Serve PDF file for a document.
 
@@ -488,6 +539,7 @@ async def get_pdf(
         - Only files from data/ directory allowed
     """
     from urllib.parse import unquote
+
     document_id = unquote(document_id)
 
     # Find PDF using pattern matching
@@ -497,7 +549,7 @@ async def get_pdf(
         logger.info(f"PDF not found for document_id: {document_id}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"PDF not found for document: {document_id}"
+            detail=f"PDF not found for document: {document_id}",
         )
 
     # Resolve to absolute path
@@ -506,13 +558,12 @@ async def get_pdf(
     # Security: Verify path is under allowed directory (prevent path traversal)
     if not str(pdf_path).startswith(str(PDF_BASE_DIR.resolve())):
         logger.warning(f"Path traversal attempt blocked: {document_id}")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied"
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     pdf_filename = pdf_path.name
-    logger.info(f"Serving PDF: {pdf_filename} (doc: {document_id}) to user {user.get('id', 'unknown')}")
+    logger.info(
+        f"Serving PDF: {pdf_filename} (doc: {document_id}) to user {user.get('id', 'unknown')}"
+    )
 
     return FileResponse(
         path=pdf_path,
@@ -521,7 +572,7 @@ async def get_pdf(
         headers={
             "Content-Disposition": f"inline; filename={pdf_filename}",
             "Cache-Control": "public, max-age=3600",  # 1 hour cache
-        }
+        },
     )
 
 
@@ -534,6 +585,18 @@ def _sanitize_filename(filename: str) -> str:
     # Collapse multiple underscores
     name = re.sub(r"_+", "_", name)
     return name
+
+
+def _cleanup_upload_files(pdf_path: Path, page_store: Any, document_id: str) -> None:
+    """Clean up uploaded PDF and rendered page images."""
+    if pdf_path.exists():
+        pdf_path.unlink()
+    doc_dir = page_store.store_dir / document_id
+    if doc_dir.exists():
+        try:
+            shutil.rmtree(doc_dir)
+        except OSError as e:
+            logger.error("Failed to clean up page image directory %s: %s", doc_dir, e)
 
 
 @router.post("/upload")
@@ -553,20 +616,19 @@ async def upload_document(
     if category not in ("documentation", "legislation"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Category must be 'documentation' or 'legislation'"
+            detail="Category must be 'documentation' or 'legislation'",
         )
     # Validate VL components are available
     if not _vl_components:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="VL indexing pipeline not initialized"
+            detail="VL indexing pipeline not initialized",
         )
 
     # Validate file type
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only PDF files are supported"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Only PDF files are supported"
         )
 
     # Read and validate size
@@ -574,7 +636,7 @@ async def upload_document(
     if len(content) > MAX_UPLOAD_SIZE:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="File too large (max 100 MB)"
+            detail="File too large (max 100 MB)",
         )
 
     safe_filename = _sanitize_filename(file.filename)
@@ -582,10 +644,7 @@ async def upload_document(
 
     # Check for duplicate
     if pdf_path.exists():
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Document already exists"
-        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Document already exists")
 
     async def event_generator():
         jina_client = _vl_components["jina_client"]
@@ -601,11 +660,13 @@ async def upload_document(
             pdf_path.write_bytes(content)
             yield {
                 "event": "progress",
-                "data": json.dumps({
-                    "stage": "uploading",
-                    "percent": 100,
-                    "message": "File saved",
-                }),
+                "data": json.dumps(
+                    {
+                        "stage": "uploading",
+                        "percent": 100,
+                        "message": "File saved",
+                    }
+                ),
             }
 
             # 1b. Register document category
@@ -625,7 +686,11 @@ async def upload_document(
 
             # 2-5. Render, embed, summarize, store, extract entities via shared pipeline
             async for event in index_document_pipeline(
-                pdf_path, document_id, jina_client, page_store, vector_store,
+                pdf_path,
+                document_id,
+                jina_client,
+                page_store,
+                vector_store,
                 summary_provider=summary_provider,
                 entity_extractor=entity_extractor,
                 graph_storage=graph_storage,
@@ -640,19 +705,20 @@ async def upload_document(
         except (asyncio.CancelledError, GeneratorExit):
             logger.info(
                 "Upload cancelled for %s (user %s)",
-                safe_filename, user.get("id", "unknown"),
+                safe_filename,
+                user.get("id", "unknown"),
             )
-            # Clean up files synchronously (always works)
-            if pdf_path.exists():
-                pdf_path.unlink()
-            doc_dir = page_store.store_dir / document_id
-            if doc_dir.exists():
-                shutil.rmtree(doc_dir, ignore_errors=True)
+            _cleanup_upload_files(pdf_path, page_store, document_id)
+
             # DB cleanup as fire-and-forget task (await unreliable in GeneratorExit)
             async def _cleanup_db():
                 try:
                     await vector_store._ensure_pool()
                     async with vector_store.pool.acquire() as conn:
+                        await conn.execute(
+                            "DELETE FROM graph.entities WHERE document_id = $1",
+                            document_id,
+                        )
                         await conn.execute(
                             "DELETE FROM vectors.vl_pages WHERE document_id = $1",
                             document_id,
@@ -663,8 +729,23 @@ async def upload_document(
                         )
                     logger.info("DB cleanup completed for cancelled upload: %s", document_id)
                 except Exception as e:
-                    logger.warning("DB cleanup failed for %s: %s", document_id, e)
-            asyncio.create_task(_cleanup_db())
+                    logger.error(
+                        "DB cleanup failed for cancelled upload %s: %s",
+                        document_id,
+                        e,
+                        exc_info=True,
+                    )
+
+            try:
+                task = asyncio.create_task(_cleanup_db())
+                _background_tasks.add(task)
+                task.add_done_callback(_background_tasks.discard)
+            except RuntimeError:
+                logger.error(
+                    "Cannot schedule DB cleanup for cancelled upload %s — "
+                    "orphaned data may remain in database",
+                    document_id,
+                )
             return
 
         except Exception as e:
@@ -675,31 +756,37 @@ async def upload_document(
                 e,
                 exc_info=True,
             )
-            # Clean up partial files on failure
-            if pdf_path.exists():
-                pdf_path.unlink()
-            doc_dir = page_store.store_dir / document_id
-            if doc_dir.exists():
-                shutil.rmtree(doc_dir, ignore_errors=True)
-            # Clean up document registry entry
+            _cleanup_upload_files(pdf_path, page_store, document_id)
+            # Clean up all database entries (graph, vectors, documents)
             try:
                 await vector_store._ensure_pool()
                 async with vector_store.pool.acquire() as conn:
+                    await conn.execute(
+                        "DELETE FROM graph.entities WHERE document_id = $1",
+                        document_id,
+                    )
+                    await conn.execute(
+                        "DELETE FROM vectors.vl_pages WHERE document_id = $1",
+                        document_id,
+                    )
                     await conn.execute(
                         "DELETE FROM vectors.documents WHERE document_id = $1",
                         document_id,
                     )
             except Exception as cleanup_err:
                 logger.warning(
-                    "Failed to clean up document registry entry for %s: %s",
-                    document_id, cleanup_err,
+                    "Failed to clean up database entries for %s: %s",
+                    document_id,
+                    cleanup_err,
                 )
             yield {
                 "event": "error",
-                "data": json.dumps({
-                    "message": str(e),
-                    "stage": "indexing",
-                }),
+                "data": json.dumps(
+                    {
+                        "message": str(e),
+                        "stage": "indexing",
+                    }
+                ),
             }
 
     return EventSourceResponse(event_generator())

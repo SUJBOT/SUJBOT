@@ -38,10 +38,8 @@ export function useDocumentUpload() {
           setProgress(event.data as UploadProgress);
         } else if (event.event === 'complete') {
           setResult(event.data as UploadResult);
-          setIsUploading(false);
         } else if (event.event === 'error') {
           setError(event.data.error || event.data.message || 'Upload failed');
-          setIsUploading(false);
         }
       }
     } catch (err) {
@@ -60,6 +58,8 @@ export function useDocumentUpload() {
     abortRef.current?.abort();
     setIsUploading(false);
     setProgress(null);
+    setError(null);
+    setResult(null);
   }, []);
 
   const reset = useCallback(() => {

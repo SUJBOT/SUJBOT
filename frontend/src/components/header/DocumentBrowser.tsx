@@ -35,6 +35,8 @@ export function DocumentBrowser({ isOpen, onClose }: DocumentBrowserProps) {
   useEffect(() => {
     if (isOpen) {
       loadDocuments();
+    } else {
+      setPendingFile(null);
     }
   }, [isOpen]);
 
