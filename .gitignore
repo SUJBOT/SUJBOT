@@ -125,7 +125,6 @@ dataset/
 !dataset/.gitkeep
 evaluations/
 clean_text/
-rag_confidence/
 results/
 results_all/
 

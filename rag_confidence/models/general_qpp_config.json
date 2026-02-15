@@ -1,0 +1,69 @@
+{
+  "model_type": "mlp",
+  "hidden_sizes": [
+    128,
+    64
+  ],
+  "alpha": 0.1,
+  "n_features": 24,
+  "feature_extractor": "GeneralQPPExtractor",
+  "tau": 0.711,
+  "training_data": "vidore_v3",
+  "n_train": 10295,
+  "n_test": 2574,
+  "test_auroc": 0.7709685918125458,
+  "test_auprc": 0.8545397581673617,
+  "test_brier": 0.18216025829315186,
+  "dataset_stats": [
+    {
+      "dataset": "vidore_v3_physics",
+      "n_queries": 1812,
+      "positive_rate": 0.4900662251655629
+    },
+    {
+      "dataset": "vidore_v3_energy",
+      "n_queries": 1848,
+      "positive_rate": 0.7326839826839827
+    },
+    {
+      "dataset": "vidore_v3_finance_en",
+      "n_queries": 1854,
+      "positive_rate": 0.6548004314994607
+    },
+    {
+      "dataset": "vidore_v3_hr",
+      "n_queries": 1908,
+      "positive_rate": 0.6210691823899371
+    },
+    {
+      "dataset": "vidore_v3_industrial",
+      "n_queries": 1698,
+      "positive_rate": 0.4758539458186101
+    },
+    {
+      "dataset": "vidore_v3_computer_science",
+      "n_queries": 1290,
+      "positive_rate": 0.8209302325581396
+    },
+    {
+      "dataset": "vidore_v3_pharmaceuticals",
+      "n_queries": 2184,
+      "positive_rate": 0.6863553113553114
+    },
+    {
+      "dataset": "esg_reports_eng_v2",
+      "n_queries": 57,
+      "positive_rate": 0.8421052631578947
+    },
+    {
+      "dataset": "economics_reports_eng_v2",
+      "n_queries": 58,
+      "positive_rate": 0.3793103448275862
+    },
+    {
+      "dataset": "biomedical_lectures_eng_v2",
+      "n_queries": 160,
+      "positive_rate": 0.85
+    }
+  ]
+}
