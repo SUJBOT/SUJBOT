@@ -11,6 +11,7 @@ from typing import Any, Optional, Tuple
 
 from .community_detector import CommunityDetector
 from .community_summarizer import CommunitySummarizer
+from .embedder import GraphEmbedder
 from .entity_extractor import EntityExtractor
 from .storage import GraphStorageAdapter
 
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "GraphStorageAdapter",
+    "GraphEmbedder",
     "EntityExtractor",
     "CommunityDetector",
     "CommunitySummarizer",

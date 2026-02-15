@@ -155,15 +155,19 @@ class SingleAgentRunner:
         graph_storage = None
         if architecture == "vl" and hasattr(vector_store, "pool") and vector_store.pool:
             try:
-                from ..graph import GraphStorageAdapter
+                from ..graph import GraphEmbedder, GraphStorageAdapter
             except ImportError as e:
                 logger.warning(f"Graph module not importable: {e}")
                 GraphStorageAdapter = None
+                GraphEmbedder = None
 
             if GraphStorageAdapter is not None:
                 try:
-                    graph_storage = GraphStorageAdapter(pool=vector_store.pool)
-                    logger.info("Graph storage initialized (shares vector_store pool)")
+                    graph_embedder = GraphEmbedder()
+                    graph_storage = GraphStorageAdapter(
+                        pool=vector_store.pool, embedder=graph_embedder
+                    )
+                    logger.info("Graph storage initialized with embedder (shares vector_store pool)")
                 except Exception as e:
                     logger.error(f"Graph storage initialization failed: {e}", exc_info=True)
 

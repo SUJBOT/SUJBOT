@@ -126,6 +126,7 @@ User Query → SingleAgentRunner (autonomous tool loop)
 **Key directories:**
 - `src/single_agent/` - Production runner (autonomous tool loop with unified prompt)
 - `src/agent/` - Agent CLI and tools (`tools/` has individual tool files)
+- `src/graph/` - Graph RAG (storage, embedder, entity extraction, communities)
 - `src/multi_agent/` - Legacy LangGraph-based multi-agent system
 - `src/retrieval/` - HyDE + Expansion Fusion retrieval pipeline
 - `src/vl/` - Vision-Language RAG module (Jina v4 embeddings, page store, VL retriever)
@@ -140,6 +141,8 @@ User Query → SingleAgentRunner (autonomous tool loop)
 - `src/agent/providers/factory.py` - Provider creation + `detect_provider_from_model()`
 - `src/vl/__init__.py:create_vl_components()` - VL initialization factory (both runners use this)
 - `backend/constants.py:get_variant_model()` - Variant→model mapping (falls back for unknown names)
+- `src/graph/embedder.py:GraphEmbedder` - multilingual-e5-small (384-dim) for graph semantic search
+- `src/graph/storage.py:GraphStorageAdapter` - Graph CRUD + embedding/FTS search
 
 ### VL (Vision-Language) Architecture
 
@@ -162,6 +165,8 @@ VL flow: Query → Jina v4 embed_query() → PostgreSQL exact cosine (vectors.vl
 | DB table | `vectors.layer3` | `vectors.vl_pages` |
 | Search | HyDE + Expansion Fusion | Simple cosine |
 | Token cost | ~100 tokens/chunk | ~1600 tokens/page |
+
+**Graph search** uses `intfloat/multilingual-e5-small` (384-dim) for cross-language semantic search on entities/communities. Falls back to PostgreSQL FTS when embedder not configured.
 
 ## Critical Constraints (DO NOT CHANGE)
 

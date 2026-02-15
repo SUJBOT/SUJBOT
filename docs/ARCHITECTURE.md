@@ -130,9 +130,9 @@ The agent has access to 8 tools (5 core RAG + 3 graph):
 
 | Tool | File | Description |
 |------|------|-------------|
-| `graph_search` | `src/agent/tools/graph_search.py` | Search entities by name using trigram similarity. |
+| `graph_search` | `src/agent/tools/graph_search.py` | Search entities by semantic embedding similarity (multilingual-e5-small). Cross-language capable. |
 | `graph_context` | `src/agent/tools/graph_context.py` | Get entity relationships via N-hop recursive CTE traversal. |
-| `graph_communities` | `src/agent/tools/graph_communities.py` | Browse Leiden community summaries for thematic queries. |
+| `graph_communities` | `src/agent/tools/graph_communities.py` | Search community summaries by semantic embedding similarity. |
 
 See [GRAPH_RAG.md](GRAPH_RAG.md) for the full Graph RAG architecture.
 

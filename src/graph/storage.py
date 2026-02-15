@@ -8,9 +8,10 @@ Follows PostgresVectorStoreAdapter pattern: asyncpg pool + sync wrappers.
 import asyncio
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import asyncpg
+import numpy as np
 
 from ..exceptions import DatabaseConnectionError, GraphStoreError
 
@@ -18,6 +19,11 @@ logger = logging.getLogger(__name__)
 
 # Column lists reused across entity queries
 _ENTITY_COLS = "entity_id, name, entity_type, description, document_id"
+
+
+def _vec_to_pg(vec: np.ndarray) -> str:
+    """Convert numpy array to pgvector string '[0.1,0.2,...]'."""
+    return "[" + ",".join(map(str, vec.flatten().tolist())) + "]"
 
 
 def _entity_from_row(row: asyncpg.Record) -> Dict[str, Any]:
@@ -70,20 +76,26 @@ class GraphStorageAdapter:
     or create its own.
     """
 
-    def __init__(self, pool: Optional[asyncpg.Pool] = None, connection_string: Optional[str] = None):
+    def __init__(
+        self,
+        pool: Optional[asyncpg.Pool] = None,
+        connection_string: Optional[str] = None,
+        embedder: Optional[Any] = None,
+    ):
         """
         Initialize with existing pool or connection string.
 
         Args:
             pool: Existing asyncpg pool (preferred — avoids duplicate connections).
-                When provided, this adapter does NOT own the pool (close() is a no-op).
             connection_string: PostgreSQL DSN (creates new pool if pool is None).
-                When pool is None and connection_string is provided, this adapter
-                creates and owns a new pool (close() will terminate it).
+            embedder: Optional GraphEmbedder for semantic search on entities/communities.
+                When provided, search methods use cosine similarity on embeddings.
+                When None, falls back to full-text search.
         """
         self.pool = pool
         self._connection_string = connection_string
         self._owns_pool = pool is None
+        self._embedder = embedder
 
     async def initialize(self):
         """Create connection pool if not provided."""
@@ -249,7 +261,7 @@ class GraphStorageAdapter:
     def search_entities(
         self, query: str, entity_type: Optional[str] = None, limit: int = 10
     ) -> List[Dict]:
-        """Search entities by name using trigram similarity."""
+        """Search entities by embedding similarity (or FTS fallback)."""
         return _run_async_safe(
             self.async_search_entities(query, entity_type, limit),
             operation_name="search_entities",
@@ -259,23 +271,34 @@ class GraphStorageAdapter:
         self, query: str, entity_type: Optional[str], limit: int
     ) -> List[Dict]:
         await self._ensure_pool()
-        params: list = [query]
-        where_parts = ["similarity(name, $1) > 0.1"]
+
+        if self._embedder:
+            return await self._search_entities_by_embedding(query, entity_type, limit)
+        return await self._search_entities_by_fts(query, entity_type, limit)
+
+    async def _search_entities_by_embedding(
+        self, query: str, entity_type: Optional[str], limit: int
+    ) -> List[Dict]:
+        query_vec = _vec_to_pg(self._embedder.encode_query(query))
+        params: list = [query_vec]
         param_idx = 1
 
+        type_filter = ""
         if entity_type:
             param_idx += 1
-            where_parts.append(f"entity_type = ${param_idx}")
+            type_filter = f"AND entity_type = ${param_idx}"
             params.append(entity_type)
 
         param_idx += 1
         params.append(limit)
 
         sql = f"""
-            SELECT {_ENTITY_COLS}, metadata, similarity(name, $1) AS sim
+            SELECT {_ENTITY_COLS}, metadata,
+                   1 - (search_embedding <=> $1::vector) AS score
             FROM graph.entities
-            WHERE {' AND '.join(where_parts)}
-            ORDER BY sim DESC
+            WHERE search_embedding IS NOT NULL
+            {type_filter}
+            ORDER BY search_embedding <=> $1::vector
             LIMIT ${param_idx}
         """
 
@@ -284,11 +307,49 @@ class GraphStorageAdapter:
                 rows = await conn.fetch(sql, *params)
         except asyncpg.PostgresError as e:
             raise GraphStoreError(
-                f"Entity search failed for query '{query}': {e}", cause=e
+                f"Entity embedding search failed for query '{query}': {e}", cause=e
             ) from e
 
         return [
-            {**_entity_from_row(row), "metadata": row["metadata"] or {}, "similarity": float(row["sim"])}
+            {**_entity_from_row(row), "metadata": row["metadata"] or {}, "score": float(row["score"])}
+            for row in rows
+        ]
+
+    async def _search_entities_by_fts(
+        self, query: str, entity_type: Optional[str], limit: int
+    ) -> List[Dict]:
+        params: list = [query]
+        param_idx = 1
+
+        type_filter = ""
+        if entity_type:
+            param_idx += 1
+            type_filter = f"AND entity_type = ${param_idx}"
+            params.append(entity_type)
+
+        param_idx += 1
+        params.append(limit)
+
+        sql = f"""
+            SELECT {_ENTITY_COLS}, metadata,
+                   ts_rank(search_tsv, plainto_tsquery('simple', unaccent($1))) AS score
+            FROM graph.entities
+            WHERE search_tsv @@ plainto_tsquery('simple', unaccent($1))
+            {type_filter}
+            ORDER BY score DESC
+            LIMIT ${param_idx}
+        """
+
+        try:
+            async with self.pool.acquire() as conn:
+                rows = await conn.fetch(sql, *params)
+        except asyncpg.PostgresError as e:
+            raise GraphStoreError(
+                f"Entity FTS search failed for query '{query}': {e}", cause=e
+            ) from e
+
+        return [
+            {**_entity_from_row(row), "metadata": row["metadata"] or {}, "score": float(row["score"])}
             for row in rows
         ]
 
@@ -481,6 +542,90 @@ class GraphStorageAdapter:
                 "summary": row["summary"],
                 "entity_ids": row["entity_ids"],
                 "metadata": row["metadata"] or {},
+            }
+            for row in rows
+        ]
+
+    def search_communities(
+        self, query: str, level: int = 0, limit: int = 10
+    ) -> List[Dict]:
+        """Search communities by embedding similarity (or FTS fallback)."""
+        return _run_async_safe(
+            self.async_search_communities(query, level, limit),
+            operation_name="search_communities",
+        )
+
+    async def async_search_communities(
+        self, query: str, level: int, limit: int
+    ) -> List[Dict]:
+        await self._ensure_pool()
+
+        if self._embedder:
+            return await self._search_communities_by_embedding(query, level, limit)
+        return await self._search_communities_by_fts(query, level, limit)
+
+    async def _search_communities_by_embedding(
+        self, query: str, level: int, limit: int
+    ) -> List[Dict]:
+        query_vec = _vec_to_pg(self._embedder.encode_query(query))
+        sql = """
+            SELECT community_id, level, title, summary, summary_model, entity_ids, metadata,
+                   1 - (search_embedding <=> $1::vector) AS score
+            FROM graph.communities
+            WHERE search_embedding IS NOT NULL AND level = $2
+            ORDER BY search_embedding <=> $1::vector
+            LIMIT $3
+        """
+        try:
+            async with self.pool.acquire() as conn:
+                rows = await conn.fetch(sql, query_vec, level, limit)
+        except asyncpg.PostgresError as e:
+            raise GraphStoreError(
+                f"Community embedding search failed for query '{query}': {e}", cause=e
+            ) from e
+
+        return [
+            {
+                "community_id": row["community_id"],
+                "level": row["level"],
+                "title": row["title"],
+                "summary": row["summary"],
+                "entity_ids": row["entity_ids"],
+                "metadata": row["metadata"] or {},
+                "score": float(row["score"]),
+            }
+            for row in rows
+        ]
+
+    async def _search_communities_by_fts(
+        self, query: str, level: int, limit: int
+    ) -> List[Dict]:
+        sql = """
+            SELECT community_id, level, title, summary, summary_model, entity_ids, metadata,
+                   ts_rank(search_tsv, plainto_tsquery('simple', unaccent($1))) AS score
+            FROM graph.communities
+            WHERE search_tsv @@ plainto_tsquery('simple', unaccent($1))
+              AND level = $2
+            ORDER BY score DESC
+            LIMIT $3
+        """
+        try:
+            async with self.pool.acquire() as conn:
+                rows = await conn.fetch(sql, query, level, limit)
+        except asyncpg.PostgresError as e:
+            raise GraphStoreError(
+                f"Community FTS search failed for query '{query}': {e}", cause=e
+            ) from e
+
+        return [
+            {
+                "community_id": row["community_id"],
+                "level": row["level"],
+                "title": row["title"],
+                "summary": row["summary"],
+                "entity_ids": row["entity_ids"],
+                "metadata": row["metadata"] or {},
+                "score": float(row["score"]),
             }
             for row in rows
         ]

@@ -1,8 +1,8 @@
 """
 Graph Search Tool — entity search in knowledge graph.
 
-Searches entities by name using trigram similarity, returns matching
-entities with their direct relationships.
+Searches entities by semantic embedding similarity (multilingual-e5-small),
+returns matching entities with their direct relationships.
 """
 
 import logging

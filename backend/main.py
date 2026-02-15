@@ -229,18 +229,22 @@ async def lifespan(app: FastAPI):
                 entity_extractor = None
                 graph_storage = None
                 try:
-                    from src.graph import GraphStorageAdapter
+                    from src.graph import GraphEmbedder, GraphStorageAdapter
                     from src.graph.entity_extractor import EntityExtractor
                 except ImportError as e:
                     logger.warning(f"Graph module not importable (entity extraction disabled): {e}")
                     GraphStorageAdapter = None
+                    GraphEmbedder = None
                     EntityExtractor = None
 
                 if GraphStorageAdapter is not None:
                     try:
                         # Share VL vector store pool (avoids duplicate connections
                         # and asyncio.to_thread event loop mismatch)
-                        graph_storage = GraphStorageAdapter(pool=vl_vector_store.pool)
+                        graph_embedder = GraphEmbedder()
+                        graph_storage = GraphStorageAdapter(
+                            pool=vl_vector_store.pool, embedder=graph_embedder
+                        )
                         if summary_provider and EntityExtractor is not None:
                             entity_extractor = EntityExtractor(summary_provider)
                             logger.info("✓ Graph components initialized for entity extraction")
