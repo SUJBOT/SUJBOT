@@ -482,8 +482,8 @@ class ComplianceCheckTool(BaseTool):
             explanation = data.get("explanation", "")
             return (status, confidence, explanation)
 
-        except (json.JSONDecodeError, ValueError, TypeError):
-            logger.warning(f"Failed to parse assessment JSON: {response_text[:200]}")
+        except (json.JSONDecodeError, ValueError):
+            logger.warning(f"Failed to parse assessment JSON: {response_text[:200]}", exc_info=True)
             return ("UNCLEAR", 0.25, "Could not parse assessment response")
 
     def _load_assessment_prompt(self) -> Optional[str]:
@@ -493,7 +493,7 @@ class ComplianceCheckTool(BaseTool):
                 return _ASSESSMENT_PROMPT_PATH.read_text(encoding="utf-8")
             logger.warning(f"Assessment prompt not found: {_ASSESSMENT_PROMPT_PATH}")
             return None
-        except Exception as e:
+        except OSError as e:
             logger.error(f"Failed to load assessment prompt: {e}", exc_info=True)
             return None
 

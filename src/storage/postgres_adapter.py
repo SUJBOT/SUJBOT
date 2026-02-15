@@ -1011,6 +1011,7 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
 
     async def _async_get_stats(self) -> Dict[str, Any]:
         """Async get stats."""
+        await self._ensure_pool()
         async with self.pool.acquire() as conn:
             stats_row = await conn.fetchrow(
                 "SELECT * FROM metadata.vector_store_stats WHERE id = 1"

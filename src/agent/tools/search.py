@@ -92,7 +92,7 @@ class SearchTool(BaseTool):
         query: str,
         k: int = 10,
         filter_document: Optional[str] = None,
-        filter_category: Optional[str] = None,
+        filter_category: Optional[Literal["documentation", "legislation"]] = None,
     ) -> ToolResult:
         """
         Execute search — dispatches to VL or OCR mode based on architecture config.
@@ -168,7 +168,7 @@ class SearchTool(BaseTool):
                         }
                     )
                 except Exception as e:
-                    logger.warning(f"Failed to load image for {r.page_id}: {e}")
+                    logger.warning(f"Failed to load image for {r.page_id}: {e}", exc_info=True)
                     failed_pages.append(r.page_id)
 
             if failed_pages and not page_images:

@@ -944,7 +944,7 @@ async def delete_admin_document(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete document files"
         )
-    except Exception as e:
+    except asyncpg.PostgresError as e:
         logger.error(f"Database error deleting {document_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
