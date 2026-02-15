@@ -111,9 +111,6 @@ class ToolConfig:
     query_expansion_provider: str = "openai"  # "openai" or "anthropic"
     query_expansion_model: str = "gpt-4o-mini"  # Stable, fast model for expansion
 
-    # HyDE (Hypothetical Document Embeddings) settings
-    hyde_num_hypotheses: int = 3  # Number of hypothetical documents to generate
-
     # Performance
     lazy_load_reranker: bool = False  # Load reranker at startup for better tool availability
     cache_embeddings: bool = True

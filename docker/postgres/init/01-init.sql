@@ -44,113 +44,9 @@ CREATE SCHEMA IF NOT EXISTS checkpoints;
 CREATE SCHEMA IF NOT EXISTS metadata;
 
 -- ============================================================================
--- VECTORS SCHEMA: 3-Layer Embedding Tables
+-- NOTE: OCR layer tables (layer1, layer2, layer3) removed.
+-- VL architecture uses vectors.vl_pages table (created by application).
 -- ============================================================================
-
--- Layer 1: Document-level embeddings (1 vector per document)
-CREATE TABLE IF NOT EXISTS vectors.layer1 (
-    id BIGSERIAL PRIMARY KEY,
-    chunk_id TEXT NOT NULL UNIQUE,
-    document_id TEXT NOT NULL,
-    title TEXT,
-
-    -- Embedding (4096 dimensions for Qwen3-Embedding-8B)
-    embedding vector(4096) NOT NULL,
-
-    -- Content (for retrieval and generation)
-    content TEXT NOT NULL,
-    content_tsv tsvector,  -- Auto-generated via trigger
-
-    -- Clustering metadata
-    cluster_id INTEGER,
-    cluster_label TEXT,
-    cluster_confidence FLOAT,
-
-    -- Hierarchical metadata
-    hierarchical_path TEXT,  -- Breadcrumb: "doc_id"
-    page_number INTEGER,
-
-    -- Additional metadata (flexible JSONB)
-    metadata JSONB,
-
-    -- Timestamps
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Layer 2: Section-level embeddings (N vectors per document)
-CREATE TABLE IF NOT EXISTS vectors.layer2 (
-    id BIGSERIAL PRIMARY KEY,
-    chunk_id TEXT NOT NULL UNIQUE,
-    document_id TEXT NOT NULL,
-
-    -- Section metadata
-    section_id TEXT,
-    section_title TEXT,
-    section_path TEXT,
-    section_level INTEGER,
-    section_depth INTEGER,
-    hierarchical_path TEXT,  -- "doc_id > section > subsection"
-    page_number INTEGER,
-
-    -- Embedding (4096 dimensions for Qwen3-Embedding-8B)
-    embedding vector(4096) NOT NULL,
-
-    -- Content
-    content TEXT NOT NULL,
-    content_tsv tsvector,
-
-    -- Clustering
-    cluster_id INTEGER,
-    cluster_label TEXT,
-    cluster_confidence FLOAT,
-
-    -- Metadata
-    metadata JSONB,
-
-    -- Timestamps
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Layer 3: Chunk-level embeddings (M vectors per document, PRIMARY retrieval layer)
-CREATE TABLE IF NOT EXISTS vectors.layer3 (
-    id BIGSERIAL PRIMARY KEY,
-    chunk_id TEXT NOT NULL UNIQUE,
-    document_id TEXT NOT NULL,
-
-    -- Section metadata (inherited from parent section)
-    section_id TEXT,
-    section_title TEXT,
-    section_path TEXT,
-    section_level INTEGER,
-    section_depth INTEGER,
-    hierarchical_path TEXT,
-    page_number INTEGER,
-
-    -- Chunk position
-    char_start INTEGER,
-    char_end INTEGER,
-
-    -- Embedding (4096 dimensions for Qwen3-Embedding-8B)
-    embedding vector(4096) NOT NULL,
-
-    -- Content (WITHOUT summary-augmentation for generation)
-    content TEXT NOT NULL,
-    content_tsv tsvector,
-
-    -- Clustering
-    cluster_id INTEGER,
-    cluster_label TEXT,
-    cluster_confidence FLOAT,
-
-    -- Metadata (section summaries, document summaries, etc.)
-    metadata JSONB,
-
-    -- Timestamps
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
 
 -- ============================================================================
 -- GRAPHS SCHEMA: Apache AGE Property Graph + Mirror Tables
@@ -260,18 +156,15 @@ CREATE TABLE IF NOT EXISTS metadata.documents (
 -- Vector store statistics (for get_stats() API)
 CREATE TABLE IF NOT EXISTS metadata.vector_store_stats (
     id SERIAL PRIMARY KEY,
-    dimensions INTEGER NOT NULL DEFAULT 4096,
-    layer1_count INTEGER NOT NULL DEFAULT 0,
-    layer2_count INTEGER NOT NULL DEFAULT 0,
-    layer3_count INTEGER NOT NULL DEFAULT 0,
+    dimensions INTEGER NOT NULL DEFAULT 2048,
     total_vectors INTEGER NOT NULL DEFAULT 0,
     document_count INTEGER NOT NULL DEFAULT 0,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Insert initial stats row
-INSERT INTO metadata.vector_store_stats (dimensions, layer1_count, layer2_count, layer3_count, total_vectors, document_count)
-VALUES (4096, 0, 0, 0, 0, 0)
+INSERT INTO metadata.vector_store_stats (dimensions, total_vectors, document_count)
+VALUES (2048, 0, 0)
 ON CONFLICT DO NOTHING;
 
 -- ============================================================================
@@ -279,68 +172,9 @@ ON CONFLICT DO NOTHING;
 -- ============================================================================
 
 -- ============================================================================
--- Vector Indexes (HNSW for production, IVFFlat for development)
+-- NOTE: OCR layer indexes (layer1, layer2, layer3) removed.
+-- VL page indexes are managed by the application.
 -- ============================================================================
-
--- Layer 1: IVFFlat (fast build, small dataset)
-CREATE INDEX IF NOT EXISTS idx_layer1_embedding_ivfflat
-ON vectors.layer1 USING ivfflat (embedding vector_cosine_ops)
-WITH (lists = 100);
-
--- Layer 2: IVFFlat (medium dataset)
-CREATE INDEX IF NOT EXISTS idx_layer2_embedding_ivfflat
-ON vectors.layer2 USING ivfflat (embedding vector_cosine_ops)
-WITH (lists = 100);
-
--- Layer 3: Vector index
--- NOTE: pgvector 0.8.x has a 2000 dimension limit for HNSW/IVFFlat indexes
--- Qwen3-Embedding-8B produces 4096-dim vectors, so NO INDEX is possible
--- Options: 1) Upgrade to pgvector 0.9+ (16000 dim limit)
---          2) Use embedding model with ≤2000 dims (e.g., text-embedding-3-large = 3072 dims won't work either)
---          3) Use sequential scan (acceptable for <10k vectors)
---
--- For now, using sequential scan which is fast for small datasets
--- Uncomment below if using pgvector 0.9+ or lower-dim embeddings:
---
--- CREATE INDEX IF NOT EXISTS idx_layer3_embedding_hnsw
--- ON vectors.layer3 USING hnsw (embedding vector_cosine_ops)
--- WITH (m = 16, ef_construction = 64);
-
--- ============================================================================
--- Full-Text Search Indexes (GIN for tsvector)
--- ============================================================================
-
-CREATE INDEX IF NOT EXISTS idx_layer1_content_tsv
-ON vectors.layer1 USING gin(content_tsv);
-
-CREATE INDEX IF NOT EXISTS idx_layer2_content_tsv
-ON vectors.layer2 USING gin(content_tsv);
-
-CREATE INDEX IF NOT EXISTS idx_layer3_content_tsv
-ON vectors.layer3 USING gin(content_tsv);
-
--- ============================================================================
--- Filtering Indexes (B-tree for document/section filtering)
--- ============================================================================
-
--- Layer 1
-CREATE INDEX IF NOT EXISTS idx_layer1_document_id ON vectors.layer1(document_id);
-CREATE INDEX IF NOT EXISTS idx_layer1_chunk_id ON vectors.layer1(chunk_id);
-
--- Layer 2
-CREATE INDEX IF NOT EXISTS idx_layer2_document_id ON vectors.layer2(document_id);
-CREATE INDEX IF NOT EXISTS idx_layer2_section_id ON vectors.layer2(section_id);
-CREATE INDEX IF NOT EXISTS idx_layer2_chunk_id ON vectors.layer2(chunk_id);
-
--- Layer 3
-CREATE INDEX IF NOT EXISTS idx_layer3_document_id ON vectors.layer3(document_id);
-CREATE INDEX IF NOT EXISTS idx_layer3_section_id ON vectors.layer3(section_id);
-CREATE INDEX IF NOT EXISTS idx_layer3_chunk_id ON vectors.layer3(chunk_id);
-CREATE INDEX IF NOT EXISTS idx_layer3_hierarchical_path ON vectors.layer3(hierarchical_path);
-
--- Composite index for filtered vector search
-CREATE INDEX IF NOT EXISTS idx_layer3_doc_section
-ON vectors.layer3(document_id, section_id);
 
 -- ============================================================================
 -- Graph Indexes
@@ -382,29 +216,6 @@ CREATE INDEX IF NOT EXISTS idx_documents_indexed ON metadata.documents(indexed_a
 -- TRIGGERS: Auto-Update Fields
 -- ============================================================================
 
--- Function: Auto-update tsvector for full-text search
-CREATE OR REPLACE FUNCTION vectors.update_content_tsv()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.content_tsv := to_tsvector('english', COALESCE(NEW.content, ''));
-    NEW.updated_at := NOW();
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- Apply triggers to all layers
-CREATE TRIGGER layer1_tsv_update
-    BEFORE INSERT OR UPDATE OF content ON vectors.layer1
-    FOR EACH ROW EXECUTE FUNCTION vectors.update_content_tsv();
-
-CREATE TRIGGER layer2_tsv_update
-    BEFORE INSERT OR UPDATE OF content ON vectors.layer2
-    FOR EACH ROW EXECUTE FUNCTION vectors.update_content_tsv();
-
-CREATE TRIGGER layer3_tsv_update
-    BEFORE INSERT OR UPDATE OF content ON vectors.layer3
-    FOR EACH ROW EXECUTE FUNCTION vectors.update_content_tsv();
-
 -- Function: Auto-update timestamps
 CREATE OR REPLACE FUNCTION update_modified_column()
 RETURNS TRIGGER AS $$
@@ -431,19 +242,14 @@ CREATE TRIGGER checkpoints_update_timestamp
 -- FUNCTIONS: Utility Functions
 -- ============================================================================
 
--- Function: Update vector store statistics
+-- Function: Update vector store statistics (VL pages)
 CREATE OR REPLACE FUNCTION metadata.update_vector_store_stats()
 RETURNS void AS $$
 BEGIN
     UPDATE metadata.vector_store_stats
     SET
-        layer1_count = (SELECT COUNT(*) FROM vectors.layer1),
-        layer2_count = (SELECT COUNT(*) FROM vectors.layer2),
-        layer3_count = (SELECT COUNT(*) FROM vectors.layer3),
-        total_vectors = (SELECT COUNT(*) FROM vectors.layer1) +
-                       (SELECT COUNT(*) FROM vectors.layer2) +
-                       (SELECT COUNT(*) FROM vectors.layer3),
-        document_count = (SELECT COUNT(DISTINCT document_id) FROM vectors.layer1),
+        total_vectors = COALESCE((SELECT COUNT(*) FROM vectors.vl_pages), 0),
+        document_count = COALESCE((SELECT COUNT(DISTINCT document_id) FROM vectors.vl_pages), 0),
         updated_at = NOW()
     WHERE id = 1;
 END;
@@ -471,14 +277,13 @@ GRANT USAGE ON SCHEMA metadata TO PUBLIC;
 DO $$
 BEGIN
     RAISE NOTICE '✓ SUJBOT database initialization complete!';
-    RAISE NOTICE '  - Extensions: pgvector, Apache AGE, pg_trgm';
+    RAISE NOTICE '  - Extensions: pgvector, pg_trgm';
     RAISE NOTICE '  - Schemas: vectors, graphs, checkpoints, metadata';
-    RAISE NOTICE '  - Tables: 3 vector layers, graph tables, checkpoints';
-    RAISE NOTICE '  - Indexes: HNSW (layer3), IVFFlat (layer1/2), GIN, B-tree';
-    RAISE NOTICE '  - Triggers: Auto-update tsvector and timestamps';
+    RAISE NOTICE '  - Tables: VL pages (created by app), graph tables, checkpoints';
+    RAISE NOTICE '  - Indexes: Graph, checkpoint, metadata';
+    RAISE NOTICE '  - Triggers: Auto-update timestamps';
     RAISE NOTICE '';
     RAISE NOTICE 'Next steps:';
-    RAISE NOTICE '  1. Run migration: python scripts/migrate_faiss_to_postgres.py';
+    RAISE NOTICE '  1. Index documents: uv run python run_pipeline.py data/';
     RAISE NOTICE '  2. Verify data: SELECT * FROM metadata.vector_store_stats;';
-    RAISE NOTICE '  3. Test search: SELECT * FROM vectors.layer3 LIMIT 1;';
 END $$;

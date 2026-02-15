@@ -140,27 +140,15 @@ def mock_vector_store():
     """Mock vector store for testing retrieval."""
     store = Mock()
 
-    # Mock hierarchical search
-    store.hierarchical_search = Mock(return_value={
-        "layer1": [
-            {
-                "chunk_id": "doc1:sec1:0",
-                "text": "Test chunk 1",
-                "relevance_score": 0.95,
-                "document_id": "doc1",
-                "metadata": {"section": "Introduction"}
-            }
-        ],
-        "layer3": [
-            {
-                "chunk_id": "doc1:sec1:0",
-                "text": "Test chunk 1",
-                "relevance_score": 0.95,
-                "document_id": "doc1",
-                "metadata": {"section": "Introduction"}
-            }
-        ]
-    })
+    # Mock search
+    store.search = Mock(return_value=[
+        {
+            "page_id": "doc1_page_1",
+            "document_id": "doc1",
+            "page_number": 1,
+            "score": 0.95,
+        }
+    ])
 
     # Mock similarity search
     store.similarity_search = Mock(return_value=[
@@ -176,7 +164,7 @@ def mock_vector_store():
     store.get_all_document_ids = Mock(return_value=["doc1", "doc2", "doc3"])
 
     # Mock metadata access
-    store.metadata_layer3 = [
+    store.metadata = [
         {"document_id": "doc1", "title": "Test Document 1"},
         {"document_id": "doc2", "title": "Test Document 2"}
     ]

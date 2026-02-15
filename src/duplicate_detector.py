@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
 from dataclasses import dataclass
 
-import numpy as np
+
 
 logger = logging.getLogger(__name__)
 
@@ -99,12 +99,8 @@ class DuplicateDetector:
 
         self.connection_string = connection_string or os.environ.get("DATABASE_URL")
 
-        # Lazy-loaded components
-        self._embedder = None
-        self._vector_store = None
-
-        # In-memory cache: file_hash -> (embedding, document_id)
-        self._embedding_cache: Dict[str, Tuple[np.ndarray, str]] = {}
+        # File hash cache: file_hash -> document_id
+        self._hash_cache: Dict[str, str] = {}
 
         logger.info(
             f"DuplicateDetector initialized: "
@@ -141,35 +137,22 @@ class DuplicateDetector:
             logger.warning(f"Document too short for duplicate detection: {file_path}")
             return False, 0.0, None
 
-        # Step 2: Compute file hash (for caching)
+        # Step 2: Compute file hash
         file_hash = self._compute_file_hash(file_path)
 
-        # Step 3: Check cache
-        if file_hash in self._embedding_cache:
-            embedding, _ = self._embedding_cache[file_hash]
-            logger.debug(f"Using cached embedding for {file_path}")
-        else:
-            # Generate embedding
-            embedder = self._get_embedder()
-            embedding = embedder.embed_texts([text])[0]
-
-            # Cache embedding
-            self._cache_embedding(file_hash, embedding, document_id or file_path)
-
-        # Step 4: Search for similar documents
-        is_duplicate, similarity, match_doc_id = self._find_similar_document(
-            embedding, document_id
-        )
-
-        if is_duplicate:
+        # Step 3: Check hash cache for exact duplicates
+        if file_hash in self._hash_cache:
+            match_doc_id = self._hash_cache[file_hash]
             logger.warning(
                 f"Duplicate detected: {file_path} matches {match_doc_id} "
-                f"({similarity:.1%} similarity)"
+                f"(exact hash match)"
             )
-        else:
-            logger.info(f"No duplicate found for {file_path}")
+            return True, 1.0, match_doc_id
 
-        return is_duplicate, similarity, match_doc_id
+        # Store hash for future comparisons
+        self._hash_cache[file_hash] = document_id or file_path
+        logger.info(f"No duplicate found for {file_path}")
+        return False, 0.0, None
 
     def _extract_text_sample(self, file_path: str) -> str:
         """
@@ -215,20 +198,6 @@ class DuplicateDetector:
 
         return hash_obj.hexdigest()
 
-    def _get_embedder(self):
-        """Lazy load embedding generator."""
-        if self._embedder is None:
-            from .embedding_generator import EmbeddingGenerator
-            from .config import EmbeddingConfig
-
-            # EmbeddingConfig auto-loads from config.json via __post_init__
-            config = EmbeddingConfig()
-            self._embedder = EmbeddingGenerator(config)
-
-            logger.info("Loaded EmbeddingGenerator for duplicate detection")
-
-        return self._embedder
-
     def _get_vector_store(self):
         """Lazy load PostgreSQL vector store."""
         if self._vector_store is None and self.connection_string:
@@ -249,70 +218,11 @@ class DuplicateDetector:
 
         return self._vector_store
 
-    def _cache_embedding(self, file_hash: str, embedding: np.ndarray, document_id: str):
-        """Cache embedding with LRU-style eviction."""
-        # Simple cache size management
-        if len(self._embedding_cache) >= self.config.cache_size:
-            # Remove oldest entry (first key)
-            oldest_key = next(iter(self._embedding_cache))
-            del self._embedding_cache[oldest_key]
-
-        self._embedding_cache[file_hash] = (embedding, document_id)
-
-    def _find_similar_document(
-        self,
-        embedding: np.ndarray,
-        exclude_doc_id: Optional[str] = None,
-    ) -> Tuple[bool, float, Optional[str]]:
-        """
-        Find most similar document in vector store.
-
-        Returns:
-            (is_duplicate, similarity, matching_document_id)
-        """
-        vector_store = self._get_vector_store()
-        if vector_store is None:
-            logger.debug("No vector store available for duplicate check")
-            return False, 0.0, None
-
-        # Search in Layer 1 (document-level embeddings)
-        # Use k=5 to check multiple candidates
-        results = vector_store.search_layer1(
-            query_embedding=embedding,
-            k=5,
-        )
-
-        if not results:
-            return False, 0.0, None
-
-        # Find best match (excluding current document)
-        best_match = None
-        best_similarity = 0.0
-
-        for result in results:
-            doc_id = result.get("document_id")
-            similarity = result.get("score", 0.0)
-
-            # Skip if it's the same document
-            if doc_id == exclude_doc_id:
-                continue
-
-            if similarity > best_similarity:
-                best_similarity = similarity
-                best_match = doc_id
-
-        # Check threshold
-        is_duplicate = best_similarity >= self.config.similarity_threshold
-
-        return is_duplicate, best_similarity, best_match
-
     def get_stats(self) -> Dict[str, Any]:
         """Get detector statistics."""
         return {
             "enabled": self.config.enabled,
             "threshold": self.config.similarity_threshold,
-            "cache_size": len(self._embedding_cache),
+            "hash_cache_size": len(self._hash_cache),
             "cache_limit": self.config.cache_size,
-            "embedder_loaded": self._embedder is not None,
-            "vector_store_loaded": self._vector_store is not None,
         }

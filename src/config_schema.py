@@ -19,9 +19,6 @@ from typing import List, Literal, Optional
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-# Architecture mode
-ArchitectureMode = Literal["ocr", "vl"]
-
 # Type alias for providers
 LLMProvider = Literal["anthropic", "openai", "google", "deepinfra"]
 EmbeddingProvider = Literal["openai", "deepinfra", "voyage", "huggingface", "jina"]
@@ -230,21 +227,6 @@ class ExtractionConfig(BaseModel):
     fallback_to_unstructured: bool = Field(
         ...,
         description="Fallback to Unstructured if Gemini fails"
-    )
-
-    # OCR settings
-    enable_ocr: bool = Field(..., description="Enable OCR processing")
-    ocr_engine: Literal["tesseract", "rapidocr"] = Field(
-        ...,
-        description="OCR engine: 'tesseract' (Czech support) or 'rapidocr' (3-5x faster)"
-    )
-    ocr_language: List[str] = Field(
-        ...,
-        description="OCR languages (e.g., ['ces', 'eng'])"
-    )
-    ocr_recognition: Literal["accurate", "fast"] = Field(
-        ...,
-        description="OCR recognition mode"
     )
 
     # Table extraction
@@ -639,12 +621,6 @@ class AgentToolConfig(BaseModel):
         description="Lazy load reranker (speeds up startup)"
     )
     cache_embeddings: bool = Field(..., description="Cache embeddings")
-    hyde_num_hypotheses: int = Field(
-        ...,
-        description="Number of hypothetical documents for HyDE (multi-hypothesis averaging)",
-        ge=1,
-        le=10
-    )
 
 
 class CLIConfig(BaseModel):
@@ -1061,30 +1037,44 @@ class RootConfig(BaseModel):
         extra="allow",  # Allow unknown fields (for backwards compatibility with multi_agent, storage, etc.)
     )
 
-    architecture: Optional[ArchitectureMode] = Field(
-        default="ocr",
-        description="RAG architecture mode: 'ocr' (text chunking) or 'vl' (vision-language page images)"
-    )
     vl: Optional[VLConfig] = Field(
         default=None,
-        description="Vision-Language configuration (only used when architecture='vl')"
+        description="Vision-Language configuration"
     )
     api_keys: APIKeysConfig = Field(default_factory=APIKeysConfig)
     models: ModelsConfig
-    extraction: ExtractionConfig
-    unstructured: UnstructuredConfig
-    hierarchy_detection: HierarchyDetectionConfig
-    summarization: SummarizationConfig
-    context_generation: ContextGenerationConfig
-    chunking: ChunkingConfig
+    extraction: Optional[ExtractionConfig] = Field(
+        default=None, description="[DEPRECATED] OCR extraction config"
+    )
+    unstructured: Optional[UnstructuredConfig] = Field(
+        default=None, description="[DEPRECATED] Unstructured.io config"
+    )
+    hierarchy_detection: Optional[HierarchyDetectionConfig] = Field(
+        default=None, description="[DEPRECATED] Hierarchy detection config"
+    )
+    summarization: Optional[SummarizationConfig] = Field(
+        default=None, description="[DEPRECATED] Summarization config"
+    )
+    context_generation: Optional[ContextGenerationConfig] = Field(
+        default=None, description="[DEPRECATED] Contextual Retrieval config"
+    )
+    chunking: Optional[ChunkingConfig] = Field(
+        default=None, description="[DEPRECATED] Chunking config"
+    )
     embedding: EmbeddingConfig
-    clustering: ClusteringConfig
-    hybrid_search: HybridSearchConfig
+    clustering: Optional[ClusteringConfig] = Field(
+        default=None, description="[DEPRECATED] Clustering config"
+    )
+    hybrid_search: Optional[HybridSearchConfig] = Field(
+        default=None, description="[DEPRECATED] Hybrid search config"
+    )
     agent: AgentConfig
     agent_tools: AgentToolConfig
     cli: CLIConfig
     pipeline: PipelineConfig
-    indexing: IndexingConfig = Field(default_factory=IndexingConfig)
+    indexing: Optional[IndexingConfig] = Field(
+        default=None, description="[DEPRECATED] OCR indexing config"
+    )
 
     # SSOT Configuration sections (optional for backwards compatibility)
     model_registry: Optional[ModelRegistryConfig] = Field(
@@ -1127,16 +1117,6 @@ class RootConfig(BaseModel):
         ]
 
         return any(pattern in value.upper() for pattern in PLACEHOLDER_PATTERNS)
-
-    @model_validator(mode="after")
-    def validate_architecture_config(self) -> "RootConfig":
-        """Validate architecture-specific config is present."""
-        if self.architecture == "vl" and self.vl is None:
-            raise ValueError(
-                "architecture is set to 'vl' but 'vl' configuration section is missing. "
-                "Add a 'vl' section to config.json or set architecture='ocr'."
-            )
-        return self
 
     @model_validator(mode="after")
     def validate_api_keys(self) -> "RootConfig":

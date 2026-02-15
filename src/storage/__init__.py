@@ -1,7 +1,7 @@
 """
 Storage Abstraction Layer for SUJBOT
 
-Provides unified interface for PostgreSQL pgvector storage.
+Provides unified interface for PostgreSQL pgvector storage (VL-only).
 
 Key Components:
 - VectorStoreAdapter: Abstract interface for vector stores
@@ -16,25 +16,23 @@ Usage:
         connection_string="postgresql://..."
     )
 
-    # All RAG tools use the same interface
-    results = adapter.search_layer3(query_emb, k=6)
+    # VL page search
+    results = adapter.search_vl_pages(query_emb, k=5)
 """
 
 from .vector_store_adapter import VectorStoreAdapter
 
 # PostgreSQL adapter (requires asyncpg)
 try:
-    from .postgres_adapter import PostgresVectorStoreAdapter, MetadataFilter
+    from .postgres_adapter import PostgresVectorStoreAdapter
     POSTGRES_AVAILABLE = True
 except ImportError:
     POSTGRES_AVAILABLE = False
     PostgresVectorStoreAdapter = None
-    MetadataFilter = None
 
 __all__ = [
     "VectorStoreAdapter",
     "PostgresVectorStoreAdapter",
-    "MetadataFilter",
     "create_vector_store_adapter",
     "load_vector_store_adapter",
 ]
@@ -62,7 +60,7 @@ def _validate_postgresql_backend(**kwargs) -> tuple:
         raise ValueError("PostgreSQL backend requires 'connection_string' argument")
 
     pool_size = kwargs.get("pool_size", 20)
-    dimensions = kwargs.get("dimensions", 4096)  # Qwen3-Embedding-8B
+    dimensions = kwargs.get("dimensions", 2048)  # Jina v4
 
     return connection_string, pool_size, dimensions
 
@@ -76,21 +74,10 @@ def create_vector_store_adapter(backend: str = "postgresql", **kwargs) -> Vector
         **kwargs: Backend-specific arguments
             - connection_string: PostgreSQL connection string
             - pool_size: Connection pool size (default: 20)
-            - dimensions: Embedding dimensions (default: 4096 for Qwen3-Embedding-8B)
+            - dimensions: Embedding dimensions (default: 2048 for Jina v4)
 
     Returns:
         VectorStoreAdapter instance
-
-    Raises:
-        ValueError: If backend is unknown or required args missing
-        ImportError: If asyncpg not installed
-
-    Example:
-        >>> adapter = create_vector_store_adapter(
-        ...     backend="postgresql",
-        ...     connection_string="postgresql://user:pass@host:5432/db",
-        ...     pool_size=20
-        ... )
     """
     if backend != "postgresql":
         raise ValueError(f"Unknown backend: {backend}. Only 'postgresql' is supported.")
@@ -113,16 +100,10 @@ async def load_vector_store_adapter(backend: str = "postgresql", path: str = Non
         **kwargs: Additional backend-specific arguments
             - connection_string: PostgreSQL connection string
             - pool_size: Connection pool size (default: 20)
-            - dimensions: Embedding dimensions (default: 4096)
+            - dimensions: Embedding dimensions (default: 2048)
 
     Returns:
         VectorStoreAdapter instance
-
-    Example:
-        >>> adapter = await load_vector_store_adapter(
-        ...     backend="postgresql",
-        ...     connection_string="postgresql://..."
-        ... )
     """
     if backend != "postgresql":
         raise ValueError(f"Unknown backend: {backend}. Only 'postgresql' is supported.")
@@ -131,13 +112,13 @@ async def load_vector_store_adapter(backend: str = "postgresql", path: str = Non
     if path and "connection_string" not in kwargs:
         kwargs["connection_string"] = path
 
-    architecture = kwargs.pop("architecture", "vl")
+    # Drop legacy architecture param if passed
+    kwargs.pop("architecture", None)
     connection_string, pool_size, dimensions = _validate_postgresql_backend(**kwargs)
     adapter = PostgresVectorStoreAdapter(
         connection_string=connection_string,
         pool_size=pool_size,
         dimensions=dimensions,
-        architecture=architecture,
     )
     await adapter.initialize()
     return adapter

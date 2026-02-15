@@ -4,9 +4,8 @@ SSOT (Single Source of Truth) Tests for config.json consolidation.
 These tests verify that:
 1. ModelRegistry reads model aliases from config.json
 2. backend/constants reads agent variants from config.json
-3. layer_default_k reads from config.json
-4. No duplicate MODEL_PRICING exists
-5. Embedding dimensions are consistently 4096 (Qwen3-Embedding-8B)
+3. Embedding dimensions are consistently 2048 (Jina v4)
+4. VL architecture configuration is correct
 
 SSOT Architecture:
 - config.json is the single source of truth for all configuration values
@@ -41,7 +40,6 @@ class TestConfigSchema:
         assert "defaults" in config_data
         assert "timeouts" in config_data["defaults"]
         assert "pool_sizes" in config_data["defaults"]
-        assert "retrieval" in config_data["defaults"]
 
     def test_agent_variants_section_exists(self, config_data):
         """Verify agent_variants section exists in config.json."""
@@ -49,22 +47,11 @@ class TestConfigSchema:
         assert "variants" in config_data["agent_variants"]
         assert "default_variant" in config_data["agent_variants"]
 
-    def test_layer_default_k_values(self, config_data):
-        """Verify layer_default_k has correct values."""
-        layer_k = config_data["defaults"]["retrieval"]["layer_default_k"]
-        assert layer_k["1"] == 3  # Documents
-        assert layer_k["2"] == 5  # Sections
-        assert layer_k["3"] == 10  # Chunks
-
-    def test_embedding_dimensions_qwen3(self, config_data):
-        """Verify Qwen3-Embedding-8B has 4096 dimensions (NOT 3072)."""
+    def test_embedding_dimensions_jina_v4(self, config_data):
+        """Verify Jina v4 has 2048 dimensions."""
         embedding_models = config_data["model_registry"]["embedding_models"]
-        # Dimensions are now inside each model definition
-        qwen_model = embedding_models.get("qwen3-embedding", {})
-        assert qwen_model.get("dimensions") == 4096
-        # OpenAI is 3072
-        openai_model = embedding_models.get("text-embedding-3-large", {})
-        assert openai_model.get("dimensions") == 3072
+        jina_model = embedding_models.get("jina-v4", {})
+        assert jina_model.get("dimensions") == 2048
 
     def test_embedding_models_have_dimensions(self, config_data):
         """Verify all embedding models have dimensions defined."""
@@ -104,16 +91,13 @@ class TestModelRegistrySSoT:
         assert "claude-opus" in resolved
 
     def test_get_embedding_model_dimensions(self):
-        """Verify embedding dimensions are retrieved correctly."""
-        from src.utils.model_registry import ModelRegistry
-
-        # Qwen3 should be 4096
-        dims = ModelRegistry.get_embedding_dimensions("Qwen/Qwen3-Embedding-8B")
-        assert dims == 4096
-
-        # OpenAI should be 3072
-        dims = ModelRegistry.get_embedding_dimensions("text-embedding-3-large")
-        assert dims == 3072
+        """Verify Jina v4 embedding dimensions from config."""
+        import json
+        config_path = Path(__file__).parent.parent / "config.json"
+        with open(config_path) as f:
+            config_data = json.load(f)
+        jina = config_data["model_registry"]["embedding_models"]["jina-v4"]
+        assert jina["dimensions"] == 2048
 
     def test_registry_reload(self):
         """Verify registry can be reloaded from config."""
@@ -166,52 +150,8 @@ class TestBackendConstantsSSoT:
         assert get_variant_model("nonexistent") == default_model
 
 
-class TestNoDuplicatePricing:
-    """Verify MODEL_PRICING is not duplicated."""
-
-    def test_no_model_pricing_in_toc_retrieval(self):
-        """Verify ToC_retrieval.py uses central PRICING, not local MODEL_PRICING."""
-        import inspect
-
-        from src import ToC_retrieval
-
-        # Check LLMAgent class doesn't have MODEL_PRICING as class attribute
-        # (it should only have _DEFAULT_PRICING as fallback)
-        agent_class = ToC_retrieval.LLMAgent
-
-        # MODEL_PRICING should NOT be a class attribute
-        assert not hasattr(agent_class, "MODEL_PRICING") or agent_class.MODEL_PRICING is None
-
-    def test_toc_retrieval_uses_central_pricing(self):
-        """Verify ToC_retrieval imports PRICING from cost_tracker."""
-        import importlib
-        import sys
-
-        # Check import statement exists
-        spec = importlib.util.find_spec("src.ToC_retrieval")
-        source_path = spec.origin
-
-        with open(source_path, "r") as f:
-            content = f.read()
-
-        assert "from src.cost_tracker import PRICING" in content
-
-
 class TestDimensionsConsistency:
-    """Verify embedding dimensions are consistently 4096."""
-
-    def test_runner_dimensions_not_3072(self):
-        """Verify runner.py doesn't fallback to 3072."""
-        runner_path = Path(__file__).parent.parent / "src" / "multi_agent" / "runner.py"
-
-        with open(runner_path, "r") as f:
-            content = f.read()
-
-        # Should NOT have dimensions=3072 (was a bug)
-        # Should have dimensions=4096 as fallback
-        assert "dimensions=3072" not in content or "dimensions, 3072" not in content
-        # Should have correct fallback
-        assert "4096" in content
+    """Verify embedding dimensions are consistently 2048 (Jina v4)."""
 
     def test_enable_reranking_default_false(self):
         """Verify enable_reranking default is False (matches config.json)."""
@@ -223,21 +163,6 @@ class TestDimensionsConsistency:
         assert config.enable_reranking is False
 
 
-class TestLayerDefaultK:
-    """Test layer_default_k centralization."""
-
-    def test_utils_loads_layer_k_from_config(self):
-        """Verify _utils.py loads layer_default_k from config."""
-        from src.agent.tools._utils import _ensure_config_loaded, _layer_default_k
-
-        _ensure_config_loaded()
-
-        # Should have expected values
-        assert _layer_default_k.get(1) == 3  # Documents
-        assert _layer_default_k.get(2) == 5  # Sections
-        assert _layer_default_k.get(3) == 10  # Chunks
-
-
 class TestArchitectureConfig:
     """Test architecture and VL configuration sections."""
 
@@ -246,11 +171,6 @@ class TestArchitectureConfig:
         config_path = Path(__file__).parent.parent / "config.json"
         with open(config_path) as f:
             return json.load(f)
-
-    def test_architecture_field_exists(self, config_data):
-        """Verify 'architecture' field is present and valid."""
-        assert "architecture" in config_data
-        assert config_data["architecture"] in ("ocr", "vl")
 
     def test_vl_section_exists(self, config_data):
         """Verify 'vl' section exists with required fields."""
@@ -312,10 +232,9 @@ class TestSingleAgentConfig:
             assert field in sa, f"Missing single_agent field: {field}"
 
     def test_single_agent_prompt_files_exist(self, config_data):
-        """Verify both VL and OCR prompt files exist."""
+        """Verify VL prompt file exists."""
         root = Path(__file__).parent.parent
         assert (root / "prompts/agents/unified.txt").exists(), "VL prompt missing"
-        assert (root / "prompts/agents/unified_ocr.txt").exists(), "OCR prompt missing"
 
     def test_single_agent_model_is_valid(self, config_data):
         """Model should reference a known model ID."""

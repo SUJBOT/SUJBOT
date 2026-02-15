@@ -242,11 +242,14 @@ export function useChat() {
         const messages = await apiService.getConversationHistory(currentConversationId);
 
         setConversations((prev) =>
-          prev.map((conv) =>
-            conv.id === currentConversationId
-              ? { ...conv, messages }
-              : conv
-          )
+          prev.map((conv) => {
+            if (conv.id !== currentConversationId) return conv;
+            // Don't overwrite if conversation already has messages locally —
+            // prevents race condition where sendMessage adds messages right after
+            // createConversation, but this async fetch returns [] and wipes them.
+            if (conv.messages.length > 0) return conv;
+            return { ...conv, messages };
+          })
         );
       } catch (error) {
         console.error('Failed to load conversation messages:', error);

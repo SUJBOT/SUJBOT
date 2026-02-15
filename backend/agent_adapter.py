@@ -104,7 +104,6 @@ class AgentAdapter:
             "agent_tools": full_config.get("agent_tools", {}),
             "single_agent": full_config.get("single_agent", {}),
             "multi_agent": full_config.get("multi_agent", {}),  # For LangSmith config
-            "architecture": full_config.get("architecture", "ocr"),
             "vl": full_config.get("vl", {}),
         }
 

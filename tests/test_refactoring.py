@@ -175,10 +175,11 @@ def test_file_structure():
     # Expected infrastructure files
     expected_infra = ["_base.py", "_registry.py", "_utils.py", "_token_manager.py", "__init__.py"]
 
-    # Expected tool files (5)
+    # Expected tool files
     expected_tools = [
         "search.py", "expand_context.py", "get_document_info.py",
-        "get_document_list.py", "get_stats.py",
+        "get_document_list.py", "get_stats.py", "compliance_check.py",
+        "graph_search.py", "graph_context.py", "graph_communities.py",
     ]
 
     # Check infrastructure files

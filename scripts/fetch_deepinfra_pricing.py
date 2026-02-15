@@ -284,7 +284,6 @@ def main():
             "Qwen/Qwen2.5-7B-Instruct",
             "meta-llama/Meta-Llama-3.1-70B-Instruct",
             "meta-llama/Meta-Llama-3.1-8B-Instruct",
-            "Qwen/Qwen3-Embedding-8B",
         ]
 
     pricing = extract_pricing(models, filter_models)

@@ -186,7 +186,6 @@ class MultiAgentRunner:
 
         # Tool modules are auto-imported via tools/__init__.py
         from ..storage import load_vector_store_adapter
-        from ..embedding_generator import EmbeddingGenerator
         from ..agent.config import ToolConfig
         from ..agent.providers.factory import create_provider
         import os
@@ -197,8 +196,7 @@ class MultiAgentRunner:
         storage_config = self.config.get("storage", {})
         backend = storage_config.get("backend", "postgresql")
 
-        # Initialize LLM provider for tools (HyDE, Synthesis)
-        # Use same model as orchestrator or default to Claude
+        # Initialize LLM provider for tools
         tool_model = self.multi_agent_config.get("orchestrator", {}).get(
             "model", "claude-3-5-sonnet-20241022"
         )
@@ -209,14 +207,13 @@ class MultiAgentRunner:
             logger.info(f"Initialized LLM provider for tools: {tool_model}")
         except Exception as e:
             logger.warning(
-                f"Failed to initialize LLM provider for tools: {e}. HyDE and Synthesis will be disabled."
+                f"Failed to initialize LLM provider for tools: {e}."
             )
             self.llm_provider = None
 
         try:
             # Load vector store adapter (PostgreSQL or FAISS)
             if backend == "postgresql":
-                # PostgreSQL backend - load from database
                 connection_string = os.getenv(
                     storage_config.get("postgresql", {}).get(
                         "connection_string_env", "DATABASE_URL"
@@ -232,20 +229,17 @@ class MultiAgentRunner:
                     return
 
                 logger.info("Loading PostgreSQL vector store adapter...")
-                # SSOT: Default dimensions must match current embedding model (Qwen3-Embedding-8B = 4096)
-                # Previously was 3072 (OpenAI legacy) which would cause vector store incompatibility
                 vector_store = await load_vector_store_adapter(
                     backend="postgresql",
                     connection_string=connection_string,
                     pool_size=storage_config.get("postgresql", {}).get("pool_size", 20),
-                    dimensions=storage_config.get("postgresql", {}).get("dimensions", 4096),
+                    dimensions=storage_config.get("postgresql", {}).get("dimensions", 2048),
                 )
                 logger.info("PostgreSQL adapter loaded successfully")
 
             else:  # FAISS backend
                 vector_store_path = Path(self.config.get("vector_store_path", "vector_db"))
 
-                # Check if FAISS files exist
                 if not vector_store_path.exists():
                     logger.warning(
                         f"Vector store not found at {vector_store_path}. "
@@ -264,38 +258,9 @@ class MultiAgentRunner:
 
             self.vector_store = vector_store  # Store for orchestrator
 
-            # Initialize embedder (avoid circular dependency - construct config directly)
-            from ..config import EmbeddingConfig, ModelConfig
-
-            # Get model info from already-loaded config (self.config was loaded at MultiAgentRunner init)
-            # We can't call get_config() here because it might be in the middle of loading
-            # Instead, use the root config that was already loaded
-            model_name = self.config.get("models", {}).get("embedding_model", "bge-m3")
-            model_provider = self.config.get("models", {}).get("embedding_provider", "huggingface")
-
-            # Create EmbeddingConfig with provider/model explicitly set
-            # This avoids triggering __post_init__ which would call get_config() recursively
-            embedding_config = EmbeddingConfig(
-                provider=model_provider,
-                model=model_name,
-                batch_size=64,
-                normalize=True,
-                enable_multi_layer=True,
-                cache_enabled=True,
-                cache_max_size=1000,
-            )
-            embedder = EmbeddingGenerator(embedding_config)
-            logger.info(f"Embedder initialized: {model_provider}/{model_name}")
-
-            # Reranker removed - HyDE + Expansion Fusion pipeline doesn't use reranking
-            # See CLAUDE.md: "Cohere performs WORSE on legal docs"
-            logger.info("Reranking DISABLED (HyDE + Expansion Fusion pipeline)")
-
-            architecture = self.config.get("architecture", "ocr")
-
             # Graph storage (optional — initialized before ToolConfig)
             graph_storage = None
-            if architecture == "vl" and hasattr(vector_store, "pool") and vector_store.pool:
+            if hasattr(vector_store, "pool") and vector_store.pool:
                 try:
                     from ..graph import GraphEmbedder, GraphStorageAdapter
                 except ImportError as e:
@@ -320,7 +285,7 @@ class MultiAgentRunner:
                 default_k=agent_tools_config.get("default_k", 6),
                 enable_reranking=agent_tools_config.get(
                     "enable_reranking", False
-                ),  # SSOT: config.json default
+                ),
                 reranker_candidates=agent_tools_config.get("reranker_candidates", 50),
                 reranker_model=agent_tools_config.get("reranker_model", "bge-reranker-large"),
                 max_document_compare=agent_tools_config.get("max_document_compare", 3),
@@ -337,31 +302,29 @@ class MultiAgentRunner:
                 ),
             )
 
-            # Initialize VL components if architecture == "vl"
+            # VL components
             vl_retriever = None
             page_store = None
 
-            if architecture == "vl":
-                try:
-                    from ..vl import create_vl_components
+            try:
+                from ..vl import create_vl_components
 
-                    vl_config = self.config.get("vl", {})
-                    vl_retriever, page_store = create_vl_components(vl_config, vector_store)
-                except Exception as e:
-                    logger.error(f"Failed to initialize VL components: {e}", exc_info=True)
-                    raise AgentInitializationError(
-                        f"VL architecture was explicitly configured but initialization failed: {e}. "
-                        f"Fix VL config or switch to architecture='ocr' in config.json.",
-                        cause=e,
-                    ) from e
+                vl_config = self.config.get("vl", {})
+                vl_retriever, page_store = create_vl_components(vl_config, vector_store)
+            except Exception as e:
+                logger.error(f"Failed to initialize VL components: {e}", exc_info=True)
+                raise AgentInitializationError(
+                    f"VL initialization failed: {e}.",
+                    cause=e,
+                ) from e
 
             # Initialize tools in registry
             registry = get_registry()
 
             registry.initialize_tools(
                 vector_store=vector_store,
-                embedder=embedder,
-                reranker=None,  # Reranker removed - HyDE + Expansion Fusion pipeline
+                embedder=None,
+                reranker=None,
                 context_assembler=None,
                 llm_provider=self.llm_provider,
                 config=tool_config,

@@ -365,10 +365,6 @@ class BaseTool(ABC):
             "avg_time_ms": round(avg_time, 2),
         }
 
-    def _is_vl_mode(self) -> bool:
-        """Check if VL (Vision-Language) architecture is active."""
-        return self.vl_retriever is not None and self.page_store is not None
-
     def get_claude_sdk_definition(self) -> Dict[str, Any]:
         """
         Get Claude SDK tool definition.

@@ -1,5 +1,4 @@
 {
-  "architecture": "vl",
   "vl": {
     "jina_model": "jina-embeddings-v4",
     "dimensions": 2048,
@@ -27,124 +26,14 @@
     "postgresql": {
       "connection_string_env": "DATABASE_URL",
       "pool_size": 20,
-      "dimensions": 4096
+      "dimensions": 2048
     }
-  },
-  "retrieval": {
-    "method": "hyde_expansion_fusion",
-    "original_weight": 0.5,
-    "hyde_weight": 0.25,
-    "expansion_weight": 0.25,
-    "default_k": 16,
-    "candidates_multiplier": 3
-  },
-  "extraction": {
-    "backend": "gemini",
-    "gemini_model": "gemini-2.5-flash",
-    "gemini_file_size_threshold_mb": 0.3,
-    "gemini_max_output_tokens": 100000,
-    "fallback_to_unstructured": true,
-    "enable_ocr": true,
-    "ocr_engine": "rapidocr",
-    "ocr_language": [
-      "ces",
-      "eng"
-    ],
-    "ocr_recognition": "accurate",
-    "extract_tables": true,
-    "table_mode": "ACCURATE",
-    "extract_hierarchy": true,
-    "enable_smart_hierarchy": true,
-    "hierarchy_tolerance": 0.8,
-    "filter_rotated_text": true,
-    "rotation_min_angle": 25.0,
-    "rotation_max_angle": 65.0,
-    "generate_summaries": true,
-    "summary_model": null,
-    "summary_max_chars": 150,
-    "summary_style": "generic",
-    "document_summary_max_chars": 500,
-    "use_batch_api": true,
-    "batch_api_poll_interval": 5,
-    "batch_api_timeout": 43200,
-    "generate_markdown": true,
-    "generate_json": true
-  },
-  "unstructured": {
-    "strategy": "hi_res",
-    "model": "yolox",
-    "languages": [
-      "ces",
-      "eng"
-    ],
-    "detect_language_per_element": true,
-    "infer_table_structure": false,
-    "extract_images": false,
-    "include_page_breaks": true
-  },
-  "hierarchy_detection": {
-    "enable_generic_hierarchy": true,
-    "hierarchy_signals": [
-      "type",
-      "font_size",
-      "spacing",
-      "numbering",
-      "parent_id"
-    ],
-    "clustering_eps": 0.15,
-    "clustering_min_samples": 2
-  },
-  "summarization": {
-    "speed_mode": "fast",
-    "temperature": 0.3,
-    "max_tokens": 100,
-    "retry_on_exceed": true,
-    "max_retries": 3,
-    "max_workers": 20,
-    "min_text_length": 50,
-    "enable_batching": false,
-    "batch_size": 8
-  },
-  "context_generation": {
-    "enable_contextual": true,
-    "temperature": 0.3,
-    "max_tokens": 150,
-    "include_surrounding": true,
-    "num_surrounding_chunks": 1,
-    "fallback_to_basic": true,
-    "batch_size": 20,
-    "max_workers": 10,
-    "use_batch_api": true,
-    "batch_api_poll_interval": 5,
-    "batch_api_timeout": 43200
-  },
-  "chunking": {
-    "max_tokens": 512,
-    "tokenizer_model": "Qwen/Qwen3-Embedding-8B",
-    "enable_sac": true
   },
   "embedding": {
     "batch_size": 64,
     "cache_enabled": true,
     "cache_size": 1000,
     "normalize": true
-  },
-  "clustering": {
-    "algorithm": "hdbscan",
-    "n_clusters": null,
-    "min_size": 5,
-    "max_clusters": 50,
-    "min_clusters": 5,
-    "layers": [
-      3
-    ],
-    "enable_labels": true,
-    "enable_visualization": false,
-    "visualization_dir": "output/clusters"
-  },
-  "hybrid_search": {
-    "enable": false,
-    "fusion_k": 60
   },
   "agent": {
     "model": "Qwen/Qwen2.5-72B-Instruct",
@@ -168,8 +57,7 @@
     "compliance_threshold": 0.7,
     "context_window": 2,
     "lazy_load_reranker": false,
-    "cache_embeddings": true,
-    "hyde_num_hypotheses": 3
+    "cache_embeddings": true
   },
   "cli": {
     "show_citations": true,
@@ -186,33 +74,6 @@
     "log_file": "logs/pipeline.log",
     "data_dir": "data",
     "output_dir": "output"
-  },
-  "indexing": {
-    "use_llamaindex_wrapper": true,
-    "enable_entity_labeling": false,
-    "entity_labeling_model": "gpt-4o-mini",
-    "entity_labeling_batch_size": 10,
-    "labeling": {
-      "enabled": true,
-      "enable_categories": true,
-      "enable_keywords": false,
-      "enable_questions": false,
-      "provider": "openai",
-      "model": "gpt-4o-mini",
-      "use_batch_api": true,
-      "category_generation_level": "document",
-      "keyword_generation_level": "section",
-      "question_generation_level": "chunk",
-      "use_dynamic_categories": true,
-      "include_questions_in_embedding": true,
-      "batch_size": 50,
-      "max_keywords_per_chunk": 10,
-      "max_questions_per_chunk": 5,
-      "cache_enabled": true,
-      "cache_size": 1000,
-      "batch_api_poll_interval": 30,
-      "batch_api_timeout_hours": 12
-    }
   },
   "multi_agent": {
     "enabled": true,
@@ -651,21 +512,7 @@
       "postgres": 20
     },
     "batch_sizes": {
-      "embedding": 64,
-      "context_generation": 20
-    },
-    "retrieval": {
-      "layer_default_k": {
-        "1": 3,
-        "2": 5,
-        "3": 10
-      },
-      "candidates_multiplier": 4,
-      "rrf_k": 60
-    },
-    "max_workers": {
-      "summarization": 20,
-      "context_generation": 10
+      "embedding": 64
     },
     "cache": {
       "embedding_cache_max_size": 1000,

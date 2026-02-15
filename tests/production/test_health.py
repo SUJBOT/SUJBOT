@@ -68,9 +68,9 @@ class TestDatabaseHealth:
             timeout=10
         )
         assert result.returncode == 0, f"Cannot query sujbot DB: {result.stderr.decode()}"
-        # Should have layer1, layer2, layer3 tables
+        # Should have vl_pages and documents tables
         output = result.stdout.decode()
-        assert "3" in output or "2" in output or "1" in output, "vectors schema should have tables"
+        assert "1" in output or "2" in output or "3" in output, "vectors schema should have tables"
 
     def test_redis_connection(self):
         """Redis is accessible and responding."""

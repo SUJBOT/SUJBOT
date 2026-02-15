@@ -26,7 +26,7 @@ class SingleAgentRunner:
     Replaces MultiAgentRunner by:
     - Using one LLM call loop instead of orchestrator + specialist routing
     - Exposing ALL tools (search, expand_context, etc.) to one agent
-    - Loading system prompt: unified.txt (VL) or unified_ocr.txt (OCR)
+    - Loading system prompt from prompts/agents/unified.txt
     """
 
     def __init__(self, config: Dict[str, Any]):
@@ -84,33 +84,28 @@ class SingleAgentRunner:
             self.langsmith = None
 
     async def _initialize_tools(self) -> None:
-        """Initialize tool registry with all RAG components (vector store, embedder, VL components)."""
+        """Initialize tool registry with all RAG components (vector store, VL components)."""
         from ..agent.tools import get_registry
         from ..storage import load_vector_store_adapter
-        from ..embedding_generator import EmbeddingGenerator
         from ..agent.config import ToolConfig
         from ..agent.providers.factory import create_provider
-        from ..config import EmbeddingConfig
 
         storage_config = self.config.get("storage", {})
         backend = storage_config.get("backend", "postgresql")
 
-        # LLM provider for tools (OCR mode: HyDE/synthesis) — use cheap model
+        # LLM provider for tools — use cheap model
         tool_model = self.config.get("models", {}).get("llm_model", "gpt-4o-mini")
         try:
             self.llm_provider = create_provider(model=tool_model)
             logger.info(f"Tool LLM provider: {tool_model}")
         except Exception as e:
             logger.error(
-                "Tool LLM provider failed for %s: %s. HyDE search disabled — "
-                "expect degraded retrieval quality.",
+                "Tool LLM provider failed for %s: %s.",
                 tool_model,
                 e,
                 exc_info=True,
             )
             self.llm_provider = None
-
-        architecture = self.config.get("architecture", "vl")
 
         # Vector store
         if backend == "postgresql":
@@ -124,8 +119,7 @@ class SingleAgentRunner:
                 backend="postgresql",
                 connection_string=connection_string,
                 pool_size=storage_config.get("postgresql", {}).get("pool_size", 20),
-                dimensions=storage_config.get("postgresql", {}).get("dimensions", 4096),
-                architecture=architecture,
+                dimensions=storage_config.get("postgresql", {}).get("dimensions", 2048),
             )
         else:
             vector_store_path = Path(self.config.get("vector_store_path", "vector_db"))
@@ -137,23 +131,9 @@ class SingleAgentRunner:
 
         self.vector_store = vector_store
 
-        # Embedder
-        model_name = self.config.get("models", {}).get("embedding_model", "bge-m3")
-        model_provider = self.config.get("models", {}).get("embedding_provider", "huggingface")
-        embedding_config = EmbeddingConfig(
-            provider=model_provider,
-            model=model_name,
-            batch_size=64,
-            normalize=True,
-            enable_multi_layer=True,
-            cache_enabled=True,
-            cache_max_size=1000,
-        )
-        embedder = EmbeddingGenerator(embedding_config)
-
         # Graph storage (optional — initialized before ToolConfig so it can be passed in)
         graph_storage = None
-        if architecture == "vl" and hasattr(vector_store, "pool") and vector_store.pool:
+        if hasattr(vector_store, "pool") and vector_store.pool:
             try:
                 from ..graph import GraphEmbedder, GraphStorageAdapter
             except ImportError as e:
@@ -189,30 +169,28 @@ class SingleAgentRunner:
             query_expansion_model=agent_tools_config.get("query_expansion_model", "gpt-4o-mini"),
         )
 
-        # VL components (optional)
+        # VL components
         vl_retriever = None
         page_store = None
 
-        if architecture == "vl":
-            try:
-                from ..vl import create_vl_components
+        try:
+            from ..vl import create_vl_components
 
-                vl_config = self.config.get("vl", {})
-                vl_retriever, page_store = create_vl_components(vl_config, vector_store)
-            except Exception as e:
-                logger.error(f"Failed to init VL components: {e}", exc_info=True)
-                raise AgentInitializationError(
-                    f"VL architecture was explicitly configured but initialization failed: {e}. "
-                    f"Fix VL config or switch to architecture='ocr' in config.json.",
-                    details={"phase": "vl_initialization", "architecture": "vl"},
-                    cause=e,
-                ) from e
+            vl_config = self.config.get("vl", {})
+            vl_retriever, page_store = create_vl_components(vl_config, vector_store)
+        except Exception as e:
+            logger.error(f"Failed to init VL components: {e}", exc_info=True)
+            raise AgentInitializationError(
+                f"VL initialization failed: {e}.",
+                details={"phase": "vl_initialization"},
+                cause=e,
+            ) from e
 
         # Initialize registry
         registry = get_registry()
         registry.initialize_tools(
             vector_store=vector_store,
-            embedder=embedder,
+            embedder=None,
             reranker=None,
             context_assembler=None,
             llm_provider=self.llm_provider,
@@ -225,22 +203,14 @@ class SingleAgentRunner:
         logger.info(f"Tool registry initialized: {total_tools} tools")
 
     def _load_system_prompt(self) -> None:
-        """Load system prompt based on architecture mode (VL or OCR)."""
-        architecture = self.config.get("architecture", "vl")
-        default_prompt = (
-            "prompts/agents/unified.txt"
-            if architecture == "vl"
-            else "prompts/agents/unified_ocr.txt"
-        )
-        prompt_file = self.single_agent_config.get("prompt_file", default_prompt)
+        """Load system prompt."""
+        prompt_file = self.single_agent_config.get("prompt_file", "prompts/agents/unified.txt")
         prompt_path = Path(prompt_file)
         if not prompt_path.exists():
             # Try relative to project root
             prompt_path = Path(__file__).parent.parent.parent / prompt_file
         if not prompt_path.exists():
-            raise FileNotFoundError(
-                f"System prompt not found: {prompt_file} (architecture={architecture})"
-            )
+            raise FileNotFoundError(f"System prompt not found: {prompt_file}")
 
         self.system_prompt = prompt_path.read_text(encoding="utf-8")
         logger.info(f"Loaded system prompt from {prompt_path} ({len(self.system_prompt)} chars)")
@@ -635,8 +605,8 @@ class SingleAgentRunner:
                 "content": (
                     "Provide your FINAL answer now based on the information gathered. "
                     "Do NOT call any more tools. Use \\cite{id} citations for all facts, "
-                    "where id is the exact chunk_id or page_id from search results "
-                    "(e.g., \\cite{BZ_VR1_p003} for VL page results, \\cite{BZ_VR1_L3_5} for text chunks)."
+                    "where id is the exact page_id from search results "
+                    "(e.g., \\cite{BZ_VR1_p003})."
                 ),
             }
         ]

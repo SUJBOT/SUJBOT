@@ -23,6 +23,7 @@ export interface DocumentInfo {
   display_name: string;
   filename: string;
   size_bytes: number;
+  category: 'documentation' | 'legislation';
 }
 
 export interface ToolHealth {

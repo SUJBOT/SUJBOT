@@ -63,7 +63,7 @@ class ToolRegistry:
 
         Args:
             vector_store: VectorStoreAdapter (FAISS or PostgreSQL backend)
-            embedder: EmbeddingGenerator
+            embedder: Embedding model (optional, not used in VL mode)
             reranker: CrossEncoderReranker (optional)
             context_assembler: ContextAssembler (optional)
             llm_provider: LLM Provider (optional)
