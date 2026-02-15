@@ -1,7 +1,7 @@
 """
 RAG Tools
 
-8 tools for retrieval, analysis, and knowledge graph queries.
+9 tools for retrieval, analysis, knowledge graph queries, and compliance checking.
 All tools are registered automatically via @register_tool decorator.
 
 Tools:
@@ -13,6 +13,7 @@ Tools:
 - graph_search: Entity search in knowledge graph
 - graph_context: Multi-hop entity neighborhood
 - graph_communities: Thematic community summaries
+- compliance_check: Community-based compliance assessment
 """
 
 import logging
@@ -62,6 +63,9 @@ _safe_import("get_stats")
 _safe_import("graph_search")
 _safe_import("graph_context")
 _safe_import("graph_communities")
+
+# Compliance tools
+_safe_import("compliance_check")
 
 # Report import failures
 if _failed_imports:
