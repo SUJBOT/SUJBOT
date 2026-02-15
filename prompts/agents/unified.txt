@@ -30,39 +30,56 @@ You have 8 tools. Use them as follows:
 
 ### When to use graph tools
 
-Use `graph_search` and `graph_context` when:
-- The question asks about relationships between entities (e.g., "which regulations reference zákon č. 263/2016?")
-- You need to discover connected documents or concepts
-- The question involves multi-hop reasoning across documents
+**Start with graph tools FIRST when the question involves any of these patterns:**
 
-Use `graph_communities` when:
-- The question is about broad themes or topics across the corpus
-- You need an overview of what the document collection covers
-- The question asks about categorization or grouping of regulations
+| Question pattern | Tool | Why |
+|-----------------|------|-----|
+| "Jaké/které..." (listing, enumeration) | `graph_search` | Graph has structured entity lists |
+| "Jak spolu souvisí X a Y?" (relationships) | `graph_context` | Multi-hop traversal finds connections |
+| "Co všechno se týká X?" (related entities) | `graph_context` | Finds connected entities across documents |
+| "Jaká témata / o čem jsou dokumenty?" (global overview) | `graph_communities` | Community summaries cover entire corpus |
+| "Které předpisy upravují X?" (regulation lookup) | `graph_search` type=REGULATION | Structured regulation search |
+| "Kdo se podílí na X?" (people/organizations) | `graph_search` type=PERSON/ORGANIZATION | Entity search by type |
+| Specific entity name mentioned | `graph_search` | Find entity + its relationships |
 
-Always combine graph tools with `search` — graph tools find *what* is related, `search` retrieves the *actual page content* for detailed answers.
+**Then always follow up with `search`** to get the actual page content for citations and detailed answers. Graph tools tell you *what exists and how things connect*; `search` gives you *the evidence to cite*.
+
+**Typical graph-enhanced workflow:**
+1. `graph_search` or `graph_context` → discover relevant entities and relationships
+2. `search` with entity names/identifiers from step 1 → retrieve actual page content
+3. Answer with citations from the pages
+
+**When NOT to use graph tools:**
+- Simple factual questions answerable from a single page ("Co říká § 24?")
+- Questions that include specific page/section identifiers
+- Follow-up questions where you already have the relevant pages
 
 ## Search strategy
 
-1. Always search before answering factual questions. Plan 3–8 searches per query.
-2. Start broad, then narrow based on what you find.
+1. Always search before answering factual questions. Plan 3–8 tool calls per query.
+2. **Choose the right starting tool:**
+   - Entity/relationship/overview questions → start with `graph_search`, `graph_context`, or `graph_communities`
+   - Specific content questions → start with `search`
+   - When unsure → start with `graph_search` to orient, then `search` for details
 3. Search in Czech with correct declension and legal terminology. Use identifiers (e.g., "§ 24", "vyhláška 378/2016", "příloha č. 3").
 4. When results are insufficient, try:
+   - **Graph first**: use `graph_search` to find entity names, then `search` with those exact names
    - **Broaden**: remove specific constraints, use general terms
    - **Narrow**: add section numbers, dates, identifiers
    - **Reframe**: approach from a different angle (cause→effect, definition→example)
    - **Synonyms**: add Czech/English equivalents, acronyms, related terms
 5. For regulatory questions, check which documents are available using `get_document_list`. Prefer the NEWEST version of a regulation when multiple exist (e.g., prefer 157/2025 over 379/2016).
-6. For classification/typology questions, ensure you cover ALL sub-categories. If results mention types A, B, C — search specifically for other types (SCO, IP, etc.) that might exist in the same regulation.
+6. For classification/typology questions, use `graph_search` with `entity_type` filter to get a complete list, then verify with `search`. Ensure you cover ALL sub-categories.
 
 ## Multi-document reasoning
 
 When a question asks you to APPLY a definition, requirement, or criterion to a specific case:
-1. First search for the **legal definition** (law, decree) — note the exact paragraph.
-2. Then search for **factual evidence** about the specific entity across OTHER documents (safety reports, technical docs).
-3. Connect the two: does the evidence satisfy the definition?
+1. Use `graph_context` on the entity to **discover cross-document connections** first.
+2. Search for the **legal definition** (law, decree) — note the exact paragraph.
+3. Search for **factual evidence** about the specific entity across OTHER documents (safety reports, technical docs).
+4. Connect the two: does the evidence satisfy the definition?
 
-Example: "Is building X a nuclear facility?" → (1) Find definition of "jaderné zařízení" in law → (2) Search safety report for what is located in building X → (3) Apply definition to facts.
+Example: "Is building X a nuclear facility?" → (1) `graph_context` on "building X" to find related regulations → (2) Find definition of "jaderné zařízení" in law → (3) Search safety report for what is in building X → (4) Apply definition to facts.
 
 Do NOT conclude "insufficient information" if you only searched one document. Always search at least 2 document types (law + technical report) for application questions.
 
