@@ -8,6 +8,7 @@ Follows PostgresVectorStoreAdapter pattern: asyncpg pool + sync wrappers.
 import asyncio
 import json
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 if TYPE_CHECKING:
@@ -86,6 +87,14 @@ def _run_async_safe(coro, timeout: float = 30.0, operation_name: str = "graph op
         raise
 
 
+def _parse_command_count(result: Optional[str]) -> int:
+    """Parse row count from asyncpg command result (e.g. 'DELETE 5' → 5)."""
+    try:
+        return int(result.split()[-1])
+    except (ValueError, IndexError, AttributeError):
+        return 0
+
+
 class GraphStorageAdapter:
     """
     PostgreSQL storage for knowledge graph (entities, relationships, communities).
@@ -125,9 +134,7 @@ class GraphStorageAdapter:
         """Lazily create connection pool on first use."""
         if self.pool is None:
             if not self._connection_string:
-                raise DatabaseConnectionError(
-                    "Either pool or connection_string must be provided"
-                )
+                raise DatabaseConnectionError("Either pool or connection_string must be provided")
             try:
                 self.pool = await asyncpg.create_pool(
                     dsn=self._connection_string,
@@ -151,7 +158,9 @@ class GraphStorageAdapter:
     # Entity & Relationship Storage
     # =========================================================================
 
-    def add_entities(self, entities: List[Dict], document_id: str, source_page_id: Optional[str] = None) -> int:
+    def add_entities(
+        self, entities: List[Dict], document_id: str, source_page_id: Optional[str] = None
+    ) -> int:
         """Bulk upsert entities (sync). Returns count of records processed."""
         return _run_async_safe(
             self.async_add_entities(entities, document_id, source_page_id),
@@ -213,7 +222,8 @@ class GraphStorageAdapter:
         """Resolve entity name to ID: document-scoped first, then cross-document fallback."""
         entity_id = await conn.fetchval(
             "SELECT entity_id FROM graph.entities WHERE name = $1 AND document_id = $2 LIMIT 1",
-            name, document_id,
+            name,
+            document_id,
         )
         if entity_id is None:
             entity_id = await conn.fetchval(
@@ -333,7 +343,11 @@ class GraphStorageAdapter:
             ) from e
 
         return [
-            {**_entity_from_row(row), "metadata": row["metadata"] or {}, "score": float(row["score"])}
+            {
+                **_entity_from_row(row),
+                "metadata": row["metadata"] or {},
+                "score": float(row["score"]),
+            }
             for row in rows
         ]
 
@@ -371,7 +385,11 @@ class GraphStorageAdapter:
             ) from e
 
         return [
-            {**_entity_from_row(row), "metadata": row["metadata"] or {}, "score": float(row["score"])}
+            {
+                **_entity_from_row(row),
+                "metadata": row["metadata"] or {},
+                "score": float(row["score"]),
+            }
             for row in rows
         ]
 
@@ -525,9 +543,7 @@ class GraphStorageAdapter:
                         records,
                     )
         except asyncpg.PostgresError as e:
-            raise GraphStoreError(
-                f"Failed to save {len(records)} communities: {e}", cause=e
-            ) from e
+            raise GraphStoreError(f"Failed to save {len(records)} communities: {e}", cause=e) from e
 
         return len(records)
 
@@ -558,18 +574,14 @@ class GraphStorageAdapter:
 
         return [_community_from_row(row) for row in rows]
 
-    def search_communities(
-        self, query: str, level: int = 0, limit: int = 10
-    ) -> List[Dict]:
+    def search_communities(self, query: str, level: int = 0, limit: int = 10) -> List[Dict]:
         """Search communities by embedding similarity (or FTS fallback)."""
         return _run_async_safe(
             self.async_search_communities(query, level, limit),
             operation_name="search_communities",
         )
 
-    async def async_search_communities(
-        self, query: str, level: int, limit: int
-    ) -> List[Dict]:
+    async def async_search_communities(self, query: str, level: int, limit: int) -> List[Dict]:
         await self._ensure_pool()
 
         if self._embedder:
@@ -600,9 +612,7 @@ class GraphStorageAdapter:
 
         return [_community_from_row(row) for row in rows]
 
-    async def _search_communities_by_fts(
-        self, query: str, level: int, limit: int
-    ) -> List[Dict]:
+    async def _search_communities_by_fts(self, query: str, level: int, limit: int) -> List[Dict]:
         sql = """
             SELECT community_id, level, title, summary, summary_model, entity_ids, metadata,
                    ts_rank(search_tsv, plainto_tsquery('simple', unaccent($1))) AS score
@@ -750,9 +760,7 @@ class GraphStorageAdapter:
                     "SELECT COUNT(DISTINCT document_id) FROM graph.entities"
                 )
         except asyncpg.PostgresError as e:
-            raise GraphStoreError(
-                f"Failed to get graph stats: {e}", cause=e
-            ) from e
+            raise GraphStoreError(f"Failed to get graph stats: {e}", cause=e) from e
 
         return {
             "entities": entity_count,
@@ -760,3 +768,368 @@ class GraphStorageAdapter:
             "communities": community_count,
             "documents_with_graph": doc_count,
         }
+
+    # =========================================================================
+    # Entity Deduplication
+    # =========================================================================
+
+    async def _merge_entity_group(
+        self,
+        conn,
+        canonical_id: int,
+        duplicate_ids: List[int],
+        merged_description: Optional[str] = None,
+    ) -> int:
+        """Merge duplicate entities into canonical within an open transaction.
+
+        Remaps relationships, removes self-references and duplicate edges,
+        updates canonical entity, and deletes duplicates.
+
+        Args:
+            conn: Active asyncpg connection (must be inside a transaction).
+            canonical_id: Entity ID to keep.
+            duplicate_ids: Entity IDs to merge into canonical and delete.
+            merged_description: If provided, set as canonical's description.
+                When None, only the search_embedding is cleared.
+
+        Returns:
+            Number of duplicate entity rows deleted.
+        """
+        # Remap relationships from duplicates to canonical
+        for dup_id in duplicate_ids:
+            await conn.execute(
+                "UPDATE graph.relationships SET source_entity_id = $1 WHERE source_entity_id = $2",
+                canonical_id,
+                dup_id,
+            )
+            await conn.execute(
+                "UPDATE graph.relationships SET target_entity_id = $1 WHERE target_entity_id = $2",
+                canonical_id,
+                dup_id,
+            )
+
+        # Remove self-referencing relationships created by remap (scoped to canonical)
+        await conn.execute(
+            "DELETE FROM graph.relationships "
+            "WHERE source_entity_id = target_entity_id AND source_entity_id = $1",
+            canonical_id,
+        )
+
+        # Deduplicate relationship edges involving canonical (keep lowest relationship_id)
+        await conn.execute(
+            """
+            DELETE FROM graph.relationships r1
+            USING graph.relationships r2
+            WHERE r1.source_entity_id = r2.source_entity_id
+              AND r1.target_entity_id = r2.target_entity_id
+              AND r1.relationship_type = r2.relationship_type
+              AND r1.relationship_id > r2.relationship_id
+              AND (r1.source_entity_id = $1 OR r1.target_entity_id = $1)
+            """,
+            canonical_id,
+        )
+
+        # Update canonical: set description if provided, always clear embedding
+        if merged_description is not None:
+            await conn.execute(
+                "UPDATE graph.entities SET description = $1, search_embedding = NULL WHERE entity_id = $2",
+                merged_description,
+                canonical_id,
+            )
+        else:
+            await conn.execute(
+                "UPDATE graph.entities SET search_embedding = NULL WHERE entity_id = $1",
+                canonical_id,
+            )
+
+        # Delete duplicate entity rows
+        placeholders = ", ".join(f"${i + 1}" for i in range(len(duplicate_ids)))
+        result = await conn.execute(
+            f"DELETE FROM graph.entities WHERE entity_id IN ({placeholders})",
+            *duplicate_ids,
+        )
+        return _parse_command_count(result)
+
+    def deduplicate_exact(self) -> Dict:
+        """Merge entities with identical (name, entity_type) across documents (sync)."""
+        return _run_async_safe(
+            self.async_deduplicate_exact(),
+            timeout=120.0,
+            operation_name="deduplicate_exact",
+        )
+
+    async def async_deduplicate_exact(self) -> Dict:
+        """
+        Merge entities with identical (name, entity_type) across different documents.
+
+        For each duplicate group, delegates to ``_merge_entity_group`` which
+        remaps relationships, removes self-references and duplicate edges,
+        updates the canonical entity description, and deletes duplicates.
+
+        Returns:
+            Dict with merge stats: groups_merged, entities_removed
+        """
+        await self._ensure_pool()
+
+        # Find groups with identical (name, entity_type) spanning multiple documents
+        find_groups_sql = """
+            SELECT name, entity_type,
+                   array_agg(entity_id ORDER BY length(coalesce(description, '')) DESC, entity_id ASC) AS entity_ids,
+                   array_agg(coalesce(description, '') ORDER BY length(coalesce(description, '')) DESC, entity_id ASC) AS descriptions
+            FROM graph.entities
+            GROUP BY name, entity_type
+            HAVING COUNT(DISTINCT document_id) > 1
+        """
+
+        try:
+            async with self.pool.acquire() as conn:
+                groups = await conn.fetch(find_groups_sql)
+        except asyncpg.PostgresError as e:
+            raise GraphStoreError(f"Failed to find duplicate entity groups: {e}", cause=e) from e
+
+        if not groups:
+            logger.info("No exact duplicates found")
+            return {"groups_merged": 0, "entities_removed": 0}
+
+        logger.info(f"Found {len(groups)} exact duplicate groups to merge")
+
+        total_removed = 0
+        groups_succeeded = 0
+
+        for group in groups:
+            entity_ids = list(group["entity_ids"])
+            descriptions = list(group["descriptions"])
+            canonical_id = entity_ids[0]
+            duplicate_ids = entity_ids[1:]
+
+            if not duplicate_ids:
+                continue
+
+            # Build merged description (concatenate distinct, max 2000 chars)
+            distinct_descs = list(dict.fromkeys(d for d in descriptions if d))
+            merged_desc = " | ".join(distinct_descs)[:2000] if distinct_descs else None
+
+            try:
+                async with self.pool.acquire() as conn:
+                    async with conn.transaction():
+                        removed = await self._merge_entity_group(
+                            conn, canonical_id, duplicate_ids, merged_description=merged_desc
+                        )
+                        total_removed += removed
+                        groups_succeeded += 1
+
+            except asyncpg.PostgresError as e:
+                logger.error(
+                    f"Failed to merge exact duplicates for '{group['name']}' ({group['entity_type']}): {e}",
+                    exc_info=True,
+                )
+                # Continue with next group -- partial failure doesn't corrupt
+
+        stats = {
+            "groups_merged": groups_succeeded,
+            "entities_removed": total_removed,
+        }
+        logger.info(f"Exact dedup complete: {stats}")
+        return stats
+
+    def deduplicate_semantic(
+        self, similarity_threshold: float = 0.85, llm_provider: Optional[Any] = None
+    ) -> Dict:
+        """Merge semantically similar entities using embedding NN + LLM arbiter (sync)."""
+        return _run_async_safe(
+            self.async_deduplicate_semantic(similarity_threshold, llm_provider),
+            timeout=300.0,
+            operation_name="deduplicate_semantic",
+        )
+
+    async def async_deduplicate_semantic(
+        self, similarity_threshold: float = 0.85, llm_provider: Optional[Any] = None
+    ) -> Dict:
+        """
+        Merge semantically similar entities using embedding nearest-neighbor + LLM arbiter.
+
+        1. Find candidate pairs above similarity threshold via pgvector KNN
+           (same entity_type required, uses CROSS JOIN LATERAL for batch NN)
+        2. Ask LLM to confirm each candidate pair
+        3. Build Union-Find from confirmed pairs (transitive closure)
+        4. Merge each group using same logic as exact dedup
+
+        Args:
+            similarity_threshold: Cosine similarity threshold for candidate pairs
+            llm_provider: LLM provider for arbitration (required for actual merges)
+
+        Returns:
+            Dict with merge stats
+        """
+        await self._ensure_pool()
+
+        if not llm_provider:
+            logger.info("No LLM provider for semantic dedup — skipping")
+            return {"candidates_found": 0, "llm_confirmed": 0, "entities_removed": 0}
+
+        # Load dedup prompt (try relative to source first, then cwd)
+        prompt_path = (
+            Path(__file__).resolve().parent.parent.parent / "prompts" / "graph_entity_dedup.txt"
+        )
+        if not prompt_path.exists():
+            prompt_path = Path("prompts") / "graph_entity_dedup.txt"
+        if not prompt_path.exists():
+            logger.error(f"Dedup prompt not found at {prompt_path}, skipping semantic dedup")
+            return {
+                "candidates_found": 0,
+                "llm_confirmed": 0,
+                "entities_removed": 0,
+                "error": f"Prompt file not found: {prompt_path}",
+            }
+        prompt_template = prompt_path.read_text(encoding="utf-8")
+
+        # Find candidate pairs via pgvector KNN (batch nearest-neighbor)
+        candidate_sql = """
+            SELECT e1.entity_id AS id1, e2.entity_id AS id2,
+                   e1.name AS name1, e2.name AS name2,
+                   e1.entity_type AS type1, e2.entity_type AS type2,
+                   e1.description AS desc1, e2.description AS desc2,
+                   1 - (e1.search_embedding <=> e2.search_embedding) AS similarity
+            FROM graph.entities e1
+            CROSS JOIN LATERAL (
+                SELECT entity_id, name, entity_type, description, search_embedding
+                FROM graph.entities e2
+                WHERE e2.entity_type = e1.entity_type
+                  AND e2.entity_id > e1.entity_id
+                  AND e2.search_embedding IS NOT NULL
+                ORDER BY e2.search_embedding <=> e1.search_embedding
+                LIMIT 5
+            ) e2
+            WHERE e1.search_embedding IS NOT NULL
+              AND 1 - (e1.search_embedding <=> e2.search_embedding) >= $1
+        """
+
+        try:
+            async with self.pool.acquire() as conn:
+                candidates = await conn.fetch(candidate_sql, similarity_threshold)
+        except asyncpg.PostgresError as e:
+            raise GraphStoreError(
+                f"Failed to find semantic duplicate candidates: {e}", cause=e
+            ) from e
+
+        if not candidates:
+            logger.info("No semantic duplicate candidates found")
+            return {"candidates_found": 0, "llm_confirmed": 0, "entities_removed": 0}
+
+        logger.info(
+            f"Found {len(candidates)} semantic duplicate candidates (threshold={similarity_threshold})"
+        )
+
+        # LLM arbitration for each candidate pair
+        confirmed_pairs = []
+        for cand in candidates:
+            prompt = prompt_template.format(
+                name1=cand["name1"],
+                type1=cand["type1"],
+                desc1=cand["desc1"] or "No description",
+                name2=cand["name2"],
+                type2=cand["type2"],
+                desc2=cand["desc2"] or "No description",
+            )
+
+            try:
+                response = await asyncio.to_thread(
+                    llm_provider.create_message,
+                    messages=[{"role": "user", "content": prompt}],
+                    tools=[],
+                    system="",
+                    max_tokens=100,
+                    temperature=0.0,
+                )
+                answer = (response.text or "").strip().upper()
+                is_yes = answer.startswith("YES")
+
+                if is_yes:
+                    confirmed_pairs.append((cand["id1"], cand["id2"]))
+                    logger.info(
+                        f"LLM confirmed merge: '{cand['name1']}' ≈ '{cand['name2']}' "
+                        f"(sim={cand['similarity']:.3f})"
+                    )
+                else:
+                    logger.debug(
+                        f"LLM rejected merge: '{cand['name1']}' vs '{cand['name2']}' "
+                        f"(sim={cand['similarity']:.3f}): {answer[:80]}"
+                    )
+            except (KeyboardInterrupt, SystemExit, MemoryError):
+                raise
+            except Exception as e:
+                logger.warning(
+                    f"LLM arbitration failed for '{cand['name1']}' vs '{cand['name2']}': {e}",
+                    exc_info=True,
+                )
+
+        if not confirmed_pairs:
+            logger.info("No semantic duplicates confirmed by LLM")
+            return {
+                "candidates_found": len(candidates),
+                "llm_confirmed": 0,
+                "entities_removed": 0,
+            }
+
+        # Build Union-Find from confirmed pairs for transitive closure
+        parent: Dict[int, int] = {}
+
+        def find(x: int) -> int:
+            while parent.get(x, x) != x:
+                parent[x] = parent.get(parent[x], parent[x])
+                x = parent[x]
+            return x
+
+        def union(a: int, b: int) -> None:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                # Lower ID becomes root (canonical)
+                if ra > rb:
+                    ra, rb = rb, ra
+                parent[rb] = ra
+
+        for a, b in confirmed_pairs:
+            union(a, b)
+
+        # Group by canonical
+        merge_groups: Dict[int, List[int]] = {}
+        all_ids = set()
+        for a, b in confirmed_pairs:
+            all_ids.add(a)
+            all_ids.add(b)
+        for eid in all_ids:
+            root = find(eid)
+            merge_groups.setdefault(root, []).append(eid)
+
+        # Deduplicate and sort each group
+        for root in merge_groups:
+            merge_groups[root] = sorted(set(merge_groups[root]))
+
+        # Merge each group using shared merge logic
+        total_removed = 0
+        groups_succeeded = 0
+        for canonical_id, group_ids in merge_groups.items():
+            duplicate_ids = [eid for eid in group_ids if eid != canonical_id]
+            if not duplicate_ids:
+                continue
+
+            try:
+                async with self.pool.acquire() as conn:
+                    async with conn.transaction():
+                        removed = await self._merge_entity_group(conn, canonical_id, duplicate_ids)
+                        total_removed += removed
+                        groups_succeeded += 1
+
+            except asyncpg.PostgresError as e:
+                logger.error(
+                    f"Failed to merge semantic group (canonical={canonical_id}): {e}", exc_info=True
+                )
+
+        stats = {
+            "candidates_found": len(candidates),
+            "llm_confirmed": len(confirmed_pairs),
+            "groups_merged": groups_succeeded,
+            "entities_removed": total_removed,
+        }
+        logger.info(f"Semantic dedup complete: {stats}")
+        return stats

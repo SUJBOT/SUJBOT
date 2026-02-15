@@ -33,6 +33,11 @@ MAX_UPLOAD_SIZE = 100 * 1024 * 1024  # 100 MB
 # Strong references for fire-and-forget cleanup tasks (prevents GC before completion)
 _background_tasks: set = set()
 
+# Debounced graph rebuild state
+_rebuild_timer: Optional[asyncio.TimerHandle] = None
+_rebuild_task: Optional[asyncio.Task] = None
+_REBUILD_DELAY_SECONDS = 10.0
+
 
 def set_vl_components(
     jina_client: Any,
@@ -41,6 +46,9 @@ def set_vl_components(
     summary_provider: Any = None,
     entity_extractor: Any = None,
     graph_storage: Any = None,
+    community_detector: Any = None,
+    community_summarizer: Any = None,
+    graph_embedder: Any = None,
 ) -> None:
     """Set VL components for upload endpoint (called from main.py lifespan)."""
     _vl_components["jina_client"] = jina_client
@@ -49,6 +57,67 @@ def set_vl_components(
     _vl_components["summary_provider"] = summary_provider
     _vl_components["entity_extractor"] = entity_extractor
     _vl_components["graph_storage"] = graph_storage
+    _vl_components["community_detector"] = community_detector
+    _vl_components["community_summarizer"] = community_summarizer
+    _vl_components["graph_embedder"] = graph_embedder
+
+
+def _schedule_graph_rebuild(document_id: str) -> None:
+    """Schedule a debounced graph rebuild. Resets timer on each call."""
+    global _rebuild_timer, _rebuild_task
+
+    graph_storage = _vl_components.get("graph_storage")
+    community_detector = _vl_components.get("community_detector")
+    if not graph_storage or not community_detector:
+        logger.debug("Graph rebuild skipped: graph_storage or community_detector not configured")
+        return
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        logger.warning("No running event loop for graph rebuild scheduling")
+        return
+
+    # Cancel pending timer
+    if _rebuild_timer is not None:
+        _rebuild_timer.cancel()
+
+    # Cancel in-progress rebuild (new data means stale results)
+    if _rebuild_task and not _rebuild_task.done():
+        _rebuild_task.cancel()
+        logger.info("Cancelled in-progress graph rebuild (new document indexed)")
+
+    def _on_rebuild_done(task: asyncio.Task) -> None:
+        """Log exceptions from background graph rebuild tasks."""
+        _background_tasks.discard(task)
+        if task.cancelled():
+            logger.debug("Graph rebuild task was cancelled")
+            return
+        exc = task.exception()
+        if exc:
+            logger.error("Background graph rebuild failed: %s", exc, exc_info=exc)
+
+    def _fire():
+        global _rebuild_task
+        from src.graph.post_processor import rebuild_graph_communities
+
+        _rebuild_task = asyncio.ensure_future(
+            rebuild_graph_communities(
+                graph_storage=graph_storage,
+                community_detector=community_detector,
+                community_summarizer=_vl_components.get("community_summarizer"),
+                graph_embedder=_vl_components.get("graph_embedder"),
+                llm_provider=_vl_components.get("summary_provider"),
+                document_id=document_id,
+            )
+        )
+        _background_tasks.add(_rebuild_task)
+        _rebuild_task.add_done_callback(_on_rebuild_done)
+
+    _rebuild_timer = loop.call_later(_REBUILD_DELAY_SECONDS, _fire)
+    logger.info(
+        f"Graph rebuild scheduled in {_REBUILD_DELAY_SECONDS}s (triggered by {document_id})"
+    )
 
 
 class DocumentInfo(BaseModel):
@@ -704,6 +773,9 @@ async def upload_document(
                 f"User {user.get('id', 'unknown')} uploaded and indexed "
                 f"{safe_filename} ({pdf_path.stem}, category={category})"
             )
+
+            # Schedule debounced graph rebuild (communities + dedup)
+            _schedule_graph_rebuild(document_id)
 
         except (asyncio.CancelledError, GeneratorExit):
             logger.info(
