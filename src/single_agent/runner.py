@@ -15,6 +15,14 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from dotenv import load_dotenv
 
+from ..agent.context_manager import (
+    CompactionLayer,
+    ContextBudgetMonitor,
+    compact_with_summary,
+    emergency_truncate,
+    get_context_window,
+    prune_tool_outputs,
+)
 from ..exceptions import AgentInitializationError
 
 logger = logging.getLogger(__name__)
@@ -27,7 +35,7 @@ class SingleAgentRunner:
     Replaces MultiAgentRunner by:
     - Using one LLM call loop instead of orchestrator + specialist routing
     - Exposing ALL tools (search, expand_context, etc.) to one agent
-    - Loading system prompt from prompts/agents/unified.txt
+    - Loading system prompt from configurable path (default: prompts/agents/unified.txt)
     """
 
     def __init__(self, config: Dict[str, Any]):
@@ -336,6 +344,10 @@ class SingleAgentRunner:
             }
             return
 
+        # Context budget monitor (uses response.usage.input_tokens for thresholds)
+        context_window = get_context_window(model_name)
+        monitor = ContextBudgetMonitor(context_window)
+
         # Get all tool schemas
         tool_schemas = [
             schema
@@ -393,6 +405,7 @@ class SingleAgentRunner:
         total_tool_cost = 0.0
         final_text = ""
         iteration = 0
+        seen_page_ids: set = set()  # Track seen page_ids to avoid duplicate base64 images (~1600 tokens/page)
 
         try:
             for iteration in range(max_iterations):
@@ -428,6 +441,9 @@ class SingleAgentRunner:
                         "errors": [str(e)],
                     }
                     return
+
+                # Update context budget from actual token usage
+                monitor.update_from_response(response)
 
                 # Track cost
                 if hasattr(response, "usage") and response.usage:
@@ -497,7 +513,25 @@ class SingleAgentRunner:
 
                         if page_images:
                             content_blocks = []
+                            dedup_skipped = 0
                             for page in page_images:
+                                pid = page.get("page_id", "unknown")
+                                if pid in seen_page_ids:
+                                    # Already sent this page image — send text reference only
+                                    dedup_skipped += 1
+                                    content_blocks.append(
+                                        {
+                                            "type": "text",
+                                            "text": (
+                                                f"[Already shown: {pid} | "
+                                                f"Page {page.get('page_number', '?')} from "
+                                                f"{page.get('document_id', 'unknown')} | "
+                                                f"score: {page.get('score', 0):.3f}]"
+                                            ),
+                                        }
+                                    )
+                                    continue
+                                seen_page_ids.add(pid)
                                 content_blocks.append(
                                     {
                                         "type": "image",
@@ -512,13 +546,18 @@ class SingleAgentRunner:
                                     {
                                         "type": "text",
                                         "text": (
-                                            f"[USE THIS EXACT page_id IN \\cite{{}}: "
-                                            f"{page.get('page_id', 'unknown')} | "
+                                            f"[{pid} | "
                                             f"Page {page.get('page_number', '?')} from "
                                             f"{page.get('document_id', 'unknown')} | "
                                             f"score: {page.get('score', 0):.3f}]"
                                         ),
                                     }
+                                )
+                            if dedup_skipped:
+                                logger.info(
+                                    "Image dedup: skipped %d duplicate pages for tool %s",
+                                    dedup_skipped,
+                                    tool_name,
                                 )
                             tool_results.append(
                                 {
@@ -562,10 +601,21 @@ class SingleAgentRunner:
                     messages.append({"role": "assistant", "content": response.content})
                     messages.append({"role": "user", "content": tool_results})
 
-                    # Truncate history to prevent overflow
-                    max_history = 7  # 1 original + 6 recent
-                    if len(messages) > max_history:
-                        messages = [messages[0]] + messages[-6:]
+                    # 3-layer progressive context compaction (mutually exclusive)
+                    action = monitor.recommended_action()
+                    if action == CompactionLayer.EMERGENCY:
+                        messages = emergency_truncate(messages)
+                    elif action == CompactionLayer.COMPACT:
+                        pre_len = len(messages)
+                        messages = compact_with_summary(messages, provider)
+                        if len(messages) == pre_len:
+                            # Compaction failed — escalate to Layer 3 to prevent retry loop
+                            logger.warning("Layer 2 compaction unchanged, escalating to Layer 3")
+                            messages = emergency_truncate(messages)
+                    elif action == CompactionLayer.PRUNE:
+                        messages = prune_tool_outputs(messages)
+                    elif action != CompactionLayer.NONE:
+                        logger.debug("Unrecognized compaction action: %s", action)
 
                     # Early stop: 2+ consecutive empty searches
                     if self._should_stop_early(tool_call_history):

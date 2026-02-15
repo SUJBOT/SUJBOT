@@ -128,6 +128,7 @@ User Query → SingleAgentRunner (autonomous tool loop)
 - `src/vl/` - Vision-Language RAG module (Jina v4 embeddings, page store, VL retriever)
 - `backend/` - FastAPI web backend with auth, routes, middleware
 - `frontend/` - React + Vite web UI
+- `rag_confidence/` - QPP-based retrieval confidence scoring (standalone, by veselm73)
 
 **Key SSOT modules (use these, don't duplicate):**
 - `src/exceptions.py` - Typed exception hierarchy
@@ -161,6 +162,8 @@ VL flow: Query → Jina v4 embed_query() → PostgreSQL exact cosine (vectors.vl
 
 **Multi-format upload:** Document upload accepts PDF, DOCX, TXT, Markdown, HTML, LaTeX. Non-PDF formats are converted to PDF first via `src/vl/document_converter.py`, then the unchanged VL pipeline processes the PDF. DOCX uses LibreOffice headless, LaTeX uses pdflatex, text/MD/HTML use PyMuPDF's `fitz.Story`.
 
+**Retrieval confidence (QPP):** Text searches include a QPP-based confidence score (0.0–1.0) from `rag_confidence.score_retrieval_general()`. The model uses 24 language-agnostic features from the full similarity distribution (all pages vs query). Bands: HIGH (≥0.90), MEDIUM (0.75–0.90), LOW (0.50–0.75), VERY_LOW (<0.50). Image searches skip QPP (no text query). The agent uses confidence to calibrate its answer and may retry with different terms on LOW/VERY_LOW.
+
 **Graph search** uses `intfloat/multilingual-e5-small` (384-dim) for cross-language semantic search on entities/communities. Falls back to PostgreSQL FTS when embedder not configured.
 
 ## Critical Constraints (DO NOT CHANGE)
@@ -191,6 +194,16 @@ Vectors in `vectors` schema (NOT `public`). Tables: `vl_pages`, `documents`.
 
 ## Best Practices
 
+### Changelog
+
+**After every merged PR or significant change, update `CHANGELOG.md` in the project root.** Keep it organized by feature area with dates. This is the primary record of what was done and when.
+
+### Git Branching
+
+**Do NOT create a new feature branch if you already have an active (unmerged) branch.** Finish, merge, or close the current branch first. Multiple active branches from the same author cause merge conflicts and duplicated work.
+
+**Main branch is protected** — direct push is rejected. All changes must go through a pull request, even cherry-picks.
+
 ### System Prompts
 
 **ALL LLM system prompts MUST be loaded from `prompts/` directory!** Never hardcode prompts in Python. Use `load_prompt("agent_name")` for agents, `Path("prompts/template.txt").read_text()` for pipeline components.
@@ -204,7 +217,7 @@ Vectors in `vectors` schema (NOT `public`). Tables: `vl_pages`, `documents`.
 
 ### Error Handling
 
-Use typed exceptions from `src/exceptions.py`: `SujbotError` → `ExtractionError`, `ValidationError`, `ProviderError`, `ToolExecutionError`, `AgentError`, `StorageError`, `RetrievalError`. Each has `message`, `details` dict, optional `cause`. Use `exc_info=True` for unexpected errors.
+Use typed exceptions from `src/exceptions.py`: `SujbotError` → `ExtractionError`, `ValidationError`, `ProviderError`, `ToolExecutionError`, `AgentError`, `StorageError`, `RetrievalError`, `ConversionError`. Each has `message`, `details` dict, optional `cause`. Use `exc_info=True` for unexpected errors.
 
 ### Internationalization (i18n)
 

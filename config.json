@@ -61,9 +61,9 @@
     "adaptive_retrieval": {
       "enabled": true,
       "method": "otsu",
-      "fetch_k": 20,
+      "fetch_k": 100,
       "min_k": 1,
-      "max_k": 10,
+      "max_k": 20,
       "score_gap_threshold": 0.05,
       "min_samples_for_adaptive": 3
     }

@@ -98,7 +98,7 @@ def _parse_command_count(result: Optional[str]) -> int:
 
 
 def _parse_dedup_verdict(text: str) -> bool:
-    """Parse LLM dedup verdict from structured JSON or plain text fallback."""
+    """Parse LLM dedup verdict from structured JSON, regex extraction, or plain text fallback."""
     text = text.strip()
     # Strip markdown code fences
     text = re.sub(r"^```(?:json)?\s*\n?", "", text)
@@ -106,13 +106,25 @@ def _parse_dedup_verdict(text: str) -> bool:
 
     try:
         data = json.loads(text)
-        if not isinstance(data, dict):
-            logger.warning("Dedup verdict JSON is not an object: %s", type(data).__name__)
-            return text.upper().startswith("YES")
-        return str(data.get("verdict", "")).strip().upper() == "YES"
+        if isinstance(data, dict):
+            return str(data.get("verdict", "")).strip().upper() == "YES"
+        logger.debug(
+            "Dedup verdict JSON is %s (not dict), trying regex fallback",
+            type(data).__name__,
+        )
     except json.JSONDecodeError:
-        logger.warning("Dedup verdict not valid JSON, falling back to plain text. Preview: %s", text[:120])
-        return text.upper().startswith("YES")
+        logger.info(
+            "Dedup verdict not valid JSON, trying regex/plain-text fallback. Preview: %s",
+            text[:120],
+        )
+
+    # Regex fallback: extract verdict from JSON-like text (handles trailing text after JSON)
+    match = re.search(r'"verdict"\s*:\s*"(YES|NO)"', text, re.IGNORECASE)
+    if match:
+        return match.group(1).upper() == "YES"
+
+    # Last resort: plain text YES/NO
+    return text.strip().upper().startswith("YES")
 
 
 class GraphStorageAdapter:
@@ -995,7 +1007,10 @@ class GraphStorageAdapter:
         )
 
     async def async_deduplicate_semantic(
-        self, similarity_threshold: float = 0.85, llm_provider: Optional[Any] = None
+        self,
+        similarity_threshold: float = 0.85,
+        llm_provider: Optional[Any] = None,
+        max_candidates: int = 500,
     ) -> Dict:
         """
         Merge semantically similar entities using embedding nearest-neighbor + LLM arbiter.
@@ -1009,6 +1024,7 @@ class GraphStorageAdapter:
         Args:
             similarity_threshold: Cosine similarity threshold for candidate pairs
             llm_provider: LLM provider for arbitration (required for actual merges)
+            max_candidates: Global cap on candidate pairs to evaluate. Defaults to 500.
 
         Returns:
             Dict with merge stats
@@ -1036,29 +1052,35 @@ class GraphStorageAdapter:
         prompt_template = prompt_path.read_text(encoding="utf-8")
 
         # Find candidate pairs via pgvector KNN (batch nearest-neighbor)
+        # LIMIT 3 per entity, global cap via max_candidates, highest similarity first
         candidate_sql = """
-            SELECT e1.entity_id AS id1, e2.entity_id AS id2,
-                   e1.name AS name1, e2.name AS name2,
-                   e1.entity_type AS type1, e2.entity_type AS type2,
-                   e1.description AS desc1, e2.description AS desc2,
-                   1 - (e1.search_embedding <=> e2.search_embedding) AS similarity
-            FROM graph.entities e1
-            CROSS JOIN LATERAL (
-                SELECT entity_id, name, entity_type, description, search_embedding
-                FROM graph.entities e2
-                WHERE e2.entity_type = e1.entity_type
-                  AND e2.entity_id > e1.entity_id
-                  AND e2.search_embedding IS NOT NULL
-                ORDER BY e2.search_embedding <=> e1.search_embedding
-                LIMIT 5
-            ) e2
-            WHERE e1.search_embedding IS NOT NULL
-              AND 1 - (e1.search_embedding <=> e2.search_embedding) >= $1
+            SELECT id1, id2, name1, name2, type1, type2, desc1, desc2, similarity
+            FROM (
+                SELECT e1.entity_id AS id1, e2.entity_id AS id2,
+                       e1.name AS name1, e2.name AS name2,
+                       e1.entity_type AS type1, e2.entity_type AS type2,
+                       e1.description AS desc1, e2.description AS desc2,
+                       1 - (e1.search_embedding <=> e2.search_embedding) AS similarity
+                FROM graph.entities e1
+                CROSS JOIN LATERAL (
+                    SELECT entity_id, name, entity_type, description, search_embedding
+                    FROM graph.entities e2
+                    WHERE e2.entity_type = e1.entity_type
+                      AND e2.entity_id > e1.entity_id
+                      AND e2.search_embedding IS NOT NULL
+                    ORDER BY e2.search_embedding <=> e1.search_embedding
+                    LIMIT 3
+                ) e2
+                WHERE e1.search_embedding IS NOT NULL
+                  AND 1 - (e1.search_embedding <=> e2.search_embedding) >= $1
+            ) sub
+            ORDER BY similarity DESC
+            LIMIT $2
         """
 
         try:
             async with self.pool.acquire() as conn:
-                candidates = await conn.fetch(candidate_sql, similarity_threshold)
+                candidates = await conn.fetch(candidate_sql, similarity_threshold, max_candidates)
         except asyncpg.PostgresError as e:
             raise GraphStoreError(
                 f"Failed to find semantic duplicate candidates: {e}", cause=e

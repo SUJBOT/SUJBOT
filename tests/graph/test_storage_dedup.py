@@ -429,6 +429,15 @@ class TestParseDedupVerdict:
     def test_json_with_code_fences(self):
         assert _parse_dedup_verdict('```json\n{"verdict": "YES"}\n```') is True
 
+    def test_json_with_trailing_text(self):
+        """JSON followed by extra text — regex fallback extracts verdict."""
+        text = '{"verdict": "YES", "reason": "Same entity"}\n\nNote: they are the same.'
+        assert _parse_dedup_verdict(text) is True
+
+    def test_json_no_with_trailing_text(self):
+        text = '{"verdict": "NO", "reason": "Different"}\nExtra text here.'
+        assert _parse_dedup_verdict(text) is False
+
     def test_json_missing_verdict_key(self):
         assert _parse_dedup_verdict('{"answer": "YES"}') is False
 

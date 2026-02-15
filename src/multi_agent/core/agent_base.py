@@ -2,7 +2,7 @@
 Abstract base class for all agents in the multi-agent system.
 
 Defines standard interface, lifecycle, and tool distribution patterns.
-Ensures consistency across all 8 specialized agents.
+Ensures consistency across all specialized agents.
 """
 
 from abc import ABC, abstractmethod
@@ -18,6 +18,14 @@ from langgraph.graph import StateGraph
 from .event_bus import EventBus, EventType
 from .state import ToolExecution
 from ..observability.trajectory import AgentTrajectory
+from ...agent.context_manager import (
+    CompactionLayer,
+    ContextBudgetMonitor,
+    compact_with_summary,
+    emergency_truncate,
+    get_context_window,
+    prune_tool_outputs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +92,7 @@ class BaseAgent(ABC):
     """
     Abstract base class for all agents.
 
-    Defines standard interface that all 8 agents must implement.
+    Defines standard interface that all specialized agents must implement.
     Enforces:
     - Configuration validation
     - Tool distribution rules
@@ -186,12 +194,10 @@ class BaseAgent(ABC):
 
     async def handle_error(self, error: Exception, state: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Handle errors gracefully.
+        Record error and update execution state.
 
-        Implements fallback strategy:
-        1. Retry with exponential backoff
-        2. Degrade gracefully (use cached results)
-        3. Escalate to orchestrator
+        Assigns a unique error ID for tracking, appends the error message
+        to state, and marks the execution phase as 'error'.
 
         Args:
             error: Exception that occurred
@@ -200,7 +206,7 @@ class BaseAgent(ABC):
         Returns:
             Updated state with error recorded
         """
-        # Track error with unique ID for Sentry
+        # Track error with unique ID
         from .error_tracker import track_error, ErrorSeverity
 
         error_id = track_error(
@@ -308,7 +314,7 @@ class BaseAgent(ABC):
         return state
 
     # ========================================================================
-    # AUTONOMOUS AGENTIC PATTERN (CLAUDE.md CONSTRAINT #0)
+    # AUTONOMOUS AGENTIC PATTERN (CLAUDE.md Critical Constraint #2: Autonomous Agents)
     # ========================================================================
     # Methods for building truly autonomous agents where LLM decides tool calling
 
@@ -495,7 +501,7 @@ class BaseAgent(ABC):
         if not content or len(content) <= max_length:
             return content
 
-        # Calculate split points (60% beginning, 40% end)
+        # Calculate split points (60% beginning, 35% end, 5% for truncation marker)
         head_length = int(max_length * 0.6)
         tail_length = int(max_length * 0.35)
 
@@ -575,6 +581,11 @@ class BaseAgent(ABC):
         messages = [{"role": "user", "content": user_message}]
         tool_call_history = []
         total_tool_cost = 0.0  # Track cumulative API cost for all tool calls
+        seen_page_ids: set = set()  # Track seen page_ids to avoid duplicate base64 images
+
+        # Context budget monitor (uses response.usage.input_tokens for thresholds)
+        context_window = get_context_window(provider.get_model_name())
+        monitor = ContextBudgetMonitor(context_window)
 
         # Initialize trajectory capture for evaluation
         trajectory = AgentTrajectory(
@@ -631,6 +642,9 @@ class BaseAgent(ABC):
                 # Note: Cost tracking won't happen since we don't have a response object
                 # Re-raise to allow upstream error handling (agent execute wrapper)
                 raise
+
+            # Update context budget from actual token usage
+            monitor.update_from_response(response)
 
             # Track LLM usage with proper model-specific pricing
             if hasattr(response, 'usage') and response.usage:
@@ -766,7 +780,23 @@ class BaseAgent(ABC):
                     if page_images:
                         # VL mode: build structured multimodal content blocks
                         content_blocks = []
+                        dedup_skipped = 0
                         for page in page_images:
+                            pid = page.get("page_id", "unknown")
+                            if pid in seen_page_ids:
+                                # Already sent this page image — text reference only
+                                dedup_skipped += 1
+                                content_blocks.append({
+                                    "type": "text",
+                                    "text": (
+                                        f"[Already shown: {pid} | "
+                                        f"Page {page.get('page_number', '?')} from "
+                                        f"{page.get('document_id', 'unknown')} | "
+                                        f"score: {page.get('score', 0):.3f}]"
+                                    ),
+                                })
+                                continue
+                            seen_page_ids.add(pid)
                             content_blocks.append({
                                 "type": "image",
                                 "source": {
@@ -778,18 +808,25 @@ class BaseAgent(ABC):
                             content_blocks.append({
                                 "type": "text",
                                 "text": (
-                                    f"[Page {page.get('page_number', '?')} from "
-                                    f"{page.get('document_id', 'unknown')}, "
+                                    f"[{pid} | "
+                                    f"Page {page.get('page_number', '?')} from "
+                                    f"{page.get('document_id', 'unknown')} | "
                                     f"score: {page.get('score', 0):.3f}]"
                                 ),
                             })
+                        if dedup_skipped:
+                            self.logger.info(
+                                "Image dedup: skipped %d duplicate pages for tool %s",
+                                dedup_skipped,
+                                tool_name,
+                            )
                         tool_results.append({
                             "type": "tool_result",
                             "tool_use_id": tool_use.get('id'),
                             "content": content_blocks,
                         })
                     else:
-                        # OCR mode (or non-search tools): text-only result
+                        # Text-only result (non-VL tools or search without page images)
                         raw_content = str(result.get("data", "")) if result.get("success", False) else f"Error: {result.get('error', 'Unknown error')}"
                         summarized_content = self._summarize_tool_result_for_context(raw_content)
 
@@ -831,16 +868,21 @@ class BaseAgent(ABC):
                 messages.append({"role": "assistant", "content": response.content})
                 messages.append({"role": "user", "content": tool_results})
 
-                # Truncate message history to prevent context overflow
-                # Keep: original query (messages[0]) + last 6 messages (3 assistant/user pairs)
-                max_history_messages = 7  # 1 original + 6 recent
-                if len(messages) > max_history_messages:
-                    truncated_count = len(messages) - max_history_messages
-                    messages = [messages[0]] + messages[-6:]
-                    self.logger.debug(
-                        f"Truncated {truncated_count} messages from history "
-                        f"(keeping {len(messages)} messages)"
-                    )
+                # 3-layer progressive context compaction (mutually exclusive)
+                action = monitor.recommended_action()
+                if action == CompactionLayer.EMERGENCY:
+                    messages = emergency_truncate(messages)
+                elif action == CompactionLayer.COMPACT:
+                    pre_len = len(messages)
+                    messages = compact_with_summary(messages, provider)
+                    if len(messages) == pre_len:
+                        # Compaction failed — escalate to Layer 3 to prevent retry loop
+                        self.logger.warning("Layer 2 compaction unchanged, escalating to Layer 3")
+                        messages = emergency_truncate(messages)
+                elif action == CompactionLayer.PRUNE:
+                    messages = prune_tool_outputs(messages)
+                elif action != CompactionLayer.NONE:
+                    self.logger.debug("Unrecognized compaction action: %s", action)
 
                 # Check for early stopping conditions (prevent over-searching)
                 should_stop, stop_reason = self._should_stop_early(tool_call_history, iteration)
