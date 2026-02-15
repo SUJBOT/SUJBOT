@@ -1,45 +1,19 @@
 """
-Unified configuration system for RAG pipeline.
-
-## Configuration Philosophy (UPDATED 2025-11-10)
+Unified configuration system for SUJBOT.
 
 **Single Source of Truth: config.json file**
 - ALL configuration in one JSON file
-- Strict validation on startup - NO fallbacks, NO defaults
-- If any required parameter is missing, application exits with error
+- Strict validation on startup
 - Hierarchical structure for better organization
-
-## Migration from .env to config.json
-
-Previous system used .env with fallback values. New system:
-1. Copy config.json.example to config.json
-2. Fill in ALL required values
-3. Application validates config on startup
-4. Missing values = immediate error, application stops
-
-## Pipeline Phases
-
-- PHASE 1: Document Extraction (Docling)
-- PHASE 2: Summarization (Generic summaries, 150 chars) → Model from config.json
-- PHASE 3: Chunking (Hierarchical with SAC, 512 tokens)
-- PHASE 4: Embedding (Multi-layer embeddings) → Model from config.json
 
 ## Usage
 
-All configuration is loaded from config.json automatically:
-
 ```python
-from src.config import get_config, SummarizationConfig, EmbeddingConfig
+from src.config import get_config, ModelConfig
 
-# Load validated config (fails if config.json is invalid or missing)
 config = get_config()
-
-# Access specific sections
-summary_config = SummarizationConfig.from_config(config.summarization)
-embed_config = EmbeddingConfig.from_config(config.embedding)
+model_config = ModelConfig.from_config(config)
 ```
-
-All configuration classes can be imported by other modules.
 """
 
 import logging
@@ -236,69 +210,5 @@ def resolve_model_alias(model_name: str) -> str:
     else:
         return model_name
 
-
-
-@dataclass
-class EmbeddingConfig:
-    """
-    Unified configuration for embedding generation (PHASE 4).
-    """
-
-    # Model selection
-    provider: Optional[str] = None
-    model: Optional[str] = None
-
-    # Research-backed parameters
-    batch_size: int = 64
-    normalize: bool = True
-
-    # Multi-layer indexing
-    enable_multi_layer: bool = True
-
-    # Model metadata
-    dimensions: Optional[int] = None
-
-    # Performance optimization
-    cache_enabled: bool = True
-    cache_max_size: int = 1000
-
-    def __post_init__(self):
-        """Load model config from global config if not provided and validate."""
-        if self.provider is None or self.model is None:
-            config = get_config()
-            model_config = ModelConfig.from_config(config)
-            self.provider = model_config.embedding_provider
-            self.model = model_config.embedding_model
-
-        # Validate parameters
-        if self.batch_size <= 0:
-            raise ValueError(f"batch_size must be positive, got {self.batch_size}")
-        if self.dimensions is not None and self.dimensions <= 0:
-            raise ValueError(f"dimensions must be positive if specified, got {self.dimensions}")
-        if self.cache_max_size <= 0:
-            raise ValueError(f"cache_max_size must be positive, got {self.cache_max_size}")
-        if self.provider is not None and self.provider not in ["voyage", "openai", "huggingface", "deepinfra"]:
-            raise ValueError(
-                f"provider must be 'voyage', 'openai', 'huggingface', or 'deepinfra', got {self.provider}"
-            )
-
-    @classmethod
-    def from_config(cls, embedding_config) -> "EmbeddingConfig":
-        """
-        Load configuration from validated EmbeddingConfig schema.
-
-        Args:
-            embedding_config: Validated embedding config from RootConfig
-
-        Returns:
-            EmbeddingConfig instance
-        """
-        return cls(
-            batch_size=embedding_config.batch_size,
-            normalize=embedding_config.normalize,
-            enable_multi_layer=True,  # Always enabled
-            cache_enabled=embedding_config.cache_enabled,
-            cache_max_size=embedding_config.cache_size,
-        )
 
 

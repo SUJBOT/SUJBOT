@@ -48,9 +48,6 @@ class ToolRegistry:
     def initialize_tools(
         self,
         vector_store: VectorStoreAdapter,
-        embedder,
-        reranker=None,
-        context_assembler=None,
         llm_provider=None,
         config=None,
         vl_retriever=None,
@@ -62,28 +59,16 @@ class ToolRegistry:
         This creates tool instances by injecting pipeline components.
 
         Args:
-            vector_store: VectorStoreAdapter (FAISS or PostgreSQL backend)
-            embedder: Embedding model (optional, not used in VL mode)
-            reranker: CrossEncoderReranker (optional)
-            context_assembler: ContextAssembler (optional)
-            llm_provider: LLM Provider (optional)
+            vector_store: VectorStoreAdapter (PostgreSQL backend)
+            llm_provider: LLM Provider (optional, used by compliance_check)
             config: ToolConfig
-            vl_retriever: VLRetriever for vision-language mode (optional)
-            page_store: PageStore for VL mode (optional)
+            vl_retriever: VLRetriever for page image search (optional)
+            page_store: PageStore for page image loading (optional)
         """
         for tool_name, tool_class in self._tool_classes.items():
-            if tool_class.requires_reranker and not reranker:
-                logger.warning(
-                    f"Tool '{tool_name}' requires reranker but none provided. "
-                    f"Tool will use base retrieval."
-                )
-
             # Instantiate tool
             tool_instance = tool_class(
                 vector_store=vector_store,
-                embedder=embedder,
-                reranker=reranker,
-                context_assembler=context_assembler,
                 llm_provider=llm_provider,
                 config=config,
                 vl_retriever=vl_retriever,

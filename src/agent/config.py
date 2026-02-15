@@ -87,7 +87,7 @@ def _detect_optimal_embedding_model() -> str:
 
 @dataclass
 class ToolConfig:
-    """Configuration for RAG tools."""
+    """Configuration for RAG tools (VL-only)."""
 
     # Graph storage (optional — set when graph schema is available).
     # Typed as Any to avoid circular import; actual type is GraphStorageAdapter.
@@ -95,34 +95,15 @@ class ToolConfig:
 
     # Retrieval settings
     default_k: int = 6
-    # SSOT: Must match config.json:agent_tools.enable_reranking (default: false)
-    enable_reranking: bool = False
-    reranker_candidates: int = 50
-    reranker_model: str = "bge-reranker-large"  # SOTA accuracy (was: ms-marco-mini)
 
     # Analysis settings
     max_document_compare: int = 3
     compliance_threshold: float = 0.7
 
-    # Context expansion settings (for expand_context tool)
-    context_window: int = 2  # Number of chunks before/after for context expansion
-
-    # Query expansion settings (for unified search tool)
-    query_expansion_provider: str = "openai"  # "openai" or "anthropic"
-    query_expansion_model: str = "gpt-4o-mini"  # Stable, fast model for expansion
-
-    # Performance
-    lazy_load_reranker: bool = False  # Load reranker at startup for better tool availability
-    cache_embeddings: bool = True
-
     def __post_init__(self):
         """Validate configuration values."""
         if self.default_k <= 0:
             raise ValueError(f"default_k must be positive, got {self.default_k}")
-        if self.reranker_candidates < self.default_k:
-            raise ValueError(
-                f"reranker_candidates ({self.reranker_candidates}) must be >= default_k ({self.default_k})"
-            )
         if not 0.0 <= self.compliance_threshold <= 1.0:
             raise ValueError(
                 f"compliance_threshold must be in [0, 1], got {self.compliance_threshold}"
@@ -130,12 +111,6 @@ class ToolConfig:
         if self.max_document_compare <= 0:
             raise ValueError(
                 f"max_document_compare must be positive, got {self.max_document_compare}"
-            )
-        if self.context_window < 0:
-            raise ValueError(f"context_window must be non-negative, got {self.context_window}")
-        if self.query_expansion_provider.lower() not in ["openai", "anthropic"]:
-            raise ValueError(
-                f"query_expansion_provider must be 'openai' or 'anthropic', got '{self.query_expansion_provider}'"
             )
 
 
@@ -289,17 +264,7 @@ class AgentConfig:
                 f"Gemini (gemini-2.5-flash/gemini-2.5-pro)"
             )
 
-        # Path validation (skip for PostgreSQL backend)
-        # Storage backend is determined at runtime from config.json, not here
-        # The multi-agent runner will handle vector store initialization
-        # This validation only applies if explicitly using FAISS backend
-        import os
-        storage_backend = os.getenv("STORAGE_BACKEND", "faiss")
-        if storage_backend == "faiss" and not self.vector_store_path.exists():
-            raise FileNotFoundError(
-                f"Vector store not found: {self.vector_store_path}. "
-                f"Run indexing pipeline first."
-            )
+        # Path validation is skipped — PostgreSQL is always used at runtime
 
         # Sub-configs are automatically validated via their __post_init__ methods
 
@@ -311,9 +276,8 @@ class AgentConfig:
         Environment variables:
         - ANTHROPIC_API_KEY: Required
         - AGENT_MODEL: Model to use (default: claude-sonnet-4-5-20250929)
-        - AGENT_MAX_TOKENS: Max output tokens (default: 4096, Gemini max: 8192)
-        - VECTOR_STORE_PATH: Path to hybrid store
-        - QUERY_EXPANSION_MODEL: LLM model for query expansion (default: gpt-4o-mini)
+        - AGENT_MAX_TOKENS: Max output tokens (default: 4096)
+        - VECTOR_STORE_PATH: Path to vector store
 
         Args:
             **overrides: Override specific config values
@@ -321,20 +285,6 @@ class AgentConfig:
         Returns:
             AgentConfig instance
         """
-        # Create ToolConfig with environment variable support
-        query_expansion_model_env = os.getenv("QUERY_EXPANSION_MODEL", "gpt-4o-mini")
-
-        # Detect provider from model name
-        query_expansion_provider = "openai"
-        if "claude" in query_expansion_model_env.lower() or "haiku" in query_expansion_model_env.lower() or "sonnet" in query_expansion_model_env.lower():
-            query_expansion_provider = "anthropic"
-
-        tool_config = ToolConfig(
-            query_expansion_provider=query_expansion_provider,
-            query_expansion_model=query_expansion_model_env,
-        )
-
-        # Load max_tokens from environment (for Gemini compatibility)
         max_tokens = int(os.getenv("AGENT_MAX_TOKENS", "4096"))
 
         config = cls(
@@ -342,7 +292,7 @@ class AgentConfig:
             model=os.getenv("AGENT_MODEL", "claude-sonnet-4-5-20250929"),
             max_tokens=max_tokens,
             vector_store_path=Path(os.getenv("VECTOR_STORE_PATH", "vector_db")),
-            tool_config=tool_config,
+            tool_config=ToolConfig(),
         )
 
         # Apply overrides
@@ -369,19 +319,6 @@ class AgentConfig:
         # Get model config for API keys
         model_config = ModelConfig.from_config(root_config)
 
-        # Detect provider for query expansion model
-        query_expansion_model = root_config.agent.query_expansion_model
-        query_expansion_provider = "openai"
-        if "claude" in query_expansion_model.lower() or "haiku" in query_expansion_model.lower() or "sonnet" in query_expansion_model.lower():
-            query_expansion_provider = "anthropic"
-        elif "gemini" in query_expansion_model.lower():
-            query_expansion_provider = "google"
-
-        tool_config = ToolConfig(
-            query_expansion_provider=query_expansion_provider,
-            query_expansion_model=query_expansion_model,
-        )
-
         # Create config from JSON
         config = cls(
             anthropic_api_key=model_config.anthropic_api_key or "",
@@ -397,7 +334,7 @@ class AgentConfig:
             context_management_trigger=root_config.agent.context_management_trigger,
             context_management_keep=root_config.agent.context_management_keep,
             debug_mode=root_config.agent.debug_mode,
-            tool_config=tool_config,
+            tool_config=ToolConfig(),
         )
 
         # Apply overrides (e.g., from CLI args)

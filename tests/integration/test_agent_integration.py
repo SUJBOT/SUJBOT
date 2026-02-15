@@ -125,7 +125,7 @@ def test_agent_imports():
         ("src.agent.cli", "CLI module"),
         ("src.agent.tools._base", "Tool base classes"),
         ("src.agent.tools._registry", "Tool registry"),
-        ("src.agent.tools._token_manager", "Token manager module"),
+        ("src.agent.tools._utils", "Tool utilities"),
         ("src.agent.tools.search", "Search tool"),
         ("src.agent.tools.expand_context", "Expand context tool"),
         ("src.agent.tools.get_document_info", "Document info tool"),

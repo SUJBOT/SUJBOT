@@ -60,7 +60,6 @@ class SearchTool(BaseTool):
     """
 
     input_schema = SearchInput
-    requires_reranker = False
 
     def execute_impl(
         self,

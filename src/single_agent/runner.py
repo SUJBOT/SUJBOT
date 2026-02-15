@@ -107,27 +107,25 @@ class SingleAgentRunner:
             )
             self.llm_provider = None
 
-        # Vector store
-        if backend == "postgresql":
-            connection_string = os.getenv(
-                storage_config.get("postgresql", {}).get("connection_string_env", "DATABASE_URL")
+        # Vector store (PostgreSQL only)
+        if backend != "postgresql":
+            raise ValueError(
+                f"Storage backend '{backend}' is no longer supported. "
+                f"Only 'postgresql' is available."
             )
-            if not connection_string:
-                raise ValueError("DATABASE_URL not set. Cannot initialize vector store.")
 
-            vector_store = await load_vector_store_adapter(
-                backend="postgresql",
-                connection_string=connection_string,
-                pool_size=storage_config.get("postgresql", {}).get("pool_size", 20),
-                dimensions=storage_config.get("postgresql", {}).get("dimensions", 2048),
-            )
-        else:
-            vector_store_path = Path(self.config.get("vector_store_path", "vector_db"))
-            if not vector_store_path.exists():
-                raise ValueError(f"Vector store not found at {vector_store_path}")
-            vector_store = await load_vector_store_adapter(
-                backend="faiss", path=str(vector_store_path)
-            )
+        connection_string = os.getenv(
+            storage_config.get("postgresql", {}).get("connection_string_env", "DATABASE_URL")
+        )
+        if not connection_string:
+            raise ValueError("DATABASE_URL not set. Cannot initialize vector store.")
+
+        vector_store = await load_vector_store_adapter(
+            backend="postgresql",
+            connection_string=connection_string,
+            pool_size=storage_config.get("postgresql", {}).get("pool_size", 20),
+            dimensions=storage_config.get("postgresql", {}).get("dimensions", 2048),
+        )
 
         self.vector_store = vector_store
 
@@ -156,17 +154,8 @@ class SingleAgentRunner:
         tool_config = ToolConfig(
             graph_storage=graph_storage,
             default_k=agent_tools_config.get("default_k", 6),
-            enable_reranking=agent_tools_config.get("enable_reranking", False),
-            reranker_candidates=agent_tools_config.get("reranker_candidates", 50),
-            reranker_model=agent_tools_config.get("reranker_model", "bge-reranker-large"),
             max_document_compare=agent_tools_config.get("max_document_compare", 3),
             compliance_threshold=agent_tools_config.get("compliance_threshold", 0.7),
-            context_window=agent_tools_config.get("context_window", 2),
-            lazy_load_reranker=agent_tools_config.get("lazy_load_reranker", False),
-            cache_embeddings=agent_tools_config.get("cache_embeddings", True),
-            hyde_num_hypotheses=agent_tools_config.get("hyde_num_hypotheses", 3),
-            query_expansion_provider=agent_tools_config.get("query_expansion_provider", "openai"),
-            query_expansion_model=agent_tools_config.get("query_expansion_model", "gpt-4o-mini"),
         )
 
         # VL components
@@ -190,9 +179,6 @@ class SingleAgentRunner:
         registry = get_registry()
         registry.initialize_tools(
             vector_store=vector_store,
-            embedder=None,
-            reranker=None,
-            context_assembler=None,
             llm_provider=self.llm_provider,
             config=tool_config,
             vl_retriever=vl_retriever,

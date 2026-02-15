@@ -1,29 +1,26 @@
 """
-Document duplicate detection using semantic similarity.
+Document duplicate detection using file hash comparison.
 
-Detects semantically similar documents before indexing to prevent duplicates
-in PostgreSQL vector store.
+Detects duplicate documents before indexing using SHA256 hash matching.
 
 Features:
-- Fast first-page text extraction (PyMuPDF, 50-200ms)
-- Embedding-based similarity (cosine distance)
-- Lazy loading (embedder, vector store)
-- 98% similarity threshold (configurable)
-- Embedding cache (in-memory)
+- Fast first-page text extraction (PyMuPDF, 50-200ms) for minimum-length check
+- SHA256 hash-based exact duplicate detection
+- In-memory hash cache
+- Configurable similarity threshold (for future use)
 
 Usage:
     from src.duplicate_detector import DuplicateDetector, DuplicateDetectionConfig
 
-    config = DuplicateDetectionConfig(threshold=0.98)
+    config = DuplicateDetectionConfig()
     detector = DuplicateDetector(config, connection_string="postgresql://...")
 
-    # Check if document is duplicate
     is_duplicate, similarity, match_doc_id = detector.check_duplicate(
         file_path="data/new_doc.pdf"
     )
 
     if is_duplicate:
-        print(f"Duplicate of {match_doc_id} (similarity: {similarity:.1%})")
+        print(f"Duplicate of {match_doc_id} (exact hash match)")
 """
 
 import logging
@@ -61,25 +58,19 @@ class DuplicateDetectionConfig:
 
 class DuplicateDetector:
     """
-    Document duplicate detector using semantic similarity.
+    Document duplicate detector using SHA256 hash comparison.
 
     Compares new documents against existing documents using:
-    1. Fast text extraction (first page via PyMuPDF)
-    2. Embedding generation (same model as indexing)
-    3. Cosine similarity against existing document embeddings
-    4. Configurable threshold (default 98%)
-
-    Performance:
-    - Text extraction: 50-200ms per document
-    - Embedding generation: ~100ms per document
-    - Similarity search: O(n) over existing documents (typically <10ms)
+    1. Fast text extraction (first page via PyMuPDF) for minimum-length validation
+    2. SHA256 file hash for exact duplicate detection
+    3. In-memory hash cache for O(1) lookups
 
     Example:
-        >>> config = DuplicateDetectionConfig(threshold=0.98)
-        >>> detector = DuplicateDetector(config, "output/vector_store")
+        >>> config = DuplicateDetectionConfig()
+        >>> detector = DuplicateDetector(config, connection_string="postgresql://...")
         >>> is_dup, sim, doc_id = detector.check_duplicate("data/new.pdf")
         >>> if is_dup:
-        ...     print(f"Duplicate of {doc_id} ({sim:.1%})")
+        ...     print(f"Duplicate of {doc_id} (exact hash match)")
     """
 
     def __init__(
@@ -104,7 +95,6 @@ class DuplicateDetector:
 
         logger.info(
             f"DuplicateDetector initialized: "
-            f"threshold={config.similarity_threshold:.1%}, "
             f"sample_pages={config.sample_pages}"
         )
 
@@ -197,26 +187,6 @@ class DuplicateDetector:
                 hash_obj.update(chunk)
 
         return hash_obj.hexdigest()
-
-    def _get_vector_store(self):
-        """Lazy load PostgreSQL vector store."""
-        if self._vector_store is None and self.connection_string:
-            import asyncio
-            from .storage import PostgresVectorStoreAdapter
-
-            try:
-                self._vector_store = PostgresVectorStoreAdapter(
-                    connection_string=self.connection_string,
-                    pool_size=5,  # Small pool for duplicate detection
-                )
-                # Initialize the connection pool
-                asyncio.run(self._vector_store.initialize())
-                logger.info("Loaded PostgreSQL vector store for duplicate detection")
-            except Exception as e:
-                logger.debug(f"Vector store not available: {e}")
-                return None
-
-        return self._vector_store
 
     def get_stats(self) -> Dict[str, Any]:
         """Get detector statistics."""

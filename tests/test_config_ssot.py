@@ -153,14 +153,15 @@ class TestBackendConstantsSSoT:
 class TestDimensionsConsistency:
     """Verify embedding dimensions are consistently 2048 (Jina v4)."""
 
-    def test_enable_reranking_default_false(self):
-        """Verify enable_reranking default is False (matches config.json)."""
+    def test_tool_config_defaults(self):
+        """Verify ToolConfig defaults (VL-only)."""
         from src.agent.config import ToolConfig
 
-        # Default should be False (matches config.json)
-        # enable_reranking is in ToolConfig, not AgentConfig
         config = ToolConfig()
-        assert config.enable_reranking is False
+        assert config.default_k == 6
+        assert config.compliance_threshold == 0.7
+        assert config.max_document_compare == 3
+        assert config.graph_storage is None
 
 
 class TestArchitectureConfig:

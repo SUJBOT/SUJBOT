@@ -206,55 +206,42 @@ class MultiAgentRunner:
             self.llm_provider = create_provider(model=tool_model, api_key=api_key)
             logger.info(f"Initialized LLM provider for tools: {tool_model}")
         except Exception as e:
-            logger.warning(
-                f"Failed to initialize LLM provider for tools: {e}."
+            logger.error(
+                f"Failed to initialize LLM provider for tools: {e}.",
+                exc_info=True,
             )
             self.llm_provider = None
 
         try:
-            # Load vector store adapter (PostgreSQL or FAISS)
-            if backend == "postgresql":
-                connection_string = os.getenv(
-                    storage_config.get("postgresql", {}).get(
-                        "connection_string_env", "DATABASE_URL"
-                    )
+            # Load vector store adapter (PostgreSQL only)
+            if backend != "postgresql":
+                raise ValueError(
+                    f"Storage backend '{backend}' is no longer supported. "
+                    f"Only 'postgresql' is available."
                 )
-                if not connection_string:
-                    logger.error(
-                        "PostgreSQL connection string not found in environment. "
-                        "Set DATABASE_URL in .env file."
-                    )
-                    registry = get_registry()
-                    logger.info("Tool registry initialized with 0 tools (no database connection)")
-                    return
 
-                logger.info("Loading PostgreSQL vector store adapter...")
-                vector_store = await load_vector_store_adapter(
-                    backend="postgresql",
-                    connection_string=connection_string,
-                    pool_size=storage_config.get("postgresql", {}).get("pool_size", 20),
-                    dimensions=storage_config.get("postgresql", {}).get("dimensions", 2048),
+            connection_string = os.getenv(
+                storage_config.get("postgresql", {}).get(
+                    "connection_string_env", "DATABASE_URL"
                 )
-                logger.info("PostgreSQL adapter loaded successfully")
-
-            else:  # FAISS backend
-                vector_store_path = Path(self.config.get("vector_store_path", "vector_db"))
-
-                if not vector_store_path.exists():
-                    logger.warning(
-                        f"Vector store not found at {vector_store_path}. "
-                        f"Tools requiring vector search will be unavailable. "
-                        f"Run indexing pipeline first: uv run python run_pipeline.py data/"
-                    )
-                    registry = get_registry()
-                    logger.info("Tool registry initialized with 0 tools (no vector store)")
-                    return
-
-                logger.info(f"Loading FAISS vector store adapter from {vector_store_path}")
-                vector_store = await load_vector_store_adapter(
-                    backend="faiss", path=str(vector_store_path)
+            )
+            if not connection_string:
+                logger.error(
+                    "PostgreSQL connection string not found in environment. "
+                    "Set DATABASE_URL in .env file."
                 )
-                logger.info("FAISS adapter loaded successfully")
+                registry = get_registry()
+                logger.info("Tool registry initialized with 0 tools (no database connection)")
+                return
+
+            logger.info("Loading PostgreSQL vector store adapter...")
+            vector_store = await load_vector_store_adapter(
+                backend="postgresql",
+                connection_string=connection_string,
+                pool_size=storage_config.get("postgresql", {}).get("pool_size", 20),
+                dimensions=storage_config.get("postgresql", {}).get("dimensions", 2048),
+            )
+            logger.info("PostgreSQL adapter loaded successfully")
 
             self.vector_store = vector_store  # Store for orchestrator
 
@@ -283,23 +270,8 @@ class MultiAgentRunner:
             tool_config = ToolConfig(
                 graph_storage=graph_storage,
                 default_k=agent_tools_config.get("default_k", 6),
-                enable_reranking=agent_tools_config.get(
-                    "enable_reranking", False
-                ),
-                reranker_candidates=agent_tools_config.get("reranker_candidates", 50),
-                reranker_model=agent_tools_config.get("reranker_model", "bge-reranker-large"),
                 max_document_compare=agent_tools_config.get("max_document_compare", 3),
                 compliance_threshold=agent_tools_config.get("compliance_threshold", 0.7),
-                context_window=agent_tools_config.get("context_window", 2),
-                lazy_load_reranker=agent_tools_config.get("lazy_load_reranker", False),
-                cache_embeddings=agent_tools_config.get("cache_embeddings", True),
-                hyde_num_hypotheses=agent_tools_config.get("hyde_num_hypotheses", 3),
-                query_expansion_provider=agent_tools_config.get(
-                    "query_expansion_provider", "openai"
-                ),
-                query_expansion_model=agent_tools_config.get(
-                    "query_expansion_model", "gpt-4o-mini"
-                ),
             )
 
             # VL components
@@ -323,9 +295,6 @@ class MultiAgentRunner:
 
             registry.initialize_tools(
                 vector_store=vector_store,
-                embedder=None,
-                reranker=None,
-                context_assembler=None,
                 llm_provider=self.llm_provider,
                 config=tool_config,
                 vl_retriever=vl_retriever,

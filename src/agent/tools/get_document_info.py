@@ -157,7 +157,6 @@ class GetDocumentInfoTool(BaseTool):
     def _get_document_pages(self, document_id: str):
         """Get all VL pages for a document, ordered by page_number."""
         from ...storage.postgres_adapter import _run_async_safe
-        import asyncio
 
         async def _fetch():
             await self.vector_store._ensure_pool()

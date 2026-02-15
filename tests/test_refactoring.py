@@ -60,7 +60,7 @@ def test_imports():
         from agent.tools._registry import ToolRegistry, get_registry
         print("  ✓ _registry imports successful")
 
-        from agent.tools._utils import format_chunk_result, generate_citation
+        from agent.tools._utils import create_error_result, estimate_tokens_from_vl_result
         print("  ✓ _utils imports successful")
 
         # Test main package import
@@ -151,7 +151,7 @@ def test_import_consistency():
             for line_num, line in enumerate(f, 1):
                 # Check for old-style imports (without underscore)
                 if "from .base import" in line or "from .registry import" in line or \
-                   "from .utils import" in line or "from .token_manager import" in line:
+                   "from .utils import" in line:
                     bad_imports.append(f"{file_path.name}:{line_num}: {line.strip()}")
 
     if bad_imports:
@@ -173,7 +173,7 @@ def test_file_structure():
     tools_dir = Path(__file__).parent / "src" / "agent" / "tools"
 
     # Expected infrastructure files
-    expected_infra = ["_base.py", "_registry.py", "_utils.py", "_token_manager.py", "__init__.py"]
+    expected_infra = ["_base.py", "_registry.py", "_utils.py", "__init__.py"]
 
     # Expected tool files
     expected_tools = [

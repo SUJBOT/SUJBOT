@@ -43,7 +43,6 @@ class GetDocumentListTool(BaseTool):
     """
 
     input_schema = GetDocumentListInput
-    requires_reranker = False
 
     def execute_impl(self) -> ToolResult:
         """
