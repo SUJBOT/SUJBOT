@@ -10,8 +10,9 @@
     "noDocuments": "No documents available",
     "legislation": "Legislation",
     "documentation": "Documentation",
-    "upload": "Upload PDF",
+    "upload": "Upload document",
     "uploading": "Uploading...",
+    "converting": "Converting to PDF...",
     "rendering": "Rendering pages...",
     "embedding": "Creating embeddings...",
     "storing": "Storing in database...",
@@ -21,7 +22,8 @@
     "startUpload": "Upload",
     "summarizing": "Generating page summaries...",
     "graph_extraction": "Extracting entities...",
-    "pdfOnly": "Only PDF files are supported",
+    "reconnecting": "Reconnecting to upload...",
+    "unsupportedFormat": "Unsupported format. Supported: PDF, DOCX, TXT, Markdown, HTML, LaTeX",
     "fileTooLarge": "File too large (max 100 MB)",
     "alreadyExists": "Document already exists"
   },
@@ -253,7 +255,7 @@
       "pages": "Pages",
       "created": "Indexed",
       "actions": "Actions",
-      "upload": "Upload PDF",
+      "upload": "Upload document",
       "reindex": "Reindex",
       "delete": "Delete",
       "deleteConfirm": "Are you sure you want to delete \"{{name}}\"? This will remove the PDF, page images, and all vectors.",
@@ -290,6 +292,26 @@
       "loadMessagesError": "Failed to load messages",
       "readOnly": "Read-only",
       "selectConversation": "Select a conversation to view"
+    },
+    "graph": {
+      "title": "Knowledge Graph",
+      "subtitle": "Interactive visualization of entities and relationships",
+      "entities": "entities",
+      "relationships": "relationships",
+      "communitiesLabel": "communities",
+      "filters": "Filters",
+      "filterByDocument": "Filter by document",
+      "filterByCommunity": "Filter by community",
+      "filterByType": "Filter by entity type",
+      "loadGraph": "Load Graph",
+      "loading": "Loading graph...",
+      "noData": "Select filters and click Load Graph to visualize",
+      "noResults": "No entities match the selected filters",
+      "limitWarning": "Showing {{shown}} of {{total}} matching entities. Narrow your filters for a complete view.",
+      "searchPlaceholder": "Search nodes...",
+      "tabNodes": "Nodes",
+      "tabCommunities": "Communities",
+      "noCommunities": "No communities in current view"
     }
   },
   "feedback": {
@@ -303,6 +325,15 @@
     "submitted": "Feedback submitted",
     "thankYou": "Thank you for your feedback!",
     "error": "Failed to submit feedback"
+  },
+  "attachments": {
+    "attach": "Attach file",
+    "fileTooLarge": "File too large (max 10 MB)",
+    "unsupportedType": "Unsupported file type. Supported: images, PDF, DOCX, TXT, Markdown, HTML, LaTeX",
+    "tooManyFiles": "Maximum 5 files",
+    "pdfTruncated": "PDF truncated to first {{max}} pages",
+    "filesAttached_one": "{{count}} file attached",
+    "filesAttached_other": "{{count}} files attached"
   },
   "citation": {
     "preview": "Preview",

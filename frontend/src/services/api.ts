@@ -190,7 +190,12 @@ export class ApiService {
       document_name: string;
       page_start: number;
       page_end: number;
-    } | null
+    } | null,
+    attachments?: Array<{
+      filename: string;
+      mime_type: string;
+      base64_data: string;
+    }> | null
   ): AsyncGenerator<SSEEvent, void, unknown> {
     let response;
     try {
@@ -204,6 +209,7 @@ export class ApiService {
           skip_save_user_message: skipSaveUserMessage || false,
           messages: messageHistory,  // Conversation history for context
           selected_context: selectedContext || null,  // Selected text from PDF
+          attachments: attachments || null,  // File attachments for multimodal context
         }),
         signal: abortSignal,  // Allow cancellation on page refresh/unmount
       });
@@ -368,6 +374,42 @@ export class ApiService {
     }
 
     yield* parseSSEStream(reader, { timeoutMs: 10 * 60 * 1000, abortSignal: signal });
+  }
+
+  /**
+   * Check for an active upload and stream its status via SSE.
+   * Yields nothing if no active upload (204 response).
+   */
+  async *getUploadStatus(): AsyncGenerator<SSEEvent, void, unknown> {
+    let response;
+    try {
+      response = await fetch(`${API_BASE_URL}/documents/upload-status`, {
+        method: 'GET',
+        credentials: 'include',
+      });
+    } catch {
+      return; // Network error — no active upload
+    }
+
+    if (response.status === 204 || !response.ok) {
+      return;
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) return;
+
+    yield* parseSSEStream(reader, { timeoutMs: 10 * 60 * 1000 });
+  }
+
+  /**
+   * Cancel an active upload on the backend
+   */
+  async cancelUpload(): Promise<void> {
+    await fetch(`${API_BASE_URL}/documents/upload-cancel`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      credentials: 'include',
+    });
   }
 
   /**
@@ -605,6 +647,16 @@ export class ApiService {
         }
       }
 
+      // Extract attachment metadata from persisted user messages
+      let attachments = undefined;
+      if (msg.role === 'user' && msg.metadata?.attachments && Array.isArray(msg.metadata.attachments)) {
+        attachments = msg.metadata.attachments.map((att: any) => ({
+          filename: att.filename,
+          mimeType: att.mime_type,
+          sizeBytes: att.size_bytes,
+        }));
+      }
+
       return {
         id: msg.id,
         role: msg.role,
@@ -614,6 +666,7 @@ export class ApiService {
         cost, // Transformed cost data
         toolCalls: msg.metadata?.tool_calls, // Map toolCalls from metadata if present
         selectedContext, // Persisted PDF selection indicator
+        attachments, // Persisted attachment metadata
       };
     });
   }

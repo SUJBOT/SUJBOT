@@ -5,7 +5,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { apiService } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
-import type { Message, Conversation, ToolCall, ClarificationData } from '../types';
+import type { Message, Conversation, ToolCall, ClarificationData, Attachment } from '../types';
 
 // UUID validation regex for conversation IDs
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -288,6 +288,7 @@ export function useChat() {
    * @param content - The message content to send
    * @param addUserMessage - Whether to add a new user message (false for regenerate/edit)
    * @param selectedContext - Optional selected text from PDF for additional context
+   * @param attachments - Optional file attachments for multimodal context
    */
   const sendMessage = useCallback(
     async (content: string, addUserMessage: boolean = true, selectedContext?: {
@@ -296,8 +297,8 @@ export function useChat() {
       documentName: string;
       pageStart: number;
       pageEnd: number;
-    } | null) => {
-      if (isStreaming || !content.trim()) {
+    } | null, attachments?: Attachment[] | null) => {
+      if (isStreaming || (!content.trim() && (!attachments || attachments.length === 0))) {
         return;
       }
 
@@ -325,7 +326,7 @@ export function useChat() {
         const userMessage: Message = {
           id: `msg_${Date.now()}_user`,
           role: 'user',
-          content: content.trim(),
+          content: content.trim() || (attachments?.length ? `[${attachments.length} file(s) attached]` : ''),
           timestamp: new Date().toISOString(),
           // Store selected context metadata for display below message
           selectedContext: selectedContext ? {
@@ -335,6 +336,12 @@ export function useChat() {
             pageStart: selectedContext.pageStart,
             pageEnd: selectedContext.pageEnd,
           } : undefined,
+          // Store attachment metadata (without base64) for display
+          attachments: attachments?.map(att => ({
+            filename: att.filename,
+            mimeType: att.mimeType,
+            sizeBytes: att.sizeBytes,
+          })),
         };
 
         // Add user message to conversation
@@ -418,6 +425,15 @@ export function useChat() {
           page_end: selectedContext.pageEnd,
         } : null;
 
+        // Convert attachments to API format (camelCase → snake_case)
+        const apiAttachments = attachments?.length
+          ? attachments.map(att => ({
+              filename: att.filename,
+              mime_type: att.mimeType,
+              base64_data: att.base64Data,
+            }))
+          : null;
+
         // Stream response from backend with abort signal for page refresh handling
         for await (const event of apiService.streamChat(
           content,
@@ -425,7 +441,8 @@ export function useChat() {
           !addUserMessage,  // Skip saving user message when regenerating/editing (already exists)
           messageHistory,   // Pass conversation history for context
           abortControllerRef.current.signal,  // Allow cancellation on page refresh
-          apiSelectedContext  // Pass selected text from PDF for additional context
+          apiSelectedContext,  // Pass selected text from PDF for additional context
+          apiAttachments,  // Pass file attachments for multimodal context
         )) {
           // Handle tool health check (first event)
           if (event.event === 'tool_health') {

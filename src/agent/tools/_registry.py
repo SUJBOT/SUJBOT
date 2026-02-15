@@ -90,6 +90,23 @@ class ToolRegistry:
                 f"{unavailable_count} tools unavailable: {list(self._unavailable_tools.keys())}"
             )
 
+    def set_request_context(self, **context: Any) -> None:
+        """
+        Set per-request context on all tools (e.g. attachment images).
+
+        Called by the runner before the tool loop. Cleared after query completes.
+
+        Args:
+            **context: Key-value pairs accessible via tool._request_context
+        """
+        for tool in self._tools.values():
+            tool._request_context = context
+
+    def clear_request_context(self) -> None:
+        """Clear per-request context from all tools."""
+        for tool in self._tools.values():
+            tool._request_context = {}
+
     def get_tool(self, name: str) -> Optional[BaseTool]:
         """
         Get initialized tool instance by name.

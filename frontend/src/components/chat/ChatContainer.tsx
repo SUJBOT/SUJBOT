@@ -16,7 +16,7 @@ import { ClarificationModal } from './ClarificationModal';
 import { useCitationContext } from '../../contexts/CitationContext';
 import { cn } from '../../design-system/utils/cn';
 import { GradientBackground } from '../common/GradientBackground';
-import type { Conversation, ClarificationData } from '../../types';
+import type { Conversation, ClarificationData, Attachment } from '../../types';
 import type { SpendingLimitError } from '../../hooks/useChat';
 
 interface ChatContainerProps {
@@ -28,7 +28,7 @@ interface ChatContainerProps {
     documentName: string;
     pageStart: number;
     pageEnd: number;
-  } | null) => void;
+  } | null, attachments?: Attachment[] | null) => void;
   onEditMessage: (messageId: string, newContent: string) => void;
   onRegenerateMessage: (messageId: string) => void;
   onCancelStreaming: () => void;
@@ -65,7 +65,7 @@ export function ChatContainer({
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Wrapper that includes selected context and clears selection after send
-  const handleSendMessage = (message: string) => {
+  const handleSendMessage = (message: string, attachments?: Attachment[]) => {
     const context = selectedText ? {
       text: selectedText.text,
       documentId: selectedText.documentId,
@@ -74,7 +74,7 @@ export function ChatContainer({
       pageEnd: selectedText.pageEnd,
     } : null;
 
-    onSendMessage(message, true, context);
+    onSendMessage(message, true, context, attachments?.length ? attachments : null);
 
     // Auto-clear selection after sending (per user requirement)
     if (selectedText) {

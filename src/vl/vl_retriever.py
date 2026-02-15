@@ -155,3 +155,97 @@ class VLRetriever:
             logger.info("VL search: '%s...' -> 0 pages", query[:50])
 
         return results
+
+    def search_by_image(
+        self,
+        image_base64: str,
+        k: Optional[int] = None,
+        document_filter: Optional[str] = None,
+        category_filter: Optional[str] = None,
+    ) -> List[VLPageResult]:
+        """
+        Search for relevant pages using an image as query.
+
+        Same pipeline as search() but embeds an image instead of text.
+
+        Args:
+            image_base64: Base64-encoded image data
+            k: Number of results (default: self.default_k)
+            document_filter: Optional document_id filter
+            category_filter: Optional category filter
+
+        Returns:
+            List of VLPageResult sorted by relevance
+        """
+        k = k or self.default_k
+
+        if self.adaptive_config.enabled:
+            fetch_k = max(self.adaptive_config.fetch_k, k)
+        else:
+            fetch_k = k
+
+        # Embed image using Jina v4 (retrieval.query task with image input)
+        query_embedding = self.jina_client.embed_image(image_base64)
+
+        # Search PostgreSQL vl_pages table
+        raw_results = self.vector_store.search_vl_pages(
+            query_embedding=query_embedding,
+            k=fetch_k,
+            document_filter=document_filter,
+            category_filter=category_filter,
+        )
+
+        # Convert to VLPageResult objects
+        results = []
+        for row in raw_results:
+            page_id = row["page_id"]
+            try:
+                image_path = self.page_store.get_image_path(page_id)
+            except Exception as e:
+                logger.warning(f"Could not resolve image path for page {page_id}: {e}", exc_info=True)
+                image_path = row.get("image_path")
+
+            results.append(
+                VLPageResult(
+                    page_id=page_id,
+                    document_id=row["document_id"],
+                    page_number=row["page_number"],
+                    score=row["score"],
+                    image_path=image_path,
+                )
+            )
+
+        # Apply adaptive-k filtering
+        if self.adaptive_config.enabled and results:
+            from src.retrieval.adaptive_k import adaptive_k_filter, AdaptiveKConfig
+
+            effective_config = AdaptiveKConfig(
+                enabled=True,
+                method=self.adaptive_config.method,
+                fetch_k=self.adaptive_config.fetch_k,
+                min_k=self.adaptive_config.min_k,
+                max_k=min(self.adaptive_config.max_k, k),
+                score_gap_threshold=self.adaptive_config.score_gap_threshold,
+                min_samples_for_adaptive=self.adaptive_config.min_samples_for_adaptive,
+            )
+            scores = [r.score for r in results]
+            adaptive_result = adaptive_k_filter(results, scores, effective_config)
+            results = adaptive_result.items
+
+            logger.info(
+                "Adaptive-k (image): %d -> %d results (threshold=%.3f, method=%s)",
+                adaptive_result.original_count,
+                adaptive_result.filtered_count,
+                adaptive_result.threshold,
+                adaptive_result.method_used,
+            )
+        elif results:
+            logger.info(
+                "VL image search: -> %d pages (top score: %.3f)",
+                len(results),
+                results[0].score,
+            )
+        else:
+            logger.info("VL image search: -> 0 pages")
+
+        return results

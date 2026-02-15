@@ -179,6 +179,9 @@ class BaseTool(ABC):
         self.vl_retriever = vl_retriever
         self.page_store = page_store
 
+        # Per-request context (set by runner before tool loop, e.g. attachment images)
+        self._request_context: Dict[str, Any] = {}
+
         # Statistics
         self.execution_count = 0
         self.total_time_ms = 0.0

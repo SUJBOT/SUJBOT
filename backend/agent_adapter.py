@@ -171,6 +171,7 @@ class AgentAdapter:
         conversation_id: Optional[str] = None,
         user_id: Optional[int] = None,
         messages: Optional[List[Dict[str, str]]] = None,
+        attachment_blocks: Optional[List[Dict]] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Stream agent response as SSE-compatible events.
@@ -253,7 +254,11 @@ class AgentAdapter:
 
             result = None
             async for event in self.runner.run_query(
-                query, model=model, stream_progress=True, conversation_history=messages or []
+                query,
+                model=model,
+                stream_progress=True,
+                conversation_history=messages or [],
+                attachment_blocks=attachment_blocks,
             ):
                 if event.get("type") == "tool_call":
                     yield {

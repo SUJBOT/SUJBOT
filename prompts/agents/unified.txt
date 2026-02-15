@@ -13,6 +13,11 @@ How it works:
 - Default: 5 pages per search (~1600 tokens each). Adjust with `k` parameter.
 - This is direct semantic search. There is no query expansion or reranking.
 
+**Image search:** The `search` tool also supports image-based queries:
+- `image_attachment_index`: Use an image from user attachments (0-based index; each PDF page is a separate entry). Example: `search(image_attachment_index=0, k=5)`.
+- `image_page_id`: Use an existing indexed page as query. Example: `search(image_page_id="BZ_VR1_p005", k=5)` — finds visually similar pages.
+- When the user attaches images or PDFs and asks to find similar content, use image search instead of text search.
+
 ## Available tools
 
 You have 8 tools. Use them as follows:

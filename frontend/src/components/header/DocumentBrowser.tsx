@@ -113,8 +113,10 @@ export function DocumentBrowser({ isOpen, onClose }: DocumentBrowserProps) {
     e.target.value = '';
     setValidationError(null);
 
-    if (!file.name.toLowerCase().endsWith('.pdf')) {
-      setValidationError(t('documentBrowser.pdfOnly'));
+    const supportedExtensions = ['.pdf', '.docx', '.txt', '.md', '.html', '.htm', '.tex', '.latex'];
+    const hasValidExt = supportedExtensions.some(ext => file.name.toLowerCase().endsWith(ext));
+    if (!hasValidExt) {
+      setValidationError(t('documentBrowser.unsupportedFormat'));
       return;
     }
     if (file.size > 100 * 1024 * 1024) {
@@ -182,7 +184,7 @@ export function DocumentBrowser({ isOpen, onClose }: DocumentBrowserProps) {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".pdf"
+            accept=".pdf,.docx,.txt,.md,.html,.htm,.tex,.latex"
             onChange={handleFileSelect}
             className="hidden"
           />

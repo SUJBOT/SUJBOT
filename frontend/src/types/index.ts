@@ -50,6 +50,30 @@ export interface MessageSelectedContext {
   pageEnd: number;
 }
 
+/**
+ * File attachment for a chat message.
+ * Sent as base64 in the request, cleared from memory after send.
+ */
+export interface Attachment {
+  id: string;
+  filename: string;
+  mimeType: string;
+  base64Data: string;  // cleared after send
+  sizeBytes: number;
+  pageCount?: number;   // PDF only
+  truncated?: boolean;  // PDF > 10 pages
+}
+
+/**
+ * Attachment metadata stored in user messages (without base64 data).
+ * Used to display attachment indicators after page refresh.
+ */
+export interface MessageAttachmentMeta {
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant';
@@ -60,6 +84,7 @@ export interface Message {
   agentProgress?: AgentProgress;
   toolHealth?: ToolHealth;  // Tool availability status at query time
   selectedContext?: MessageSelectedContext;  // Context from PDF selection (user messages only)
+  attachments?: MessageAttachmentMeta[];  // Attachment metadata (user messages only, no base64)
   runId?: string;  // LangSmith trace ID for feedback correlation (assistant messages only)
   dbMessageId?: number;  // Database message ID for feedback submission
   feedback?: MessageFeedback;  // User feedback on this message (assistant messages only)

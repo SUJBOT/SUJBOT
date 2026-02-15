@@ -13,7 +13,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import rehypeRaw from 'rehype-raw';
-import { Clock, DollarSign, Edit2, RotateCw, Check, X, FileText, Copy } from 'lucide-react';
+import { Clock, DollarSign, Edit2, RotateCw, Check, X, FileText, Copy, Paperclip } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../design-system/utils/cn';
 import type { Message } from '../../types';
@@ -414,6 +414,22 @@ function ChatMessageInner({
               {t('selection.fromDocument', {
                 document: message.selectedContext.documentName.replace(/_/g, ' ')
               })}
+            </span>
+          </div>
+        )}
+
+        {/* Attachment indicator for user messages */}
+        {isUser && message.attachments && message.attachments.length > 0 && (
+          <div
+            className={cn(
+              'flex items-center gap-1.5 px-1',
+              'text-xs text-accent-500 dark:text-accent-400',
+              'justify-end'
+            )}
+          >
+            <Paperclip size={12} />
+            <span>
+              {t('attachments.filesAttached', { count: message.attachments.length })}
             </span>
           </div>
         )}

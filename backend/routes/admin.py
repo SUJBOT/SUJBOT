@@ -1063,3 +1063,258 @@ async def reindex_admin_document(
             }
 
     return EventSourceResponse(event_generator())
+
+
+# =============================================================================
+# Graph Visualization Endpoints
+# =============================================================================
+
+
+@router.get("/graph/overview")
+async def graph_overview(
+    admin: Dict = Depends(get_current_admin_user),
+    vl: Dict = Depends(get_vl_components),
+):
+    """
+    Return graph stats and filter option lists for the visualization page.
+
+    Response includes entity/relationship/community counts, document list with
+    entity counts, community list with titles, and entity type breakdown.
+    """
+    graph_storage = vl.get("graph_storage")
+    if not graph_storage:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Graph storage not initialized",
+        )
+
+    try:
+        await graph_storage._ensure_pool()
+        async with graph_storage.pool.acquire() as conn:
+            # Stats
+            entity_count = await conn.fetchval("SELECT COUNT(*) FROM graph.entities")
+            rel_count = await conn.fetchval("SELECT COUNT(*) FROM graph.relationships")
+            community_count = await conn.fetchval("SELECT COUNT(*) FROM graph.communities")
+
+            # Documents with entity counts
+            doc_rows = await conn.fetch(
+                """
+                SELECT document_id, COUNT(*) AS entity_count
+                FROM graph.entities
+                GROUP BY document_id
+                ORDER BY document_id
+                """
+            )
+            documents = [
+                {
+                    "document_id": row["document_id"],
+                    "display_name": _format_display_name(row["document_id"]),
+                    "entity_count": row["entity_count"],
+                }
+                for row in doc_rows
+            ]
+
+            # Communities with titles and entity counts
+            community_rows = await conn.fetch(
+                """
+                SELECT c.community_id, c.title,
+                       array_length(c.entity_ids, 1) AS entity_count
+                FROM graph.communities c
+                ORDER BY array_length(c.entity_ids, 1) DESC NULLS LAST
+                """
+            )
+            communities = [
+                {
+                    "community_id": row["community_id"],
+                    "title": row["title"] or f"Community {row['community_id']}",
+                    "entity_count": row["entity_count"] or 0,
+                }
+                for row in community_rows
+            ]
+
+            # Entity types with counts
+            type_rows = await conn.fetch(
+                """
+                SELECT entity_type, COUNT(*) AS count
+                FROM graph.entities
+                GROUP BY entity_type
+                ORDER BY count DESC
+                """
+            )
+            entity_types = [
+                {"type": row["entity_type"], "count": row["count"]}
+                for row in type_rows
+            ]
+
+    except asyncpg.PostgresError as e:
+        logger.error(f"Database error fetching graph overview: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch graph overview",
+        )
+
+    return {
+        "stats": {
+            "entities": entity_count,
+            "relationships": rel_count,
+            "communities": community_count,
+        },
+        "documents": documents,
+        "communities": communities,
+        "entity_types": entity_types,
+    }
+
+
+@router.get("/graph/data")
+async def graph_data(
+    admin: Dict = Depends(get_current_admin_user),
+    vl: Dict = Depends(get_vl_components),
+    document_ids: Optional[str] = Query(None, description="Comma-separated document IDs"),
+    community_ids: Optional[str] = Query(None, description="Comma-separated community IDs"),
+    entity_types: Optional[str] = Query(None, description="Comma-separated entity types"),
+    limit: int = Query(500, ge=1, le=2000),
+):
+    """
+    Return filtered graph nodes and edges for visualization.
+
+    At least one filter (document_ids, community_ids, or entity_types) is required
+    to prevent loading the entire graph.
+    """
+    graph_storage = vl.get("graph_storage")
+    if not graph_storage:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Graph storage not initialized",
+        )
+
+    # Parse filter params
+    doc_filter = [d.strip() for d in document_ids.split(",") if d.strip()] if document_ids else []
+    comm_filter = []
+    if community_ids:
+        for c in community_ids.split(","):
+            c = c.strip()
+            if c:
+                try:
+                    comm_filter.append(int(c))
+                except ValueError:
+                    pass
+    type_filter = [t.strip() for t in entity_types.split(",") if t.strip()] if entity_types else []
+
+    if not doc_filter and not comm_filter and not type_filter:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one filter is required",
+        )
+
+    try:
+        await graph_storage._ensure_pool()
+        async with graph_storage.pool.acquire() as conn:
+            # Build dynamic WHERE clause
+            conditions = []
+            params: list = []
+            param_idx = 1
+
+            if doc_filter:
+                conditions.append(f"e.document_id = ANY(${param_idx})")
+                params.append(doc_filter)
+                param_idx += 1
+
+            if type_filter:
+                conditions.append(f"e.entity_type = ANY(${param_idx})")
+                params.append(type_filter)
+                param_idx += 1
+
+            if comm_filter:
+                # Entities belonging to any of the selected communities
+                conditions.append(
+                    f"""e.entity_id IN (
+                        SELECT unnest(entity_ids) FROM graph.communities
+                        WHERE community_id = ANY(${param_idx})
+                    )"""
+                )
+                params.append(comm_filter)
+                param_idx += 1
+
+            where_clause = " AND ".join(conditions)
+
+            # Count total matching
+            count_sql = f"SELECT COUNT(*) FROM graph.entities e WHERE {where_clause}"
+            total_matching = await conn.fetchval(count_sql, *params)
+
+            # Fetch nodes (limited)
+            nodes_sql = f"""
+                SELECT e.entity_id, e.name, e.entity_type, e.description, e.document_id
+                FROM graph.entities e
+                WHERE {where_clause}
+                ORDER BY e.entity_id
+                LIMIT ${param_idx}
+            """
+            params.append(limit)
+            node_rows = await conn.fetch(nodes_sql, *params)
+
+            node_ids = [row["entity_id"] for row in node_rows]
+
+            # Fetch edges between selected nodes
+            edges = []
+            if node_ids:
+                edge_rows = await conn.fetch(
+                    """
+                    SELECT r.source_entity_id, r.target_entity_id,
+                           r.relationship_type, r.description, r.weight
+                    FROM graph.relationships r
+                    WHERE r.source_entity_id = ANY($1)
+                      AND r.target_entity_id = ANY($1)
+                    """,
+                    node_ids,
+                )
+                edges = [
+                    {
+                        "source": row["source_entity_id"],
+                        "target": row["target_entity_id"],
+                        "type": row["relationship_type"],
+                        "description": row["description"],
+                        "weight": float(row["weight"]) if row["weight"] else 1.0,
+                    }
+                    for row in edge_rows
+                ]
+
+            # Resolve community_id for each node
+            community_map: Dict[int, int] = {}
+            if node_ids:
+                comm_rows = await conn.fetch(
+                    """
+                    SELECT community_id, entity_ids
+                    FROM graph.communities
+                    """
+                )
+                for crow in comm_rows:
+                    if crow["entity_ids"]:
+                        for eid in crow["entity_ids"]:
+                            if eid in node_ids and eid not in community_map:
+                                community_map[eid] = crow["community_id"]
+
+    except asyncpg.PostgresError as e:
+        logger.error(f"Database error fetching graph data: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch graph data",
+        )
+
+    nodes = [
+        {
+            "id": row["entity_id"],
+            "name": row["name"],
+            "type": row["entity_type"],
+            "description": row["description"],
+            "document_id": row["document_id"],
+            "community_id": community_map.get(row["entity_id"]),
+        }
+        for row in node_rows
+    ]
+
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "total_matching": total_matching,
+        "limited": total_matching > limit,
+    }
