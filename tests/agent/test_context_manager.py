@@ -2,22 +2,26 @@
 Tests for context compaction manager (src/agent/context_manager.py).
 
 Covers:
-- ContextBudgetMonitor: threshold triggering, update from response, edge cases
+- ContextBudget: frozen dataclass, validation, ratio
+- ContextBudgetMonitor: threshold triggering, recommended_action, update, edge cases
+- CompactionLayer: enum dispatch
 - prune_tool_outputs: preserves first/last messages, replaces content, handles images,
   preserves tool_use_ids
-- compact_with_summary: mock provider, preserves recent messages, handles provider failure
-- emergency_truncate: keeps 7 messages, no-op for small history
+- compact_with_summary: mock provider, preserves recent messages, handles provider failure,
+  multimodal content serialization
+- emergency_truncate: keeps EMERGENCY_KEEP_MESSAGES, no-op for small history
 - get_context_window: model registry lookup, fallback
 """
 
 import pytest
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from unittest.mock import MagicMock, patch
 
 from src.agent.context_manager import (
     COMPACT_THRESHOLD,
+    CompactionLayer,
     DEFAULT_CONTEXT_WINDOW,
+    EMERGENCY_KEEP_MESSAGES,
     EMERGENCY_THRESHOLD,
     PRUNE_THRESHOLD,
     ContextBudget,
@@ -165,10 +169,51 @@ class TestContextBudgetMonitor:
         monitor.update_from_response(resp)
         assert not monitor._initialized
 
-    def test_zero_context_window(self):
-        """Zero context window doesn't cause division by zero."""
-        monitor = ContextBudgetMonitor(context_window=0)
-        assert monitor.check().ratio == 0.0
+    def test_zero_context_window_raises(self):
+        """Zero context window raises ValueError."""
+        with pytest.raises(ValueError, match="must be positive"):
+            ContextBudgetMonitor(context_window=0)
+
+    def test_negative_context_window_raises(self):
+        """Negative context window raises ValueError."""
+        with pytest.raises(ValueError, match="must be positive"):
+            ContextBudgetMonitor(context_window=-100)
+
+    def test_context_window_is_readonly(self):
+        """context_window property is read-only."""
+        monitor = ContextBudgetMonitor(context_window=100_000)
+        assert monitor.context_window == 100_000
+        with pytest.raises(AttributeError):
+            monitor.context_window = 50_000
+
+    def test_recommended_action_none_before_init(self):
+        """Before any update, recommended_action returns NONE."""
+        monitor = ContextBudgetMonitor(context_window=100_000)
+        assert monitor.recommended_action() == CompactionLayer.NONE
+
+    def test_recommended_action_prune(self):
+        """At 75%, recommended_action returns PRUNE."""
+        monitor = ContextBudgetMonitor(context_window=100_000)
+        monitor.update_from_response(_make_response(input_tokens=75_000))
+        assert monitor.recommended_action() == CompactionLayer.PRUNE
+
+    def test_recommended_action_compact(self):
+        """At 90%, recommended_action returns COMPACT (not PRUNE)."""
+        monitor = ContextBudgetMonitor(context_window=100_000)
+        monitor.update_from_response(_make_response(input_tokens=90_000))
+        assert monitor.recommended_action() == CompactionLayer.COMPACT
+
+    def test_recommended_action_emergency(self):
+        """At 96%, recommended_action returns EMERGENCY (highest priority)."""
+        monitor = ContextBudgetMonitor(context_window=100_000)
+        monitor.update_from_response(_make_response(input_tokens=96_000))
+        assert monitor.recommended_action() == CompactionLayer.EMERGENCY
+
+    def test_recommended_action_below_threshold(self):
+        """At 50%, recommended_action returns NONE."""
+        monitor = ContextBudgetMonitor(context_window=100_000)
+        monitor.update_from_response(_make_response(input_tokens=50_000))
+        assert monitor.recommended_action() == CompactionLayer.NONE
 
 
 # ===========================================================================
@@ -182,8 +227,27 @@ class TestContextBudget:
         assert b.ratio == 0.5
 
     def test_ratio_zero_max(self):
-        b = ContextBudget(used_tokens=100, max_tokens=0)
+        b = ContextBudget(used_tokens=0, max_tokens=0)
         assert b.ratio == 0.0
+
+    def test_frozen(self):
+        """ContextBudget is immutable."""
+        b = ContextBudget(used_tokens=100, max_tokens=1000)
+        with pytest.raises(AttributeError):
+            b.used_tokens = 200
+
+    def test_negative_used_tokens_raises(self):
+        with pytest.raises(ValueError, match="non-negative"):
+            ContextBudget(used_tokens=-1, max_tokens=100)
+
+    def test_negative_max_tokens_raises(self):
+        with pytest.raises(ValueError, match="non-negative"):
+            ContextBudget(used_tokens=0, max_tokens=-1)
+
+    def test_ratio_above_one(self):
+        """Overflow scenario: ratio can exceed 1.0."""
+        b = ContextBudget(used_tokens=150_000, max_tokens=100_000)
+        assert b.ratio == 1.5
 
 
 # ===========================================================================
@@ -331,7 +395,7 @@ class TestCompactWithSummary:
         ]
 
         provider = self._make_provider("Compacted summary here.")
-        result = compact_with_summary(messages, provider, "system prompt", protect_last_n=2)
+        result = compact_with_summary(messages, provider, protect_last_n_pairs=2)
 
         # Should be: first_msg + summary + last 4 messages
         assert result[0]["content"] == "original query"
@@ -356,7 +420,7 @@ class TestCompactWithSummary:
         provider = MagicMock()
         provider.create_message.side_effect = RuntimeError("API down")
 
-        result = compact_with_summary(messages, provider, "system", protect_last_n=2)
+        result = compact_with_summary(messages, provider, protect_last_n_pairs=2)
         assert result == messages
 
     def test_not_enough_messages(self):
@@ -367,9 +431,50 @@ class TestCompactWithSummary:
         ]
 
         provider = self._make_provider()
-        result = compact_with_summary(messages, provider, "system", protect_last_n=2)
+        result = compact_with_summary(messages, provider, protect_last_n_pairs=2)
         assert result == messages
         provider.create_message.assert_not_called()
+
+    def test_multimodal_content_serialization(self):
+        """Middle messages with tool_use, tool_result, and image blocks serialize correctly."""
+        messages = [
+            {"role": "user", "content": "original query"},
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "tool_use", "id": "t1", "name": "search", "input": {"q": "test"}},
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "t1",
+                        "content": [
+                            {"type": "image", "source": {"type": "base64", "data": "AAA"}},
+                            {"type": "text", "text": "[page_id | Page 1 from doc]"},
+                        ],
+                    }
+                ],
+            },
+            {"role": "assistant", "content": "thinking about results"},
+            {"role": "user", "content": "follow-up"},
+            {"role": "assistant", "content": "recent thought"},
+            {"role": "user", "content": "recent result"},
+            {"role": "assistant", "content": "last thought"},
+            {"role": "user", "content": "last result"},
+        ]
+
+        provider = self._make_provider("Summary with citations.")
+        result = compact_with_summary(messages, provider, protect_last_n_pairs=2)
+
+        # Provider was called — verify the conversation_text includes tool info
+        call_args = provider.create_message.call_args
+        user_content = call_args[1]["messages"][0]["content"]
+        assert "[tool_use: search]" in user_content
+        assert "[image]" in user_content
+        assert "[page_id | Page 1 from doc]" in user_content
 
 
 # ===========================================================================

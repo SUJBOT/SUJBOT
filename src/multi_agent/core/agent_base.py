@@ -2,7 +2,7 @@
 Abstract base class for all agents in the multi-agent system.
 
 Defines standard interface, lifecycle, and tool distribution patterns.
-Ensures consistency across all 8 specialized agents.
+Ensures consistency across all specialized agents.
 """
 
 from abc import ABC, abstractmethod
@@ -19,6 +19,7 @@ from .event_bus import EventBus, EventType
 from .state import ToolExecution
 from ..observability.trajectory import AgentTrajectory
 from ...agent.context_manager import (
+    CompactionLayer,
     ContextBudgetMonitor,
     compact_with_summary,
     emergency_truncate,
@@ -582,6 +583,7 @@ class BaseAgent(ABC):
         messages = [{"role": "user", "content": user_message}]
         tool_call_history = []
         total_tool_cost = 0.0  # Track cumulative API cost for all tool calls
+        seen_page_ids: set = set()  # Track seen page_ids to avoid duplicate base64 images
 
         # Context budget monitor (uses response.usage.input_tokens for thresholds)
         context_window = get_context_window(provider.get_model_name())
@@ -780,7 +782,23 @@ class BaseAgent(ABC):
                     if page_images:
                         # VL mode: build structured multimodal content blocks
                         content_blocks = []
+                        dedup_skipped = 0
                         for page in page_images:
+                            pid = page.get("page_id", "unknown")
+                            if pid in seen_page_ids:
+                                # Already sent this page image — text reference only
+                                dedup_skipped += 1
+                                content_blocks.append({
+                                    "type": "text",
+                                    "text": (
+                                        f"[Already shown: {pid} | "
+                                        f"Page {page.get('page_number', '?')} from "
+                                        f"{page.get('document_id', 'unknown')} | "
+                                        f"score: {page.get('score', 0):.3f}]"
+                                    ),
+                                })
+                                continue
+                            seen_page_ids.add(pid)
                             content_blocks.append({
                                 "type": "image",
                                 "source": {
@@ -792,18 +810,25 @@ class BaseAgent(ABC):
                             content_blocks.append({
                                 "type": "text",
                                 "text": (
-                                    f"[Page {page.get('page_number', '?')} from "
-                                    f"{page.get('document_id', 'unknown')}, "
+                                    f"[{pid} | "
+                                    f"Page {page.get('page_number', '?')} from "
+                                    f"{page.get('document_id', 'unknown')} | "
                                     f"score: {page.get('score', 0):.3f}]"
                                 ),
                             })
+                        if dedup_skipped:
+                            self.logger.info(
+                                "Image dedup: skipped %d duplicate pages for tool %s",
+                                dedup_skipped,
+                                tool_name,
+                            )
                         tool_results.append({
                             "type": "tool_result",
                             "tool_use_id": tool_use.get('id'),
                             "content": content_blocks,
                         })
                     else:
-                        # OCR mode (or non-search tools): text-only result
+                        # Text-only result (non-VL tools or search without page images)
                         raw_content = str(result.get("data", "")) if result.get("success", False) else f"Error: {result.get('error', 'Unknown error')}"
                         summarized_content = self._summarize_tool_result_for_context(raw_content)
 
@@ -845,12 +870,13 @@ class BaseAgent(ABC):
                 messages.append({"role": "assistant", "content": response.content})
                 messages.append({"role": "user", "content": tool_results})
 
-                # 3-layer progressive context compaction
-                if monitor.needs_emergency_truncation():
+                # 3-layer progressive context compaction (mutually exclusive)
+                action = monitor.recommended_action()
+                if action == CompactionLayer.EMERGENCY:
                     messages = emergency_truncate(messages)
-                elif monitor.needs_compaction():
-                    messages = compact_with_summary(messages, provider, cacheable_system)
-                elif monitor.needs_pruning():
+                elif action == CompactionLayer.COMPACT:
+                    messages = compact_with_summary(messages, provider)
+                elif action == CompactionLayer.PRUNE:
                     messages = prune_tool_outputs(messages)
 
                 # Check for early stopping conditions (prevent over-searching)

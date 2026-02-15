@@ -16,6 +16,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 from dotenv import load_dotenv
 
 from ..agent.context_manager import (
+    CompactionLayer,
     ContextBudgetMonitor,
     compact_with_summary,
     emergency_truncate,
@@ -404,7 +405,7 @@ class SingleAgentRunner:
         total_tool_cost = 0.0
         final_text = ""
         iteration = 0
-        seen_page_ids: set = set()  # Dedup images across parallel tool calls
+        seen_page_ids: set = set()  # Track seen page_ids to avoid duplicate base64 images (~1600 tokens/page)
 
         try:
             for iteration in range(max_iterations):
@@ -600,12 +601,13 @@ class SingleAgentRunner:
                     messages.append({"role": "assistant", "content": response.content})
                     messages.append({"role": "user", "content": tool_results})
 
-                    # 3-layer progressive context compaction
-                    if monitor.needs_emergency_truncation():
+                    # 3-layer progressive context compaction (mutually exclusive)
+                    action = monitor.recommended_action()
+                    if action == CompactionLayer.EMERGENCY:
                         messages = emergency_truncate(messages)
-                    elif monitor.needs_compaction():
-                        messages = compact_with_summary(messages, provider, system)
-                    elif monitor.needs_pruning():
+                    elif action == CompactionLayer.COMPACT:
+                        messages = compact_with_summary(messages, provider)
+                    elif action == CompactionLayer.PRUNE:
                         messages = prune_tool_outputs(messages)
 
                     # Early stop: 2+ consecutive empty searches

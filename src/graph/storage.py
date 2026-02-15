@@ -109,7 +109,10 @@ def _parse_dedup_verdict(text: str) -> bool:
         if isinstance(data, dict):
             return str(data.get("verdict", "")).strip().upper() == "YES"
     except json.JSONDecodeError:
-        pass
+        logger.debug(
+            "Dedup verdict not valid JSON, trying regex/plain-text fallback. Preview: %s",
+            text[:120],
+        )
 
     # Regex fallback: extract verdict from JSON-like text (handles trailing text after JSON)
     match = re.search(r'"verdict"\s*:\s*"(YES|NO)"', text, re.IGNORECASE)

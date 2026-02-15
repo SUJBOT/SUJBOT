@@ -224,7 +224,7 @@
     "langsmith": {
       "enabled": true,
       "api_key_env": "LANGSMITH_API_KEY",
-      "project_name": "sujbot-dev-prusemic",
+      "project_name": "sujbot-multi-agent",
       "trace_logging_level": "INFO",
       "sample_rate": 1.0
     },

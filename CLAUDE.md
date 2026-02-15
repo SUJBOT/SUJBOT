@@ -192,6 +192,10 @@ Vectors in `vectors` schema (NOT `public`). Tables: `vl_pages`, `documents`.
 
 ## Best Practices
 
+### Changelog
+
+**After every merged PR or significant change, update `CHANGELOG.md` in the project root.** Keep it organized by feature area with dates. This is the primary record of what was done and when.
+
 ### Git Branching
 
 **Do NOT create a new feature branch if you already have an active (unmerged) branch.** Finish, merge, or close the current branch first. Multiple active branches from the same author cause merge conflicts and duplicated work.
