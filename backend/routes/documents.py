@@ -590,7 +590,10 @@ def _sanitize_filename(filename: str) -> str:
 def _cleanup_upload_files(pdf_path: Path, page_store: Any, document_id: str) -> None:
     """Clean up uploaded PDF and rendered page images."""
     if pdf_path.exists():
-        pdf_path.unlink()
+        try:
+            pdf_path.unlink()
+        except OSError as e:
+            logger.error("Failed to delete uploaded PDF %s: %s", pdf_path, e)
     doc_dir = page_store.store_dir / document_id
     if doc_dir.exists():
         try:
@@ -715,18 +718,19 @@ async def upload_document(
                 try:
                     await vector_store._ensure_pool()
                     async with vector_store.pool.acquire() as conn:
-                        await conn.execute(
-                            "DELETE FROM graph.entities WHERE document_id = $1",
-                            document_id,
-                        )
-                        await conn.execute(
-                            "DELETE FROM vectors.vl_pages WHERE document_id = $1",
-                            document_id,
-                        )
-                        await conn.execute(
-                            "DELETE FROM vectors.documents WHERE document_id = $1",
-                            document_id,
-                        )
+                        async with conn.transaction():
+                            await conn.execute(
+                                "DELETE FROM graph.entities WHERE document_id = $1",
+                                document_id,
+                            )
+                            await conn.execute(
+                                "DELETE FROM vectors.vl_pages WHERE document_id = $1",
+                                document_id,
+                            )
+                            await conn.execute(
+                                "DELETE FROM vectors.documents WHERE document_id = $1",
+                                document_id,
+                            )
                     logger.info("DB cleanup completed for cancelled upload: %s", document_id)
                 except Exception as e:
                     logger.error(
@@ -761,18 +765,19 @@ async def upload_document(
             try:
                 await vector_store._ensure_pool()
                 async with vector_store.pool.acquire() as conn:
-                    await conn.execute(
-                        "DELETE FROM graph.entities WHERE document_id = $1",
-                        document_id,
-                    )
-                    await conn.execute(
-                        "DELETE FROM vectors.vl_pages WHERE document_id = $1",
-                        document_id,
-                    )
-                    await conn.execute(
-                        "DELETE FROM vectors.documents WHERE document_id = $1",
-                        document_id,
-                    )
+                    async with conn.transaction():
+                        await conn.execute(
+                            "DELETE FROM graph.entities WHERE document_id = $1",
+                            document_id,
+                        )
+                        await conn.execute(
+                            "DELETE FROM vectors.vl_pages WHERE document_id = $1",
+                            document_id,
+                        )
+                        await conn.execute(
+                            "DELETE FROM vectors.documents WHERE document_id = $1",
+                            document_id,
+                        )
             except Exception as cleanup_err:
                 logger.warning(
                     "Failed to clean up database entries for %s: %s",
