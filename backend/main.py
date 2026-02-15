@@ -35,11 +35,12 @@ except Exception as e:
     sys.exit(1)
 
 import asyncio
+import base64
 import json
 import logging
 import os
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request, Depends
@@ -508,6 +509,65 @@ async def health_check():
 # Note: Authentication endpoints are in routes/auth.py (/auth/login, /auth/logout, etc.)
 
 
+def _pdf_to_page_images(
+    base64_pdf: str, filename: str, max_pages: int = 10, dpi: int = 150
+) -> List[Dict]:
+    """Convert PDF to page images in memory using PyMuPDF.
+
+    Returns list of dicts with page_number and base64_data (PNG).
+    Reuses same DPI as PageStore.render_pdf_pages() for consistency.
+    """
+    import fitz  # PyMuPDF
+
+    pdf_bytes = base64.b64decode(base64_pdf)
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    pages = []
+    matrix = fitz.Matrix(dpi / 72.0, dpi / 72.0)
+    for i in range(min(len(doc), max_pages)):
+        pix = doc[i].get_pixmap(matrix=matrix)
+        pages.append({
+            "page_number": i + 1,
+            "base64_data": base64.b64encode(pix.tobytes("png")).decode(),
+        })
+    total_pages = len(doc)
+    doc.close()
+    return pages, total_pages
+
+
+def _build_attachment_blocks(attachments) -> List[Dict]:
+    """Convert attachments into Anthropic multimodal content blocks."""
+    blocks = []
+    for att in attachments:
+        if att.mime_type == "application/pdf":
+            pages, total_pages = _pdf_to_page_images(att.base64_data, att.filename)
+            truncated = total_pages > len(pages)
+            for page in pages:
+                blocks.append({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": page["base64_data"],
+                    },
+                })
+                label = f"[Attached PDF: {att.filename}, page {page['page_number']}"
+                if truncated and page["page_number"] == len(pages):
+                    label += f" (showing {len(pages)}/{total_pages} pages)"
+                label += "]"
+                blocks.append({"type": "text", "text": label})
+        else:
+            blocks.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": att.mime_type,
+                    "data": att.base64_data,
+                },
+            })
+            blocks.append({"type": "text", "text": f"[Attached image: {att.filename}]"})
+    return blocks
+
+
 def _create_fallback_title(user_message: str, max_length: int = 50) -> str:
     """
     Create fallback title from user message when LLM generation fails.
@@ -712,6 +772,19 @@ async def chat_stream(
                     }
                 }
 
+            # Add attachment metadata (NOT the base64 data — just filenames/sizes)
+            if request.attachments:
+                if user_metadata is None:
+                    user_metadata = {}
+                user_metadata["attachments"] = [
+                    {
+                        "filename": att.filename,
+                        "mime_type": att.mime_type,
+                        "size_bytes": len(base64.b64decode(att.base64_data)),
+                    }
+                    for att in request.attachments
+                ]
+
             await adapter.append_message(
                 conversation_id=request.conversation_id,
                 role="user",
@@ -772,11 +845,32 @@ async def chat_stream(
                     f"Added selected context from {ctx.document_name} ({len(ctx.text)} chars)"
                 )
 
+            # Process attachments into multimodal content blocks
+            attachment_blocks = None
+            if request.attachments:
+                try:
+                    attachment_blocks = _build_attachment_blocks(request.attachments)
+                    logger.info(
+                        f"Processed {len(request.attachments)} attachment(s) "
+                        f"into {len(attachment_blocks)} content blocks"
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to process attachments: {e}", exc_info=True)
+                    yield {
+                        "event": "error",
+                        "data": json.dumps(
+                            {"error": f"Failed to process attachments: {e}", "type": "AttachmentError"},
+                            ensure_ascii=True,
+                        ),
+                    }
+                    return
+
             async for event in agent_adapter.stream_response(
                 query=query,
                 conversation_id=request.conversation_id,
                 user_id=user["id"],
                 messages=message_history,
+                attachment_blocks=attachment_blocks,
             ):
                 # Format as SSE event
                 event_type = event["event"]
