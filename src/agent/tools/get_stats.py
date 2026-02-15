@@ -47,48 +47,31 @@ class GetStatsTool(BaseTool):
     input_schema = GetStatsInput
 
     def execute_impl(self, stat_scope: str) -> ToolResult:
+        if stat_scope not in ("corpus", "index", "document"):
+            return ToolResult(
+                success=False,
+                data=None,
+                error=f"Invalid stat_scope: {stat_scope}. Must be 'corpus', 'index', or 'document'",
+            )
+
         try:
-            stats = {}
+            vs_stats = self.vector_store.get_stats()
+            stats = {"vector_store": vs_stats}
 
-            if stat_scope in ["corpus", "document", "index"]:
-                # Get vector store statistics
-                vs_stats = self.vector_store.get_stats()
-                stats["vector_store"] = vs_stats
+            doc_count = vs_stats.get("documents", 0)
+            stats["unique_documents"] = doc_count
 
-                # Get unique documents count from stats
-                if "documents" in vs_stats:
-                    stats["unique_documents"] = vs_stats["documents"]
-
-                # Try to get document list from PostgreSQL (if available)
-                try:
-                    from src.storage import PostgresVectorStoreAdapter
-                    if isinstance(self.vector_store, PostgresVectorStoreAdapter):
-                        # Get document list from PostgreSQL
-                        doc_list = self.vector_store.get_document_list()
-                        stats["document_list"] = sorted(doc_list) if doc_list else []
-                except Exception as e:
-                    # If we can't get document list, skip it (non-critical)
-                    logger.debug(f"Could not extract document list: {e}")
-                    stats["document_list"] = []
+            doc_list = self.vector_store.get_document_list()
+            stats["document_list"] = sorted(doc_list) if doc_list else []
 
             if stat_scope == "index":
-                # Document info
                 stats["documents"] = {
-                    "count": stats.get("unique_documents", 0),
-                    "document_ids": stats.get("document_list", []),
+                    "count": doc_count,
+                    "document_ids": stats["document_list"],
                 }
-
-                # VL architecture info
                 stats["architecture"] = "vl"
                 stats["embedding_model"] = "jina-embeddings-v4"
                 stats["embedding_dimensions"] = 2048
-
-            if stat_scope not in ["corpus", "index", "document"]:
-                return ToolResult(
-                    success=False,
-                    data=None,
-                    error=f"Invalid stat_scope: {stat_scope}. Must be 'corpus', 'index', or 'document'",
-                )
 
             return ToolResult(
                 success=True,

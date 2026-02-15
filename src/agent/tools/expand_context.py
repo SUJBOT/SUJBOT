@@ -114,11 +114,10 @@ class ExpandContextTool(BaseTool):
 
             return ToolResult(
                 success=True,
-                data={"expansions": expanded_results, "expansion_mode": "adjacent"},
+                data={"expansions": expanded_results},
                 citations=citations,
                 metadata={
                     "page_count": len(page_ids),
-                    "expansion_mode": "adjacent",
                     "page_images": all_page_images,
                 },
             )

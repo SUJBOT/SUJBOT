@@ -83,49 +83,47 @@ class GetDocumentInfoTool(BaseTool):
                     error=f"document_id is required for info_type='{info_type}' (use info_type='list' with document_id=None to list all documents)",
                 )
 
+            if info_type not in ("summary", "metadata"):
+                return ToolResult(
+                    success=False,
+                    data=None,
+                    error=f"Invalid info_type: {info_type}. Must be 'list', 'summary', or 'metadata'",
+                )
+
+            # Both 'summary' and 'metadata' need pages and categories
+            pages = self._get_document_pages(document_id)
+            if not pages:
+                return ToolResult(
+                    success=True,
+                    data=None,
+                    metadata={"document_id": document_id, "found": False},
+                )
+
+            categories = self.vector_store.get_document_categories()
+            category = categories.get(document_id, "unknown")
+            page_count = len(pages)
+            base_metadata = {"document_id": document_id, "page_count": page_count}
+
             if info_type == "summary":
-                # Get page summaries from vl_pages metadata
-                pages = self._get_document_pages(document_id)
-                if not pages:
-                    return ToolResult(
-                        success=True,
-                        data=None,
-                        metadata={"document_id": document_id, "found": False},
-                    )
+                page_summaries = [
+                    {"page_number": p["page_number"], "summary": meta.get("page_summary", "")}
+                    for p in pages
+                    if (meta := p.get("metadata") or {}).get("page_summary")
+                ]
 
-                # Build summary from page summaries
-                page_summaries = []
-                for p in pages:
-                    meta = p.get("metadata") or {}
-                    summary = meta.get("page_summary", "")
-                    if summary:
-                        page_summaries.append(
-                            {"page_number": p["page_number"], "summary": summary}
-                        )
-
-                categories = self.vector_store.get_document_categories()
                 return ToolResult(
                     success=True,
                     data={
                         "document_id": document_id,
-                        "page_count": len(pages),
-                        "category": categories.get(document_id, "unknown"),
-                        "page_summaries": page_summaries[:20],  # Limit to first 20
+                        "page_count": page_count,
+                        "category": category,
+                        "page_summaries": page_summaries[:20],
                         "has_more": len(page_summaries) > 20,
                     },
-                    metadata={"document_id": document_id, "page_count": len(pages)},
+                    metadata=base_metadata,
                 )
 
-            elif info_type == "metadata":
-                pages = self._get_document_pages(document_id)
-                if not pages:
-                    return ToolResult(
-                        success=True,
-                        data=None,
-                        metadata={"document_id": document_id, "found": False},
-                    )
-
-                categories = self.vector_store.get_document_categories()
+            else:  # metadata
                 pages_with_summary = sum(
                     1 for p in pages
                     if (p.get("metadata") or {}).get("page_summary")
@@ -135,19 +133,12 @@ class GetDocumentInfoTool(BaseTool):
                     success=True,
                     data={
                         "document_id": document_id,
-                        "page_count": len(pages),
-                        "category": categories.get(document_id, "unknown"),
+                        "page_count": page_count,
+                        "category": category,
                         "pages_with_summary": pages_with_summary,
                         "page_numbers": [p["page_number"] for p in pages],
                     },
-                    metadata={"document_id": document_id, "page_count": len(pages)},
-                )
-
-            else:
-                return ToolResult(
-                    success=False,
-                    data=None,
-                    error=f"Invalid info_type: {info_type}. Must be 'list', 'summary', or 'metadata'",
+                    metadata=base_metadata,
                 )
 
         except Exception as e:
