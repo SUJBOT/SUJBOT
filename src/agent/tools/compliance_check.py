@@ -221,11 +221,11 @@ class ComplianceCheckTool(BaseTool):
         req_description = requirement.get("description", req_name)
         req_entity_id = requirement.get("entity_id", 0)
 
-        # Search for evidence
-        evidence_text, evidence_source = self._search_evidence(req_description, document_id)
+        # Search for evidence (returns images list in VL mode, text string in OCR mode)
+        evidence, evidence_source = self._search_evidence(req_description, document_id)
 
         # No evidence found
-        if not evidence_text:
+        if not evidence:
             return {
                 "requirement": req_name,
                 "requirement_type": req_type,
@@ -239,17 +239,24 @@ class ComplianceCheckTool(BaseTool):
 
         # Assess with LLM (if available)
         status, confidence, explanation = self._run_assessment(
-            requirement, evidence_text, evidence_source, assessment_prompt
+            requirement, evidence, evidence_source, assessment_prompt
         )
 
-        # Build finding
+        # Build finding — evidence field is page refs for VL, truncated text for OCR
+        if isinstance(evidence, list):
+            evidence_display = ", ".join(
+                f"{img['document_id']} p.{img['page_number']}" for img in evidence
+            )
+        else:
+            evidence_display = evidence[:_MAX_EVIDENCE_CHARS]
+
         finding: Dict[str, Any] = {
             "requirement": req_name,
             "requirement_type": req_type,
             "source_entity_id": req_entity_id,
             "status": status,
             "confidence": confidence,
-            "evidence": evidence_text[:_MAX_EVIDENCE_CHARS],
+            "evidence": evidence_display,
             "evidence_source": evidence_source,
         }
 
@@ -262,35 +269,39 @@ class ComplianceCheckTool(BaseTool):
         return finding
 
     def _search_evidence(self, query: str, document_id: Optional[str]) -> tuple:
-        """Search for evidence in VL or OCR mode. Returns (text, source_id)."""
+        """Search for evidence. Returns (page_images_list, source) in VL mode, (text, source) in OCR."""
         if self._is_vl_mode():
             return self._search_evidence_vl(query, document_id)
         return self._search_evidence_ocr(query, document_id)
 
     def _search_evidence_vl(self, query: str, document_id: Optional[str]) -> tuple:
-        """VL mode: search page embeddings and use page summaries."""
+        """VL mode: search page embeddings and load page images for multimodal LLM."""
         try:
             results = self.vl_retriever.search(query=query, k=3, document_filter=document_id)
             if not results:
-                return ("", None)
+                return ([], None)
 
-            # Collect page summaries from metadata
-            texts = []
+            page_images: List[Dict[str, Any]] = []
             source = None
             for r in results:
                 page_id = getattr(r, "page_id", None) or r.get("page_id", "")
-                metadata = getattr(r, "metadata", None) or r.get("metadata", {}) or {}
-                summary = metadata.get("page_summary", "")
-                if summary:
-                    texts.append(summary)
                 if source is None:
                     source = page_id
+                try:
+                    b64_data = self.page_store.get_image_base64(page_id)
+                    page_images.append({
+                        "page_id": page_id,
+                        "base64_data": b64_data,
+                        "document_id": getattr(r, "document_id", "") or r.get("document_id", ""),
+                        "page_number": getattr(r, "page_number", 0) or r.get("page_number", 0),
+                    })
+                except Exception as e:
+                    logger.warning(f"Failed to load image for {page_id}: {e}")
 
-            evidence = "\n\n".join(texts) if texts else ""
-            return (evidence, source)
+            return (page_images, source)
         except Exception as e:
             logger.warning(f"VL evidence search failed: {e}", exc_info=True)
-            return ("", None)
+            return ([], None)
 
     def _search_evidence_ocr(self, query: str, document_id: Optional[str]) -> tuple:
         """OCR mode: search text chunks via vector store."""
@@ -340,13 +351,12 @@ class ComplianceCheckTool(BaseTool):
     def _run_assessment(
         self,
         requirement: Dict[str, Any],
-        evidence_text: str,
+        evidence: Any,
         evidence_source: Optional[str],
         assessment_prompt: Optional[str],
     ) -> tuple:
-        """Run LLM assessment or fall back to heuristic."""
+        """Run LLM assessment or fall back to heuristic. Evidence is images (list) or text (str)."""
         if not self.llm_provider or not assessment_prompt:
-            # Heuristic fallback: evidence found but can't assess
             return ("UNCLEAR", 0.25, "LLM provider not available for assessment")
 
         req_name = requirement.get("name", "Unknown")
@@ -354,16 +364,38 @@ class ComplianceCheckTool(BaseTool):
         req_description = requirement.get("description", req_name)
         req_source = requirement.get("document_id", "Unknown")
 
-        prompt = (
+        # Build prompt text (evidence placeholder differs by mode)
+        if isinstance(evidence, list):
+            evidence_note = f"[See the {len(evidence)} page image(s) above]"
+        else:
+            evidence_note = evidence[:_MAX_EVIDENCE_CHARS]
+
+        prompt_text = (
             assessment_prompt.replace("{requirement_type}", req_type)
             .replace("{requirement_text}", req_description)
             .replace("{requirement_source}", req_source)
-            .replace("{evidence_text}", evidence_text[:_MAX_EVIDENCE_CHARS])
+            .replace("{evidence_text}", evidence_note)
         )
+
+        # Build message content — multimodal for VL, text-only for OCR
+        if isinstance(evidence, list) and evidence:
+            content: List[Dict[str, Any]] = []
+            for img in evidence:
+                content.append({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": img["base64_data"],
+                    },
+                })
+            content.append({"type": "text", "text": prompt_text})
+        else:
+            content = prompt_text  # type: ignore[assignment]
 
         try:
             response = self.llm_provider.create_message(
-                messages=[{"role": "user", "content": prompt}],
+                messages=[{"role": "user", "content": content}],
                 tools=[],
                 system="",
                 max_tokens=512,

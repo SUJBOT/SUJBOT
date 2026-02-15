@@ -375,5 +375,140 @@ class TestComplianceAssessment:
         assert finding["evidence"] is not None
 
 
+# ===========================================================================
+# TestComplianceVLMode
+# ===========================================================================
+
+
+class TestComplianceVLMode:
+    """VL mode: evidence from page images (multimodal) instead of text chunks."""
+
+    def _setup_vl_tool(self, llm_response_text=None, search_results=None):
+        """Create a VL-mode compliance tool with mocked VL components."""
+        community = _make_community(community_id=1)
+        entities = [_make_entity(1, "Monitor radiation", "OBLIGATION")]
+
+        gs = MagicMock()
+        gs.search_communities.return_value = [community]
+        gs.get_community_entities.return_value = entities
+
+        vl_retriever = MagicMock()
+        if search_results is None:
+            search_results = [
+                {
+                    "page_id": "doc_1_page_3",
+                    "document_id": "doc_1",
+                    "page_number": 3,
+                    "score": 0.88,
+                },
+                {
+                    "page_id": "doc_1_page_7",
+                    "document_id": "doc_1",
+                    "page_number": 7,
+                    "score": 0.75,
+                },
+            ]
+        vl_retriever.search.return_value = search_results
+
+        page_store = MagicMock()
+        page_store.get_image_base64.side_effect = lambda pid: f"base64_data_for_{pid}"
+
+        llm_provider = None
+        if llm_response_text is not None:
+            llm_provider = MagicMock()
+            mock_block = MagicMock()
+            mock_block.text = llm_response_text
+            mock_response = MagicMock()
+            mock_response.content = [mock_block]
+            llm_provider.create_message.return_value = mock_response
+
+        return _make_tool(
+            graph_storage=gs,
+            llm_provider=llm_provider,
+            vl_retriever=vl_retriever,
+            page_store=page_store,
+        )
+
+    def test_vl_evidence_returns_page_images(self):
+        """VL mode evidence search returns page image dicts, not text."""
+        tool = self._setup_vl_tool()
+        evidence, source = tool._search_evidence_vl("radiation", document_id=None)
+        assert isinstance(evidence, list)
+        assert len(evidence) == 2
+        assert evidence[0]["page_id"] == "doc_1_page_3"
+        assert evidence[0]["base64_data"] == "base64_data_for_doc_1_page_3"
+        assert evidence[0]["document_id"] == "doc_1"
+        assert evidence[0]["page_number"] == 3
+        assert source == "doc_1_page_3"
+
+    def test_vl_evidence_empty_results(self):
+        """VL mode returns empty list when no pages found."""
+        tool = self._setup_vl_tool(search_results=[])
+        evidence, source = tool._search_evidence_vl("unknown", document_id=None)
+        assert evidence == []
+        assert source is None
+
+    def test_vl_evidence_image_load_failure(self):
+        """VL mode skips pages whose images fail to load."""
+        tool = self._setup_vl_tool()
+        # First page loads, second raises
+        tool.page_store.get_image_base64.side_effect = [
+            "base64_ok",
+            Exception("disk error"),
+        ]
+        evidence, source = tool._search_evidence_vl("radiation", document_id=None)
+        assert len(evidence) == 1
+        assert evidence[0]["base64_data"] == "base64_ok"
+
+    def test_vl_finding_evidence_display(self):
+        """In VL mode, finding evidence shows page references not raw text."""
+        llm_json = json.dumps({"status": "MET", "confidence": 0.9, "explanation": "ok"})
+        tool = self._setup_vl_tool(llm_response_text=llm_json)
+        result = tool.execute_impl(query="radiation monitoring")
+        assert result.success is True
+        finding = result.data["findings"][0]
+        assert "doc_1 p.3" in finding["evidence"]
+        assert "doc_1 p.7" in finding["evidence"]
+
+    def test_vl_llm_receives_image_content_blocks(self):
+        """LLM provider receives multimodal content (image blocks + text)."""
+        llm_json = json.dumps({"status": "MET", "confidence": 0.85, "explanation": "ok"})
+        tool = self._setup_vl_tool(llm_response_text=llm_json)
+        result = tool.execute_impl(query="radiation monitoring")
+        assert result.success is True
+
+        # Verify LLM was called with image content blocks
+        call_args = tool.llm_provider.create_message.call_args
+        messages = call_args.kwargs.get("messages") or call_args[1].get("messages")
+        content = messages[0]["content"]
+        assert isinstance(content, list)
+
+        # Should have 2 image blocks + 1 text block
+        image_blocks = [b for b in content if b.get("type") == "image"]
+        text_blocks = [b for b in content if b.get("type") == "text"]
+        assert len(image_blocks) == 2
+        assert len(text_blocks) == 1
+        assert image_blocks[0]["source"]["type"] == "base64"
+        assert image_blocks[0]["source"]["media_type"] == "image/png"
+
+    def test_vl_no_llm_falls_back_to_unclear(self):
+        """VL mode without LLM provider returns UNCLEAR with image evidence."""
+        tool = self._setup_vl_tool(llm_response_text=None)
+        result = tool.execute_impl(query="radiation monitoring")
+        assert result.success is True
+        finding = result.data["findings"][0]
+        assert finding["status"] == "UNCLEAR"
+        assert "doc_1 p.3" in finding["evidence"]
+
+    def test_vl_no_evidence_returns_unmet(self):
+        """VL mode with no page images returns UNMET."""
+        tool = self._setup_vl_tool(search_results=[])
+        result = tool.execute_impl(query="unknown topic")
+        assert result.success is True
+        finding = result.data["findings"][0]
+        assert finding["status"] == "UNMET"
+        assert finding["evidence"] is None
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
