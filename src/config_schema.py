@@ -572,9 +572,9 @@ class AgentConfig(BaseModel):
         description="Keep last N messages with full tool context",
         ge=1
     )
-    query_expansion_model: str = Field(
-        ...,
-        description="Query expansion LLM model (gpt-4o-mini recommended)"
+    query_expansion_model: Optional[str] = Field(
+        default=None,
+        description="[DEPRECATED] Query expansion LLM model (OCR-only, unused in VL mode)"
     )
 
 
@@ -587,19 +587,6 @@ class AgentToolConfig(BaseModel):
         ge=1,
         le=100
     )
-    enable_reranking: bool = Field(
-        ...,
-        description="Enable cross-encoder reranking (+25% accuracy)"
-    )
-    reranker_candidates: int = Field(
-        ...,
-        description="Number of candidates before reranking (must be >= default_k)",
-        ge=1
-    )
-    reranker_model: Literal["bge-reranker-large", "bge-reranker-base", "ms-marco-mini"] = Field(
-        ...,
-        description="Reranker model"
-    )
     max_document_compare: int = Field(
         ...,
         description="Max documents to compare",
@@ -611,16 +598,31 @@ class AgentToolConfig(BaseModel):
         ge=0.0,
         le=1.0
     )
-    context_window: int = Field(
-        ...,
-        description="Context window for expansion (chunks before/after)",
-        ge=0
+    # Deprecated OCR fields — kept Optional for backward compat with existing config.json
+    enable_reranking: Optional[bool] = Field(
+        default=None,
+        description="[DEPRECATED] OCR-only reranking"
     )
-    lazy_load_reranker: bool = Field(
-        ...,
-        description="Lazy load reranker (speeds up startup)"
+    reranker_candidates: Optional[int] = Field(
+        default=None,
+        description="[DEPRECATED] OCR-only reranker candidates"
     )
-    cache_embeddings: bool = Field(..., description="Cache embeddings")
+    reranker_model: Optional[str] = Field(
+        default=None,
+        description="[DEPRECATED] OCR-only reranker model"
+    )
+    context_window: Optional[int] = Field(
+        default=None,
+        description="[DEPRECATED] OCR-only context window"
+    )
+    lazy_load_reranker: Optional[bool] = Field(
+        default=None,
+        description="[DEPRECATED] OCR-only lazy reranker loading"
+    )
+    cache_embeddings: Optional[bool] = Field(
+        default=None,
+        description="[DEPRECATED] OCR-only embedding cache"
+    )
 
 
 class CLIConfig(BaseModel):
@@ -1061,7 +1063,9 @@ class RootConfig(BaseModel):
     chunking: Optional[ChunkingConfig] = Field(
         default=None, description="[DEPRECATED] Chunking config"
     )
-    embedding: EmbeddingConfig
+    embedding: Optional[EmbeddingConfig] = Field(
+        default=None, description="[DEPRECATED] OCR embedding config"
+    )
     clustering: Optional[ClusteringConfig] = Field(
         default=None, description="[DEPRECATED] Clustering config"
     )

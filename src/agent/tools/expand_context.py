@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class ExpandContextInput(ToolInput):
     """Input for expand_context tool."""
 
-    chunk_ids: List[str] = Field(
+    page_ids: List[str] = Field(
         ...,
         description="List of page IDs (format: {doc_id}_p{NNN}) to expand with adjacent pages",
     )
@@ -50,14 +50,14 @@ class ExpandContextTool(BaseTool):
 
     input_schema = ExpandContextInput
 
-    def execute_impl(self, chunk_ids: List[str], k: int = 3) -> ToolResult:
+    def execute_impl(self, page_ids: List[str], k: int = 3) -> ToolResult:
         try:
             from ...vl.page_store import PageStore
 
             expanded_results = []
             all_page_images = []
 
-            for page_id in chunk_ids:
+            for page_id in page_ids:
                 # Parse page_id -> (document_id, page_number)
                 try:
                     document_id, page_number = PageStore.page_id_to_components(page_id)
@@ -117,7 +117,7 @@ class ExpandContextTool(BaseTool):
                 data={"expansions": expanded_results, "expansion_mode": "adjacent"},
                 citations=citations,
                 metadata={
-                    "page_count": len(chunk_ids),
+                    "page_count": len(page_ids),
                     "expansion_mode": "adjacent",
                     "page_images": all_page_images,
                 },

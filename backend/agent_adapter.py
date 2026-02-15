@@ -403,18 +403,8 @@ class AgentAdapter:
                     "degraded_components": [],
                 }
 
-            # Check vector store (skip for PostgreSQL backend)
-            storage_backend = os.getenv("STORAGE_BACKEND", "faiss")
-
-            if storage_backend == "faiss":
-                vector_store_exists = self.config.vector_store_path.exists()
-                if not vector_store_exists:
-                    return {
-                        "status": "error",
-                        "message": "Vector store not found",
-                        "details": {"vector_store_path": str(self.config.vector_store_path)},
-                        "degraded_components": [],
-                    }
+            # PostgreSQL is the only supported storage backend
+            storage_backend = os.getenv("STORAGE_BACKEND", "postgresql")
 
             # Check API keys
             has_anthropic_key = bool(self.config.anthropic_api_key)

@@ -14,14 +14,11 @@ logger = logging.getLogger(__name__)
 
 
 class GetStatsInput(ToolInput):
-    """Input for unified get_stats tool."""
+    """Input for get_stats tool."""
 
     stat_scope: str = Field(
         ...,
-        description="Statistics scope: 'corpus' (overall stats), 'index' (comprehensive index stats with embedding/cache info), 'document' (per-document stats)",
-    )
-    include_cache_stats: bool = Field(
-        False, description="Include embedding cache statistics (for 'index' scope)"
+        description="Statistics scope: 'corpus' (overall stats), 'index' (VL index info), 'document' (per-document stats)",
     )
 
 
@@ -35,29 +32,21 @@ class GetStatsTool(BaseTool):
     Get statistics about corpus, index, or documents.
 
     **Stat scopes:**
-    - 'corpus': Overall document counts, sizes
-    - 'index': Comprehensive index stats (layers, dimensions, cache)
+    - 'corpus': Overall document counts, page counts
+    - 'index': VL index info (Jina v4, 2048-dim)
     - 'document': Per-document statistics
 
     **When to use:**
     - "How many documents?"
     - "Corpus statistics"
     - "Index information"
-    - System/debugging queries
 
-    **Best practices:**
-    - Use 'corpus' for quick document counts
-    - Use 'index' for detailed information
-    - Set include_cache_stats=true for embedding cache info
-    - Fast metadata aggregation (no search required)
-
-    **Method:** Metadata aggregation
-
+    **Method:** Metadata aggregation (fast, no search)
     """
 
     input_schema = GetStatsInput
 
-    def execute_impl(self, stat_scope: str, include_cache_stats: bool = False) -> ToolResult:
+    def execute_impl(self, stat_scope: str) -> ToolResult:
         try:
             stats = {}
 
@@ -83,35 +72,16 @@ class GetStatsTool(BaseTool):
                     stats["document_list"] = []
 
             if stat_scope == "index":
-                # Additional index-specific information
-                stats["hybrid_search_enabled"] = stats.get("vector_store", {}).get(
-                    "hybrid_enabled", False
-                )
-
-                # Embedding model information
-                if self.embedder:
-                    stats["embedding_model"] = {
-                        "model_name": self.embedder.model_name,
-                        "dimensions": self.embedder.dimensions,
-                        "model_type": self.embedder.model_type,
-                    }
-
-                    # Cache statistics if requested
-                    if include_cache_stats and hasattr(self.embedder, "get_cache_stats"):
-                        stats["embedding_cache"] = self.embedder.get_cache_stats()
-
                 # Document info
                 stats["documents"] = {
-                    "count": stats["unique_documents"],
-                    "document_ids": stats["document_list"],
+                    "count": stats.get("unique_documents", 0),
+                    "document_ids": stats.get("document_list", []),
                 }
 
-                # System configuration
-                stats["configuration"] = {
-                    "reranking_enabled": hasattr(self, "reranker") and self.reranker is not None,
-                    "context_assembler_enabled": hasattr(self, "context_assembler")
-                    and self.context_assembler is not None,
-                }
+                # VL architecture info
+                stats["architecture"] = "vl"
+                stats["embedding_model"] = "jina-embeddings-v4"
+                stats["embedding_dimensions"] = 2048
 
             if stat_scope not in ["corpus", "index", "document"]:
                 return ToolResult(

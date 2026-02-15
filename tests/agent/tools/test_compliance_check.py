@@ -43,9 +43,6 @@ def _make_tool(
     )
     return ComplianceCheckTool(
         vector_store=vector_store or MagicMock(),
-        embedder=MagicMock(),
-        reranker=None,
-        context_assembler=None,
         llm_provider=llm_provider,
         config=config,
         vl_retriever=vl_retriever,
