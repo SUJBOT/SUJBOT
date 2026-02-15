@@ -109,8 +109,29 @@ class ExpandContextTool(BaseTool):
                 }
                 expanded_results.append(expansion)
 
+            # All page_ids were invalid format — nothing to expand
+            if not expanded_results:
+                return ToolResult(
+                    success=False,
+                    data=None,
+                    error=f"No valid page IDs found in: {page_ids}",
+                )
+
             # Collect unique document citations
             citations = list({r["document_id"] for r in expanded_results})
+
+            # Count expected vs loaded images
+            total_expected = sum(e["expansion_count"] for e in expanded_results)
+            if total_expected > 0 and not all_page_images:
+                logger.error(
+                    "All %d adjacent page images failed to load", total_expected
+                )
+                return ToolResult(
+                    success=False,
+                    data={"expansions": expanded_results},
+                    citations=citations,
+                    error=f"Found {total_expected} adjacent pages but all image loads failed",
+                )
 
             return ToolResult(
                 success=True,
@@ -119,6 +140,8 @@ class ExpandContextTool(BaseTool):
                 metadata={
                     "page_count": len(page_ids),
                     "page_images": all_page_images,
+                    "images_loaded": len(all_page_images),
+                    "images_expected": total_expected,
                 },
             )
 

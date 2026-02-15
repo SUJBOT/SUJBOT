@@ -403,9 +403,6 @@ class AgentAdapter:
                     "degraded_components": [],
                 }
 
-            # PostgreSQL is the only supported storage backend
-            storage_backend = os.getenv("STORAGE_BACKEND", "postgresql")
-
             # Check API keys
             has_anthropic_key = bool(self.config.anthropic_api_key)
             has_openai_key = bool(self.config.openai_api_key)

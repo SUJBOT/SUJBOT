@@ -359,7 +359,7 @@ async def list_documents(
                 )
                 categories = {row["document_id"]: row["category"] for row in rows}
         except Exception as e:
-            logger.warning(f"Failed to fetch document categories: {e}")
+            logger.warning(f"Failed to fetch document categories: {e}", exc_info=True)
 
     try:
         for pdf_path in PDF_BASE_DIR.glob("*.pdf"):

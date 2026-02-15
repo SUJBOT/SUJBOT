@@ -323,6 +323,7 @@ class ComplianceCheckTool(BaseTool):
                     "VL evidence search found %d results but all page images failed to load",
                     len(results),
                 )
+                return (None, "All page images failed to load")
 
             return (page_images, source)
         except Exception as e:
