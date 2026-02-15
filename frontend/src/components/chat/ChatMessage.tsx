@@ -13,7 +13,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import rehypeRaw from 'rehype-raw';
-import { Clock, DollarSign, Edit2, RotateCw, Check, X, FileText, Copy, Paperclip } from 'lucide-react';
+import { Clock, DollarSign, Edit2, RotateCw, Check, X, FileText, Copy, Image, File } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../design-system/utils/cn';
 import type { Message } from '../../types';
@@ -144,6 +144,39 @@ function ChatMessageInner({
         >
           {isUser ? t('chat.you') : t('chat.assistant')}
         </div>
+
+        {/* Attachment chips above user message bubble */}
+        {isUser && message.attachments && message.attachments.length > 0 && (
+          <div className={cn('flex flex-wrap gap-1.5', 'justify-end')}>
+            {message.attachments.map((att, idx) => (
+              <div
+                key={idx}
+                className={cn(
+                  'inline-flex items-center gap-1.5 px-2.5 py-1',
+                  'bg-blue-50 dark:bg-blue-900/30',
+                  'text-blue-700 dark:text-blue-300',
+                  'rounded-lg',
+                  'border border-blue-200 dark:border-blue-800',
+                  'text-xs'
+                )}
+              >
+                {att.mimeType.startsWith('image/') ? (
+                  <Image size={12} />
+                ) : att.mimeType === 'application/pdf' ? (
+                  <FileText size={12} />
+                ) : (
+                  <File size={12} />
+                )}
+                <span className="truncate max-w-[150px]" title={att.filename}>
+                  {att.filename}
+                </span>
+                <span className="text-blue-400 dark:text-blue-500">
+                  ({(att.sizeBytes / 1024).toFixed(0)} KB)
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Message bubble */}
         <div
@@ -414,22 +447,6 @@ function ChatMessageInner({
               {t('selection.fromDocument', {
                 document: message.selectedContext.documentName.replace(/_/g, ' ')
               })}
-            </span>
-          </div>
-        )}
-
-        {/* Attachment indicator for user messages */}
-        {isUser && message.attachments && message.attachments.length > 0 && (
-          <div
-            className={cn(
-              'flex items-center gap-1.5 px-1',
-              'text-xs text-accent-500 dark:text-accent-400',
-              'justify-end'
-            )}
-          >
-            <Paperclip size={12} />
-            <span>
-              {t('attachments.filesAttached', { count: message.attachments.length })}
             </span>
           </div>
         )}
