@@ -57,7 +57,10 @@ class GraphCommunitiesTool(BaseTool):
             )
 
         try:
-            communities = graph_storage.get_communities(level=level)
+            if query:
+                communities = graph_storage.search_communities(query, level=level, limit=10)
+            else:
+                communities = graph_storage.get_communities(level=level)
         except Exception as e:
             logger.error(f"Graph communities query failed: {e}", exc_info=True)
             return ToolResult(
@@ -72,32 +75,6 @@ class GraphCommunitiesTool(BaseTool):
                 data={"communities": [], "message": f"No communities found at level {level}"},
                 metadata={"level": level},
             )
-
-        # If query provided, filter communities by relevance
-        if query:
-            query_lower = query.lower()
-            scored = []
-            for c in communities:
-                score = 0
-                title = (c.get("title") or "").lower()
-                summary = (c.get("summary") or "").lower()
-                if query_lower in title:
-                    score += 2
-                if query_lower in summary:
-                    score += 1
-                # Check individual query words
-                for word in query_lower.split():
-                    if len(word) > 2:
-                        if word in title:
-                            score += 1
-                        if word in summary:
-                            score += 0.5
-                if score > 0:
-                    c["relevance_score"] = score
-                    scored.append(c)
-
-            scored.sort(key=lambda x: x.get("relevance_score", 0), reverse=True)
-            communities = scored[:10]
 
         # Enrich top communities with entity details
         for c in communities[:5]:

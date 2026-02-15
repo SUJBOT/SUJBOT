@@ -1,8 +1,8 @@
 """
 Graph Search Tool — entity search in knowledge graph.
 
-Searches entities by name using trigram similarity, returns matching
-entities with their direct relationships.
+Searches entities by semantic embedding similarity (multilingual-e5-small),
+returns matching entities with their direct relationships.
 """
 
 import logging
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class GraphSearchInput(ToolInput):
     """Input for graph entity search."""
 
-    query: str = Field(..., description="Entity name or search term")
+    query: str = Field(..., description="Entity name or search term (cross-language: English queries find Czech entities)")
     entity_type: Optional[str] = Field(
         None,
         description="Filter by entity type: REGULATION, STANDARD, ORGANIZATION, PERSON, CONCEPT, FACILITY, ROLE, DOCUMENT, SECTION, REQUIREMENT",
@@ -29,7 +29,7 @@ class GraphSearchInput(ToolInput):
 
 @register_tool
 class GraphSearchTool(BaseTool):
-    """Search the knowledge graph for entities by name or type."""
+    """Search the knowledge graph for entities by semantic similarity."""
 
     name = "graph_search"
     description = (

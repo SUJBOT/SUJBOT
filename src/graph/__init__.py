@@ -11,6 +11,7 @@ from typing import Any, Optional, Tuple
 
 from .community_detector import CommunityDetector
 from .community_summarizer import CommunitySummarizer
+from .embedder import GraphEmbedder
 from .entity_extractor import EntityExtractor
 from .storage import GraphStorageAdapter
 
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "GraphStorageAdapter",
+    "GraphEmbedder",
     "EntityExtractor",
     "CommunityDetector",
     "CommunitySummarizer",
@@ -28,6 +30,7 @@ __all__ = [
 def create_graph_components(
     pool: Any,
     provider: Optional[Any] = None,
+    embedder: Optional[GraphEmbedder] = None,
 ) -> Tuple[GraphStorageAdapter, Optional[EntityExtractor], CommunityDetector, Optional[CommunitySummarizer]]:
     """
     Factory for graph components (follows create_vl_components pattern).
@@ -35,11 +38,12 @@ def create_graph_components(
     Args:
         pool: asyncpg connection pool (shared with vector store)
         provider: LLM provider for extraction/summarization (optional)
+        embedder: Optional GraphEmbedder for semantic search (optional)
 
     Returns:
         Tuple of (storage, extractor, detector, summarizer)
     """
-    storage = GraphStorageAdapter(pool=pool)
+    storage = GraphStorageAdapter(pool=pool, embedder=embedder)
     extractor = EntityExtractor(provider) if provider else None
     detector = CommunityDetector()
     summarizer = CommunitySummarizer(provider) if provider else None
