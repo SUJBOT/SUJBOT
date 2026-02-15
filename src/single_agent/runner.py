@@ -15,6 +15,13 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from dotenv import load_dotenv
 
+from ..agent.context_manager import (
+    ContextBudgetMonitor,
+    compact_with_summary,
+    emergency_truncate,
+    get_context_window,
+    prune_tool_outputs,
+)
 from ..exceptions import AgentInitializationError
 
 logger = logging.getLogger(__name__)
@@ -336,6 +343,10 @@ class SingleAgentRunner:
             }
             return
 
+        # Context budget monitor (uses response.usage.input_tokens for thresholds)
+        context_window = get_context_window(model_name)
+        monitor = ContextBudgetMonitor(context_window)
+
         # Get all tool schemas
         tool_schemas = [
             schema
@@ -393,6 +404,7 @@ class SingleAgentRunner:
         total_tool_cost = 0.0
         final_text = ""
         iteration = 0
+        seen_page_ids: set = set()  # Dedup images across parallel tool calls
 
         try:
             for iteration in range(max_iterations):
@@ -428,6 +440,9 @@ class SingleAgentRunner:
                         "errors": [str(e)],
                     }
                     return
+
+                # Update context budget from actual token usage
+                monitor.update_from_response(response)
 
                 # Track cost
                 if hasattr(response, "usage") and response.usage:
@@ -497,7 +512,25 @@ class SingleAgentRunner:
 
                         if page_images:
                             content_blocks = []
+                            dedup_skipped = 0
                             for page in page_images:
+                                pid = page.get("page_id", "unknown")
+                                if pid in seen_page_ids:
+                                    # Already sent this page image — send text reference only
+                                    dedup_skipped += 1
+                                    content_blocks.append(
+                                        {
+                                            "type": "text",
+                                            "text": (
+                                                f"[Already shown: {pid} | "
+                                                f"Page {page.get('page_number', '?')} from "
+                                                f"{page.get('document_id', 'unknown')} | "
+                                                f"score: {page.get('score', 0):.3f}]"
+                                            ),
+                                        }
+                                    )
+                                    continue
+                                seen_page_ids.add(pid)
                                 content_blocks.append(
                                     {
                                         "type": "image",
@@ -512,13 +545,18 @@ class SingleAgentRunner:
                                     {
                                         "type": "text",
                                         "text": (
-                                            f"[USE THIS EXACT page_id IN \\cite{{}}: "
-                                            f"{page.get('page_id', 'unknown')} | "
+                                            f"[{pid} | "
                                             f"Page {page.get('page_number', '?')} from "
                                             f"{page.get('document_id', 'unknown')} | "
                                             f"score: {page.get('score', 0):.3f}]"
                                         ),
                                     }
+                                )
+                            if dedup_skipped:
+                                logger.info(
+                                    "Image dedup: skipped %d duplicate pages for tool %s",
+                                    dedup_skipped,
+                                    tool_name,
                                 )
                             tool_results.append(
                                 {
@@ -562,10 +600,13 @@ class SingleAgentRunner:
                     messages.append({"role": "assistant", "content": response.content})
                     messages.append({"role": "user", "content": tool_results})
 
-                    # Truncate history to prevent overflow
-                    max_history = 7  # 1 original + 6 recent
-                    if len(messages) > max_history:
-                        messages = [messages[0]] + messages[-6:]
+                    # 3-layer progressive context compaction
+                    if monitor.needs_emergency_truncation():
+                        messages = emergency_truncate(messages)
+                    elif monitor.needs_compaction():
+                        messages = compact_with_summary(messages, provider, system)
+                    elif monitor.needs_pruning():
+                        messages = prune_tool_outputs(messages)
 
                     # Early stop: 2+ consecutive empty searches
                     if self._should_stop_early(tool_call_history):

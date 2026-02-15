@@ -128,6 +128,7 @@ User Query → SingleAgentRunner (autonomous tool loop)
 - `src/vl/` - Vision-Language RAG module (Jina v4 embeddings, page store, VL retriever)
 - `backend/` - FastAPI web backend with auth, routes, middleware
 - `frontend/` - React + Vite web UI
+- `rag_confidence/` - QPP-based retrieval confidence scoring (standalone, by veselm73)
 
 **Key SSOT modules (use these, don't duplicate):**
 - `src/exceptions.py` - Typed exception hierarchy
@@ -191,6 +192,12 @@ Vectors in `vectors` schema (NOT `public`). Tables: `vl_pages`, `documents`.
 
 ## Best Practices
 
+### Git Branching
+
+**Do NOT create a new feature branch if you already have an active (unmerged) branch.** Finish, merge, or close the current branch first. Multiple active branches from the same author cause merge conflicts and duplicated work.
+
+**Main branch is protected** — direct push is rejected. All changes must go through a pull request, even cherry-picks.
+
 ### System Prompts
 
 **ALL LLM system prompts MUST be loaded from `prompts/` directory!** Never hardcode prompts in Python. Use `load_prompt("agent_name")` for agents, `Path("prompts/template.txt").read_text()` for pipeline components.
@@ -204,7 +211,7 @@ Vectors in `vectors` schema (NOT `public`). Tables: `vl_pages`, `documents`.
 
 ### Error Handling
 
-Use typed exceptions from `src/exceptions.py`: `SujbotError` → `ExtractionError`, `ValidationError`, `ProviderError`, `ToolExecutionError`, `AgentError`, `StorageError`, `RetrievalError`. Each has `message`, `details` dict, optional `cause`. Use `exc_info=True` for unexpected errors.
+Use typed exceptions from `src/exceptions.py`: `SujbotError` → `ExtractionError`, `ValidationError`, `ProviderError`, `ToolExecutionError`, `AgentError`, `StorageError`, `RetrievalError`, `ConversionError`. Each has `message`, `details` dict, optional `cause`. Use `exc_info=True` for unexpected errors.
 
 ### Internationalization (i18n)
 

@@ -18,6 +18,13 @@ from langgraph.graph import StateGraph
 from .event_bus import EventBus, EventType
 from .state import ToolExecution
 from ..observability.trajectory import AgentTrajectory
+from ...agent.context_manager import (
+    ContextBudgetMonitor,
+    compact_with_summary,
+    emergency_truncate,
+    get_context_window,
+    prune_tool_outputs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -576,6 +583,10 @@ class BaseAgent(ABC):
         tool_call_history = []
         total_tool_cost = 0.0  # Track cumulative API cost for all tool calls
 
+        # Context budget monitor (uses response.usage.input_tokens for thresholds)
+        context_window = get_context_window(provider.get_model_name())
+        monitor = ContextBudgetMonitor(context_window)
+
         # Initialize trajectory capture for evaluation
         trajectory = AgentTrajectory(
             agent_name=self.config.name,
@@ -631,6 +642,9 @@ class BaseAgent(ABC):
                 # Note: Cost tracking won't happen since we don't have a response object
                 # Re-raise to allow upstream error handling (agent execute wrapper)
                 raise
+
+            # Update context budget from actual token usage
+            monitor.update_from_response(response)
 
             # Track LLM usage with proper model-specific pricing
             if hasattr(response, 'usage') and response.usage:
@@ -831,16 +845,13 @@ class BaseAgent(ABC):
                 messages.append({"role": "assistant", "content": response.content})
                 messages.append({"role": "user", "content": tool_results})
 
-                # Truncate message history to prevent context overflow
-                # Keep: original query (messages[0]) + last 6 messages (3 assistant/user pairs)
-                max_history_messages = 7  # 1 original + 6 recent
-                if len(messages) > max_history_messages:
-                    truncated_count = len(messages) - max_history_messages
-                    messages = [messages[0]] + messages[-6:]
-                    self.logger.debug(
-                        f"Truncated {truncated_count} messages from history "
-                        f"(keeping {len(messages)} messages)"
-                    )
+                # 3-layer progressive context compaction
+                if monitor.needs_emergency_truncation():
+                    messages = emergency_truncate(messages)
+                elif monitor.needs_compaction():
+                    messages = compact_with_summary(messages, provider, cacheable_system)
+                elif monitor.needs_pruning():
+                    messages = prune_tool_outputs(messages)
 
                 # Check for early stopping conditions (prevent over-searching)
                 should_stop, stop_reason = self._should_stop_early(tool_call_history, iteration)
