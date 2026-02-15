@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.graph.storage import GraphStorageAdapter, _parse_command_count
+from src.graph.storage import GraphStorageAdapter, _parse_command_count, _parse_dedup_verdict
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -50,7 +50,7 @@ class TestParseCommandCount:
 
 @pytest.mark.anyio
 async def test_exact_dedup_no_duplicates():
-    """When no cross-document duplicates exist, returns zero stats."""
+    """When no duplicates exist, returns zero stats."""
     adapter = _make_adapter_with_mock_pool()
 
     conn_mock = AsyncMock()
@@ -66,8 +66,8 @@ async def test_exact_dedup_no_duplicates():
 
 
 @pytest.mark.anyio
-async def test_exact_dedup_merges_cross_document():
-    """Two entities with same name+type in different documents → merged."""
+async def test_exact_dedup_merges_duplicates():
+    """Two entities with same (case-insensitive) name+type → merged."""
     adapter = _make_adapter_with_mock_pool()
 
     # First call: find groups; subsequent calls: merge operations
@@ -409,3 +409,41 @@ async def test_semantic_dedup_transitive_closure():
     # Both pairs confirmed, but transitive closure merges into 1 group
     assert result["llm_confirmed"] == 2
     assert result["groups_merged"] == 1  # all three → one group
+
+
+# ---------------------------------------------------------------------------
+# _parse_dedup_verdict
+# ---------------------------------------------------------------------------
+
+
+class TestParseDedupVerdict:
+    def test_json_yes(self):
+        assert _parse_dedup_verdict('{"verdict": "YES", "reason": "Same entity"}') is True
+
+    def test_json_no(self):
+        assert _parse_dedup_verdict('{"verdict": "NO", "reason": "Different"}') is False
+
+    def test_json_case_insensitive(self):
+        assert _parse_dedup_verdict('{"verdict": "yes"}') is True
+
+    def test_json_with_code_fences(self):
+        assert _parse_dedup_verdict('```json\n{"verdict": "YES"}\n```') is True
+
+    def test_json_missing_verdict_key(self):
+        assert _parse_dedup_verdict('{"answer": "YES"}') is False
+
+    def test_json_non_dict_falls_back_to_text(self):
+        """Non-dict JSON (e.g. array) falls back to plain text parsing."""
+        assert _parse_dedup_verdict('["YES"]') is False  # starts with '[', not 'YES'
+
+    def test_plain_text_yes(self):
+        assert _parse_dedup_verdict("YES\nSame entity") is True
+
+    def test_plain_text_no(self):
+        assert _parse_dedup_verdict("NO\nDifferent regulations") is False
+
+    def test_plain_text_whitespace(self):
+        assert _parse_dedup_verdict("  YES  ") is True
+
+    def test_empty_string(self):
+        assert _parse_dedup_verdict("") is False

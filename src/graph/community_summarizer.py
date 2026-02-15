@@ -83,6 +83,7 @@ class CommunitySummarizer:
     def _parse_response(self, text: str) -> Optional[Tuple[str, str]]:
         """Parse structured JSON response into (title, description) tuple."""
         if not text:
+            logger.warning("Empty response from community summarizer LLM")
             return None
 
         text = text.strip()
@@ -94,6 +95,10 @@ class CommunitySummarizer:
             data = json.loads(text)
         except json.JSONDecodeError as e:
             logger.warning(f"Invalid JSON from community summary: {e}. Preview: {text[:200]}")
+            return None
+
+        if not isinstance(data, dict):
+            logger.warning(f"Community summary JSON is not an object: {type(data).__name__}. Preview: {text[:200]}")
             return None
 
         title = (data.get("title") or "").strip()

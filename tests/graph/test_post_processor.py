@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import numpy as np
 import pytest
 
+from src.exceptions import GraphStoreError
 from src.graph.post_processor import (
     _embed_new_communities,
     _embed_new_entities,
@@ -219,7 +220,7 @@ async def test_rebuild_skips_dedup_when_disabled():
 async def test_rebuild_continues_on_dedup_failure():
     """If dedup fails, community detection still runs."""
     storage = _make_storage_mock()
-    storage.async_deduplicate_exact = AsyncMock(side_effect=RuntimeError("boom"))
+    storage.async_deduplicate_exact = AsyncMock(side_effect=GraphStoreError("boom"))
     detector = FakeDetector()
 
     stats = await rebuild_graph_communities(
@@ -337,7 +338,7 @@ async def test_rebuild_summarizer_failure_uses_fallback_title():
 async def test_rebuild_continues_on_get_all_failure():
     """If async_get_all fails, returns error in stats without crashing."""
     storage = _make_storage_mock()
-    storage.async_get_all = AsyncMock(side_effect=RuntimeError("DB connection lost"))
+    storage.async_get_all = AsyncMock(side_effect=GraphStoreError("DB connection lost"))
     detector = FakeDetector()
 
     stats = await rebuild_graph_communities(
