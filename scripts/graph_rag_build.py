@@ -180,11 +180,12 @@ async def build_communities(args, graph_storage, community_detector, community_s
 
             fallback_title = f"Community L{comm['level']}#{i - 1}"
             try:
-                summary = community_summarizer.summarize(comm_entities, comm_rels)
-                if summary:
-                    comm["summary"] = summary
+                result = community_summarizer.summarize(comm_entities, comm_rels)
+                if result:
+                    title, description = result
+                    comm["title"] = title
+                    comm["summary"] = description
                     comm["summary_model"] = model_name
-                    comm["title"] = summary.split(".")[0].strip()[:100]
                     logger.info(
                         f"[{i}/{n_communities}] L{comm['level']}: "
                         f"{comm['title']} ({len(entity_ids)} entities)"

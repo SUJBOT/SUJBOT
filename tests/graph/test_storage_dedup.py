@@ -73,11 +73,15 @@ async def test_exact_dedup_merges_cross_document():
     # First call: find groups; subsequent calls: merge operations
     group_row = MagicMock()
     group_row.__getitem__ = lambda self, key: {
-        "name": "SÚJB",
+        "name_key": "sújb",
         "entity_type": "ORGANIZATION",
         "entity_ids": [1, 2],  # 1=canonical (longer desc), 2=duplicate
         "descriptions": ["Státní úřad pro jadernou bezpečnost", "SÚJB"],
+        "canonical_name": "Státní úřad pro jadernou bezpečnost",
     }[key]
+    group_row.get = lambda key, default=None: {
+        "canonical_name": "Státní úřad pro jadernou bezpečnost",
+    }.get(key, default)
 
     call_count = 0
 
@@ -111,19 +115,23 @@ async def test_exact_dedup_handles_transaction_error():
 
     group1 = MagicMock()
     group1.__getitem__ = lambda self, key: {
-        "name": "A",
+        "name_key": "a",
         "entity_type": "CONCEPT",
         "entity_ids": [1, 2],
         "descriptions": ["desc a", ""],
+        "canonical_name": "A",
     }[key]
+    group1.get = lambda key, default=None: {"canonical_name": "A"}.get(key, default)
 
     group2 = MagicMock()
     group2.__getitem__ = lambda self, key: {
-        "name": "B",
+        "name_key": "b",
         "entity_type": "CONCEPT",
         "entity_ids": [3, 4],
         "descriptions": ["desc b", ""],
+        "canonical_name": "B",
     }[key]
+    group2.get = lambda key, default=None: {"canonical_name": "B"}.get(key, default)
 
     call_count = 0
     import asyncpg
@@ -218,6 +226,12 @@ async def test_semantic_dedup_llm_confirms():
         "similarity": 0.92,
     }[key]
 
+    # Entity info rows for canonical name selection
+    entity_info_rows = [
+        {"entity_id": 1, "name": "SÚJB", "description": "Nuclear authority"},
+        {"entity_id": 2, "name": "Státní úřad pro jadernou bezpečnost", "description": "State office for nuclear safety"},
+    ]
+
     call_count = 0
 
     def make_acq():
@@ -225,6 +239,9 @@ async def test_semantic_dedup_llm_confirms():
         conn = AsyncMock()
         if call_count == 0:
             conn.fetch = AsyncMock(return_value=[candidate])
+        elif call_count == 1:
+            # Entity info fetch for canonical name selection
+            conn.fetch = AsyncMock(return_value=entity_info_rows)
         else:
             conn.execute = AsyncMock(return_value="DELETE 1")
             conn.transaction = MagicMock(
@@ -343,6 +360,13 @@ async def test_semantic_dedup_transitive_closure():
         "similarity": 0.88,
     }[key]
 
+    # Entity info rows for canonical name selection
+    entity_info_rows = [
+        {"entity_id": 1, "name": "Entity A", "description": "desc a"},
+        {"entity_id": 2, "name": "Entity B", "description": "desc b"},
+        {"entity_id": 3, "name": "Entity C", "description": "desc c"},
+    ]
+
     call_count = 0
 
     def make_acq():
@@ -350,6 +374,9 @@ async def test_semantic_dedup_transitive_closure():
         conn = AsyncMock()
         if call_count == 0:
             conn.fetch = AsyncMock(return_value=[cand1, cand2])
+        elif call_count == 1:
+            # Entity info fetch for canonical name selection
+            conn.fetch = AsyncMock(return_value=entity_info_rows)
         else:
             conn.execute = AsyncMock(return_value="DELETE 2")
             conn.transaction = MagicMock(

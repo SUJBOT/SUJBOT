@@ -8,6 +8,7 @@ Follows PostgresVectorStoreAdapter pattern: asyncpg pool + sync wrappers.
 import asyncio
 import json
 import logging
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
@@ -93,6 +94,21 @@ def _parse_command_count(result: Optional[str]) -> int:
         return int(result.split()[-1])
     except (ValueError, IndexError, AttributeError):
         return 0
+
+
+def _parse_dedup_verdict(text: str) -> bool:
+    """Parse LLM dedup verdict from structured JSON or plain text fallback."""
+    text = text.strip()
+    # Strip markdown code fences
+    text = re.sub(r"^```(?:json)?\s*\n?", "", text)
+    text = re.sub(r"\n?```\s*$", "", text)
+
+    try:
+        data = json.loads(text)
+        return str(data.get("verdict", "")).strip().upper() == "YES"
+    except (json.JSONDecodeError, AttributeError):
+        # Fallback: plain text starts with YES
+        return text.upper().startswith("YES")
 
 
 class GraphStorageAdapter:
@@ -779,6 +795,7 @@ class GraphStorageAdapter:
         canonical_id: int,
         duplicate_ids: List[int],
         merged_description: Optional[str] = None,
+        canonical_name: Optional[str] = None,
     ) -> int:
         """Merge duplicate entities into canonical within an open transaction.
 
@@ -791,6 +808,7 @@ class GraphStorageAdapter:
             duplicate_ids: Entity IDs to merge into canonical and delete.
             merged_description: If provided, set as canonical's description.
                 When None, only the search_embedding is cleared.
+            canonical_name: If provided, rename canonical entity to this name.
 
         Returns:
             Number of duplicate entity rows deleted.
@@ -829,18 +847,20 @@ class GraphStorageAdapter:
             canonical_id,
         )
 
-        # Update canonical: set description if provided, always clear embedding
+        # Update canonical: set name/description if provided, always clear embedding
+        update_parts = ["search_embedding = NULL"]
+        params: List[Any] = []
+        if canonical_name is not None:
+            params.append(canonical_name)
+            update_parts.append(f"name = ${len(params)}")
         if merged_description is not None:
-            await conn.execute(
-                "UPDATE graph.entities SET description = $1, search_embedding = NULL WHERE entity_id = $2",
-                merged_description,
-                canonical_id,
-            )
-        else:
-            await conn.execute(
-                "UPDATE graph.entities SET search_embedding = NULL WHERE entity_id = $1",
-                canonical_id,
-            )
+            params.append(merged_description)
+            update_parts.append(f"description = ${len(params)}")
+        params.append(canonical_id)
+        await conn.execute(
+            f"UPDATE graph.entities SET {', '.join(update_parts)} WHERE entity_id = ${len(params)}",
+            *params,
+        )
 
         # Delete duplicate entity rows
         placeholders = ", ".join(f"${i + 1}" for i in range(len(duplicate_ids)))
@@ -871,14 +891,15 @@ class GraphStorageAdapter:
         """
         await self._ensure_pool()
 
-        # Find groups with identical (name, entity_type) spanning multiple documents
+        # Find groups with identical (name, entity_type) — case-insensitive, including within same document
         find_groups_sql = """
-            SELECT name, entity_type,
+            SELECT lower(name) AS name_key, entity_type,
                    array_agg(entity_id ORDER BY length(coalesce(description, '')) DESC, entity_id ASC) AS entity_ids,
-                   array_agg(coalesce(description, '') ORDER BY length(coalesce(description, '')) DESC, entity_id ASC) AS descriptions
+                   array_agg(coalesce(description, '') ORDER BY length(coalesce(description, '')) DESC, entity_id ASC) AS descriptions,
+                   (array_agg(name ORDER BY length(coalesce(description, '')) DESC, entity_id ASC))[1] AS canonical_name
             FROM graph.entities
-            GROUP BY name, entity_type
-            HAVING COUNT(DISTINCT document_id) > 1
+            GROUP BY lower(name), entity_type
+            HAVING COUNT(*) > 1
         """
 
         try:
@@ -901,6 +922,7 @@ class GraphStorageAdapter:
             descriptions = list(group["descriptions"])
             canonical_id = entity_ids[0]
             duplicate_ids = entity_ids[1:]
+            canonical_name = group.get("canonical_name")
 
             if not duplicate_ids:
                 continue
@@ -913,14 +935,18 @@ class GraphStorageAdapter:
                 async with self.pool.acquire() as conn:
                     async with conn.transaction():
                         removed = await self._merge_entity_group(
-                            conn, canonical_id, duplicate_ids, merged_description=merged_desc
+                            conn,
+                            canonical_id,
+                            duplicate_ids,
+                            merged_description=merged_desc,
+                            canonical_name=canonical_name,
                         )
                         total_removed += removed
                         groups_succeeded += 1
 
             except asyncpg.PostgresError as e:
                 logger.error(
-                    f"Failed to merge exact duplicates for '{group['name']}' ({group['entity_type']}): {e}",
+                    f"Failed to merge exact duplicates for '{group['name_key']}' ({group['entity_type']}): {e}",
                     exc_info=True,
                 )
                 # Continue with next group -- partial failure doesn't corrupt
@@ -1041,8 +1067,8 @@ class GraphStorageAdapter:
                     max_tokens=100,
                     temperature=0.0,
                 )
-                answer = (response.text or "").strip().upper()
-                is_yes = answer.startswith("YES")
+                answer = (response.text or "").strip()
+                is_yes = _parse_dedup_verdict(answer)
 
                 if is_yes:
                     confirmed_pairs.append((cand["id1"], cand["id2"]))
@@ -1105,6 +1131,21 @@ class GraphStorageAdapter:
         for root in merge_groups:
             merge_groups[root] = sorted(set(merge_groups[root]))
 
+        # Fetch entity names/descriptions for canonical name selection
+        all_entity_ids = set()
+        for group_ids in merge_groups.values():
+            all_entity_ids.update(group_ids)
+        entity_info: Dict[int, Dict] = {}
+        if all_entity_ids:
+            placeholders = ", ".join(f"${i + 1}" for i in range(len(all_entity_ids)))
+            async with self.pool.acquire() as conn:
+                rows = await conn.fetch(
+                    f"SELECT entity_id, name, coalesce(description, '') AS description "
+                    f"FROM graph.entities WHERE entity_id IN ({placeholders})",
+                    *sorted(all_entity_ids),
+                )
+            entity_info = {r["entity_id"]: dict(r) for r in rows}
+
         # Merge each group using shared merge logic
         total_removed = 0
         groups_succeeded = 0
@@ -1113,10 +1154,28 @@ class GraphStorageAdapter:
             if not duplicate_ids:
                 continue
 
+            # Pick the longest name as canonical (prefer full name over abbreviation)
+            best_name = max(
+                (entity_info[eid]["name"] for eid in group_ids if eid in entity_info),
+                key=len,
+                default=None,
+            )
+
+            # Merge descriptions
+            descs = [entity_info[eid]["description"] for eid in group_ids if eid in entity_info and entity_info[eid]["description"]]
+            distinct_descs = list(dict.fromkeys(descs))
+            merged_desc = " | ".join(distinct_descs)[:2000] if distinct_descs else None
+
             try:
                 async with self.pool.acquire() as conn:
                     async with conn.transaction():
-                        removed = await self._merge_entity_group(conn, canonical_id, duplicate_ids)
+                        removed = await self._merge_entity_group(
+                            conn,
+                            canonical_id,
+                            duplicate_ids,
+                            merged_description=merged_desc,
+                            canonical_name=best_name,
+                        )
                         total_removed += removed
                         groups_succeeded += 1
 

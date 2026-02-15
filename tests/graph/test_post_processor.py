@@ -64,13 +64,13 @@ class FakeDetector:
 
 
 class FakeSummarizer:
-    """Returns a fixed summary."""
+    """Returns a fixed (title, description) tuple."""
 
     def __init__(self):
         self.provider = FakeProvider()
 
     def summarize(self, community_entities, community_relationships):
-        return "Test summary. With details."
+        return ("Test Community Title", "Test summary with details.")
 
 
 def _make_storage_mock(

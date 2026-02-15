@@ -146,13 +146,14 @@ async def rebuild_graph_communities(
             ]
 
             try:
-                summary = await asyncio.to_thread(
+                result = await asyncio.to_thread(
                     community_summarizer.summarize, comm_entities, comm_rels
                 )
-                if summary:
-                    comm["summary"] = summary
+                if result:
+                    title, description = result
+                    comm["title"] = title
+                    comm["summary"] = description
                     comm["summary_model"] = model_name
-                    comm["title"] = summary.split(".")[0].strip()[:100]
                     summarized += 1
                 else:
                     comm["title"] = f"Community L{comm['level']}"
