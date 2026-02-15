@@ -58,11 +58,20 @@ class GraphSearchTool(BaseTool):
                 error="Knowledge graph not available (graph_storage not configured)",
             )
 
+        # Determine fetch size: if adaptive-k is enabled and graph uses
+        # embedding search, fetch a larger candidate pool for thresholding.
+        adaptive_config = getattr(self.config, "adaptive_retrieval", None)
+        uses_embeddings = hasattr(graph_storage, "_embedder") and graph_storage._embedder
+        if adaptive_config and adaptive_config.enabled and uses_embeddings:
+            fetch_limit = max(adaptive_config.fetch_k, limit)
+        else:
+            fetch_limit = limit
+
         try:
             entities = graph_storage.search_entities(
                 query=query,
                 entity_type=entity_type,
-                limit=limit,
+                limit=fetch_limit,
             )
         except Exception as e:
             logger.error(f"Graph search failed: {e}", exc_info=True)
@@ -79,6 +88,50 @@ class GraphSearchTool(BaseTool):
                 metadata={"query": query, "entity_type": entity_type},
             )
 
+        # Apply adaptive-k filtering for embedding search results
+        adaptive_meta = {}
+        if (
+            adaptive_config
+            and adaptive_config.enabled
+            and uses_embeddings
+            and len(entities) >= adaptive_config.min_samples_for_adaptive
+        ):
+            try:
+                from src.retrieval.adaptive_k import adaptive_k_filter, AdaptiveKConfig
+
+                scores = [e.get("score", 0.0) for e in entities]
+                effective_config = AdaptiveKConfig(
+                    enabled=True,
+                    method=adaptive_config.method,
+                    fetch_k=adaptive_config.fetch_k,
+                    min_k=adaptive_config.min_k,
+                    max_k=min(adaptive_config.max_k, limit),
+                    score_gap_threshold=adaptive_config.score_gap_threshold,
+                    min_samples_for_adaptive=adaptive_config.min_samples_for_adaptive,
+                )
+                result = adaptive_k_filter(entities, scores, effective_config)
+                entities = result.items
+
+                adaptive_meta = {
+                    "adaptive_k": {
+                        "threshold": result.threshold,
+                        "method": result.method_used,
+                        "original_count": result.original_count,
+                        "filtered_count": result.filtered_count,
+                        "score_range": result.score_range,
+                    }
+                }
+
+                logger.info(
+                    "Graph adaptive-k: %d -> %d entities (threshold=%.3f, method=%s)",
+                    result.original_count,
+                    result.filtered_count,
+                    result.threshold,
+                    result.method_used,
+                )
+            except Exception as e:
+                logger.warning(f"Graph adaptive-k failed, using raw results: {e}")
+
         # For top results, fetch their direct relationships
         for entity in entities[:5]:
             try:
@@ -91,8 +144,11 @@ class GraphSearchTool(BaseTool):
                 )
                 entity["relationships"] = []
 
+        metadata = {"query": query, "entity_type": entity_type}
+        metadata.update(adaptive_meta)
+
         return ToolResult(
             success=True,
             data={"entities": entities, "count": len(entities)},
-            metadata={"query": query, "entity_type": entity_type},
+            metadata=metadata,
         )

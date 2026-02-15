@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any, Optional
 import logging
 
+from src.retrieval.adaptive_k import AdaptiveKConfig
+
 logger = logging.getLogger(__name__)
 
 
@@ -46,6 +48,7 @@ class ToolConfig:
 
     # Retrieval settings
     default_k: int = 6
+    adaptive_retrieval: AdaptiveKConfig = field(default_factory=AdaptiveKConfig)
 
     # Analysis settings
     max_document_compare: int = 3

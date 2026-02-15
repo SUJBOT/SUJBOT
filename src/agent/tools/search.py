@@ -141,6 +141,17 @@ class SearchTool(BaseTool):
             if failed_pages:
                 result_metadata["failed_pages"] = failed_pages
 
+            # Include adaptive-k diagnostics if available
+            adaptive_config = getattr(self.vl_retriever, "adaptive_config", None)
+            if adaptive_config and adaptive_config.enabled and len(results) > 0:
+                scores = [r.score for r in results]
+                result_metadata["adaptive_k"] = {
+                    "enabled": True,
+                    "method": adaptive_config.method,
+                    "final_count": len(results),
+                    "score_range": (round(min(scores), 4), round(max(scores), 4)),
+                }
+
             return ToolResult(
                 success=True,
                 data=formatted,

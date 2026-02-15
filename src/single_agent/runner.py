@@ -149,11 +149,26 @@ class SingleAgentRunner:
                 except Exception as e:
                     logger.error(f"Graph storage initialization failed: {e}", exc_info=True)
 
-        # Tool config
+        # Adaptive retrieval config
+        from ..retrieval.adaptive_k import AdaptiveKConfig
+
         agent_tools_config = self.config.get("agent_tools", {})
+        adaptive_raw = agent_tools_config.get("adaptive_retrieval", {})
+        adaptive_config = AdaptiveKConfig(
+            enabled=adaptive_raw.get("enabled", True),
+            method=adaptive_raw.get("method", "otsu"),
+            fetch_k=adaptive_raw.get("fetch_k", 20),
+            min_k=adaptive_raw.get("min_k", 1),
+            max_k=adaptive_raw.get("max_k", 10),
+            score_gap_threshold=adaptive_raw.get("score_gap_threshold", 0.05),
+            min_samples_for_adaptive=adaptive_raw.get("min_samples_for_adaptive", 3),
+        )
+
+        # Tool config
         tool_config = ToolConfig(
             graph_storage=graph_storage,
             default_k=agent_tools_config.get("default_k", 6),
+            adaptive_retrieval=adaptive_config,
             max_document_compare=agent_tools_config.get("max_document_compare", 3),
             compliance_threshold=agent_tools_config.get("compliance_threshold", 0.7),
         )
@@ -166,7 +181,9 @@ class SingleAgentRunner:
             from ..vl import create_vl_components
 
             vl_config = self.config.get("vl", {})
-            vl_retriever, page_store = create_vl_components(vl_config, vector_store)
+            vl_retriever, page_store = create_vl_components(
+                vl_config, vector_store, adaptive_config=adaptive_config
+            )
         except Exception as e:
             logger.error(f"Failed to init VL components: {e}", exc_info=True)
             raise AgentInitializationError(
@@ -226,11 +243,23 @@ class SingleAgentRunner:
                 summary = f"All {len(available)} tools healthy"
                 healthy = True
 
+            # Track degraded components
+            degraded = []
+            if not self.llm_provider:
+                degraded.append("llm_provider (compliance_check will return UNCLEAR)")
+
+            # Check graph storage via tool config
+            from ..agent.tools import get_registry
+            reg = get_registry()
+            sample_tool = next(iter(reg._tools.values()), None)
+            if sample_tool and not getattr(getattr(sample_tool, "config", None), "graph_storage", None):
+                degraded.append("graph_storage (graph_search/graph_context/compliance_check unavailable)")
+
             return {
-                "healthy": healthy,
+                "healthy": healthy and not missing_critical,
                 "available_tools": available,
                 "unavailable_tools": unavailable,
-                "degraded_tools": [],
+                "degraded_tools": degraded,
                 "critical_missing": missing_critical,
                 "summary": summary,
                 "total_available": len(available),

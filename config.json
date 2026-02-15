@@ -57,7 +57,16 @@
     "compliance_threshold": 0.7,
     "context_window": 2,
     "lazy_load_reranker": false,
-    "cache_embeddings": true
+    "cache_embeddings": true,
+    "adaptive_retrieval": {
+      "enabled": true,
+      "method": "otsu",
+      "fetch_k": 20,
+      "min_k": 1,
+      "max_k": 10,
+      "score_gap_threshold": 0.05,
+      "min_samples_for_adaptive": 3
+    }
   },
   "cli": {
     "show_citations": true,

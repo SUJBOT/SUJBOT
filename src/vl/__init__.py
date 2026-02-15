@@ -7,7 +7,7 @@ generation.
 """
 
 import logging
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from .jina_client import JinaClient
 from .page_store import PageStore
@@ -29,6 +29,7 @@ __all__ = [
 def create_vl_components(
     vl_config: Dict[str, Any],
     vector_store: Any,
+    adaptive_config: Optional[Any] = None,
 ) -> Tuple[VLRetriever, PageStore]:
     """
     Create VL components from config (SSOT factory function).
@@ -39,6 +40,7 @@ def create_vl_components(
     Args:
         vl_config: VL configuration dict from config.json["vl"]
         vector_store: PostgreSQL vector store adapter
+        adaptive_config: Optional AdaptiveKConfig for score thresholding
 
     Returns:
         Tuple of (VLRetriever, PageStore)
@@ -58,10 +60,12 @@ def create_vl_components(
         vector_store=vector_store,
         page_store=page_store,
         default_k=vl_config.get("default_k", 5),
+        adaptive_config=adaptive_config,
     )
     logger.info(
-        "VL components initialized: Jina v4 (%d-dim), page store at %s",
+        "VL components initialized: Jina v4 (%d-dim), page store at %s%s",
         vl_config.get("dimensions", 2048),
         vl_config.get("page_store_dir", "data/vl_pages"),
+        f", adaptive-k={adaptive_config.method}" if adaptive_config and adaptive_config.enabled else "",
     )
     return vl_retriever, page_store
