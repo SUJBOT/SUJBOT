@@ -100,7 +100,7 @@ All tables are in the `graph` schema.
 ```sql
 entity_id        SERIAL PRIMARY KEY
 name             TEXT NOT NULL
-entity_type      TEXT NOT NULL        -- one of the 10 types above
+entity_type      TEXT NOT NULL        -- one of the 15 types above
 description      TEXT
 source_page_id   TEXT
 document_id      TEXT NOT NULL

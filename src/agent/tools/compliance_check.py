@@ -35,7 +35,7 @@ _MAX_EVIDENCE_CHARS = 500
 
 # Assessment prompt template path (relative to project root)
 _ASSESSMENT_PROMPT_PATH = (
-    Path(__file__).parent.parent.parent.parent / "prompts" / "compliance_assessment.txt"
+    Path(__file__).resolve().parent.parent.parent.parent / "prompts" / "compliance_assessment.txt"
 )
 
 
