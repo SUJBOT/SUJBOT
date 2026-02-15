@@ -11,10 +11,21 @@ import json
 import logging
 import re
 import shutil
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
@@ -37,6 +48,28 @@ _background_tasks: set = set()
 _rebuild_timer: Optional[asyncio.TimerHandle] = None
 _rebuild_task: Optional[asyncio.Task] = None
 _REBUILD_DELAY_SECONDS = 10.0
+
+# Upload state TTL after completion (seconds)
+_UPLOAD_STATE_TTL = 60.0
+
+
+@dataclass
+class UploadState:
+    """State of an in-progress or recently completed upload."""
+
+    document_id: str
+    filename: str
+    user_id: int
+    category: str
+    pdf_path: Path
+    task: Optional[asyncio.Task] = None
+    events: list = field(default_factory=list)
+    done: bool = False
+    error: Optional[str] = None
+
+
+# Active uploads keyed by user_id (one upload per user)
+_active_uploads: Dict[int, UploadState] = {}
 
 
 def set_vl_components(
@@ -346,7 +379,7 @@ async def index_document_pipeline(
         for t in tasks:
             t.cancel()
         waiter.cancel()
-        logger.info("Indexing pipeline cancelled by client disconnect")
+        logger.info("Indexing pipeline cancelled")
         raise
 
     # Get results — embedding is mandatory, summarization is optional
@@ -671,6 +704,173 @@ def _cleanup_upload_files(pdf_path: Path, page_store: Any, document_id: str) -> 
             logger.error("Failed to clean up page image directory %s: %s", doc_dir, e)
 
 
+async def _cleanup_upload_db(vector_store: Any, document_id: str) -> None:
+    """Delete all DB entries for a partially indexed document."""
+    try:
+        await vector_store._ensure_pool()
+        async with vector_store.pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("DELETE FROM graph.entities WHERE document_id = $1", document_id)
+                await conn.execute(
+                    "DELETE FROM vectors.vl_pages WHERE document_id = $1", document_id
+                )
+                await conn.execute(
+                    "DELETE FROM vectors.documents WHERE document_id = $1", document_id
+                )
+        logger.info("DB cleanup completed for upload: %s", document_id)
+    except Exception as e:
+        logger.error("DB cleanup failed for %s: %s", document_id, e, exc_info=True)
+
+
+def _schedule_upload_state_cleanup(user_id: int, state: UploadState) -> None:
+    """Remove finished upload state after TTL so the user can upload again."""
+
+    def _remove():
+        current = _active_uploads.get(user_id)
+        if current is state:
+            del _active_uploads[user_id]
+            logger.debug("Cleaned up upload state for user %d", user_id)
+
+    try:
+        loop = asyncio.get_running_loop()
+        loop.call_later(_UPLOAD_STATE_TTL, _remove)
+    except RuntimeError:
+        pass
+
+
+async def _run_pipeline_task(state: UploadState, content: bytes) -> None:
+    """Background task: runs the indexing pipeline and updates UploadState.
+
+    Writes the PDF to disk, registers the document category, iterates the
+    shared index_document_pipeline generator, and appends every SSE event
+    to state.events.  On success it schedules a graph rebuild; on cancel or
+    error it cleans up files and DB.
+    """
+    vector_store = _vl_components["vector_store"]
+    jina_client = _vl_components["jina_client"]
+    page_store = _vl_components["page_store"]
+    summary_provider = _vl_components.get("summary_provider")
+    entity_extractor = _vl_components.get("entity_extractor")
+    graph_storage = _vl_components.get("graph_storage")
+    document_id = state.document_id
+
+    try:
+        # 1. Save file to disk
+        state.pdf_path.write_bytes(content)
+        del content  # free memory
+        state.events.append(
+            {
+                "event": "progress",
+                "data": json.dumps(
+                    {
+                        "stage": "uploading",
+                        "percent": 100,
+                        "message": "File saved",
+                    }
+                ),
+            }
+        )
+
+        # 1b. Register document category
+        display_name = _format_display_name(state.pdf_path.name)
+        await vector_store._ensure_pool()
+        async with vector_store.pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO vectors.documents (document_id, category, display_name)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (document_id) DO UPDATE SET category = $2, display_name = $3
+                """,
+                document_id,
+                state.category,
+                display_name,
+            )
+
+        # 2-5. Render, embed, summarize, store, extract entities
+        async for event in index_document_pipeline(
+            state.pdf_path,
+            document_id,
+            jina_client,
+            page_store,
+            vector_store,
+            summary_provider=summary_provider,
+            entity_extractor=entity_extractor,
+            graph_storage=graph_storage,
+        ):
+            state.events.append(event)
+
+        logger.info(
+            "User %d uploaded and indexed %s (%s, category=%s)",
+            state.user_id,
+            state.filename,
+            document_id,
+            state.category,
+        )
+
+        # Schedule debounced graph rebuild (communities + dedup)
+        _schedule_graph_rebuild(document_id)
+
+    except asyncio.CancelledError:
+        logger.info("Upload cancelled for %s (user %d)", state.filename, state.user_id)
+        _cleanup_upload_files(state.pdf_path, page_store, document_id)
+        await _cleanup_upload_db(vector_store, document_id)
+        state.error = "cancelled"
+        state.events.append(
+            {
+                "event": "error",
+                "data": json.dumps({"message": "Upload cancelled", "stage": "cancelled"}),
+            }
+        )
+
+    except Exception as e:
+        logger.error(
+            "Upload indexing failed for %s (user %d): %s",
+            state.filename,
+            state.user_id,
+            e,
+            exc_info=True,
+        )
+        _cleanup_upload_files(state.pdf_path, page_store, document_id)
+        await _cleanup_upload_db(vector_store, document_id)
+        state.error = str(e)
+        state.events.append(
+            {
+                "event": "error",
+                "data": json.dumps({"message": str(e), "stage": "indexing"}),
+            }
+        )
+
+    finally:
+        state.done = True
+        _schedule_upload_state_cleanup(state.user_id, state)
+
+
+async def _stream_upload_state(state: UploadState):
+    """SSE generator that polls UploadState and yields events.
+
+    On client disconnect (GeneratorExit) this simply stops streaming —
+    the pipeline background task keeps running.
+    """
+    cursor = 0
+    try:
+        while True:
+            # Yield any new events since last poll
+            while cursor < len(state.events):
+                yield state.events[cursor]
+                cursor += 1
+
+            # All events yielded and pipeline finished → done
+            if state.done:
+                break
+
+            await asyncio.sleep(0.3)
+    except (asyncio.CancelledError, GeneratorExit):
+        logger.debug(
+            "Upload SSE stream disconnected for user %d (pipeline continues)",
+            state.user_id,
+        )
+
+
 @router.post("/upload")
 async def upload_document(
     request: Request,
@@ -679,10 +879,11 @@ async def upload_document(
     user: Dict = Depends(get_current_user),
 ):
     """
-    Upload a PDF and index it with VL pipeline, streaming progress via SSE.
+    Upload a PDF and index it as a background task, streaming progress via SSE.
 
-    Accepts multipart/form-data with a PDF file and optional category.
-    Returns SSE stream with progress events during indexing.
+    The indexing pipeline runs independently of the SSE connection — a page
+    refresh reconnects to the same in-progress upload via GET /upload-status.
+    Only one upload per user at a time (409 if already active).
     """
     # Validate category
     if category not in ("documentation", "legislation"):
@@ -714,156 +915,66 @@ async def upload_document(
     safe_filename = _sanitize_filename(file.filename)
     pdf_path = PDF_BASE_DIR / safe_filename
 
-    # Check for duplicate
+    # Check for duplicate file on disk
     if pdf_path.exists():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Document already exists")
 
-    async def event_generator():
-        jina_client = _vl_components["jina_client"]
-        page_store = _vl_components["page_store"]
-        vector_store = _vl_components["vector_store"]
-        summary_provider = _vl_components.get("summary_provider")
-        entity_extractor = _vl_components.get("entity_extractor")
-        graph_storage = _vl_components.get("graph_storage")
-        document_id = pdf_path.stem
+    # Reject if upload already active for this user
+    user_id = user["id"]
+    existing = _active_uploads.get(user_id)
+    if existing and not existing.done:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An upload is already in progress",
+        )
 
-        try:
-            # 1. Save file
-            pdf_path.write_bytes(content)
-            yield {
-                "event": "progress",
-                "data": json.dumps(
-                    {
-                        "stage": "uploading",
-                        "percent": 100,
-                        "message": "File saved",
-                    }
-                ),
-            }
+    # Create upload state and start background task
+    state = UploadState(
+        document_id=pdf_path.stem,
+        filename=safe_filename,
+        user_id=user_id,
+        category=category,
+        pdf_path=pdf_path,
+    )
+    task = asyncio.create_task(_run_pipeline_task(state, content))
+    state.task = task
+    _active_uploads[user_id] = state
 
-            # 1b. Register document category
-            display_name = _format_display_name(pdf_path.name)
-            await vector_store._ensure_pool()
-            async with vector_store.pool.acquire() as conn:
-                await conn.execute(
-                    """
-                    INSERT INTO vectors.documents (document_id, category, display_name)
-                    VALUES ($1, $2, $3)
-                    ON CONFLICT (document_id) DO UPDATE SET category = $2, display_name = $3
-                    """,
-                    document_id,
-                    category,
-                    display_name,
-                )
+    # Prevent GC of the background task
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
-            # 2-5. Render, embed, summarize, store, extract entities via shared pipeline
-            async for event in index_document_pipeline(
-                pdf_path,
-                document_id,
-                jina_client,
-                page_store,
-                vector_store,
-                summary_provider=summary_provider,
-                entity_extractor=entity_extractor,
-                graph_storage=graph_storage,
-            ):
-                yield event
+    return EventSourceResponse(_stream_upload_state(state))
 
-            logger.info(
-                f"User {user.get('id', 'unknown')} uploaded and indexed "
-                f"{safe_filename} ({pdf_path.stem}, category={category})"
-            )
 
-            # Schedule debounced graph rebuild (communities + dedup)
-            _schedule_graph_rebuild(document_id)
+@router.get("/upload-status")
+async def upload_status(user: Dict = Depends(get_current_user)):
+    """Return SSE stream for an active upload, or 204 if none."""
+    state = _active_uploads.get(user["id"])
+    if not state:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return EventSourceResponse(_stream_upload_state(state))
 
-        except (asyncio.CancelledError, GeneratorExit):
-            logger.info(
-                "Upload cancelled for %s (user %s)",
-                safe_filename,
-                user.get("id", "unknown"),
-            )
-            _cleanup_upload_files(pdf_path, page_store, document_id)
 
-            # DB cleanup as fire-and-forget task (await unreliable in GeneratorExit)
-            async def _cleanup_db():
-                try:
-                    await vector_store._ensure_pool()
-                    async with vector_store.pool.acquire() as conn:
-                        async with conn.transaction():
-                            await conn.execute(
-                                "DELETE FROM graph.entities WHERE document_id = $1",
-                                document_id,
-                            )
-                            await conn.execute(
-                                "DELETE FROM vectors.vl_pages WHERE document_id = $1",
-                                document_id,
-                            )
-                            await conn.execute(
-                                "DELETE FROM vectors.documents WHERE document_id = $1",
-                                document_id,
-                            )
-                    logger.info("DB cleanup completed for cancelled upload: %s", document_id)
-                except Exception as e:
-                    logger.error(
-                        "DB cleanup failed for cancelled upload %s: %s",
-                        document_id,
-                        e,
-                        exc_info=True,
-                    )
+@router.post("/upload-cancel")
+async def cancel_upload(user: Dict = Depends(get_current_user)):
+    """Cancel an active upload and clean up."""
+    user_id = user["id"]
+    state = _active_uploads.get(user_id)
 
-            try:
-                task = asyncio.create_task(_cleanup_db())
-                _background_tasks.add(task)
-                task.add_done_callback(_background_tasks.discard)
-            except RuntimeError:
-                logger.error(
-                    "Cannot schedule DB cleanup for cancelled upload %s — "
-                    "orphaned data may remain in database",
-                    document_id,
-                )
-            return
+    if not state or state.done:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active upload to cancel",
+        )
 
-        except Exception as e:
-            logger.error(
-                "Upload indexing failed for %s (user %s): %s",
-                safe_filename,
-                user.get("id", "unknown"),
-                e,
-                exc_info=True,
-            )
-            _cleanup_upload_files(pdf_path, page_store, document_id)
-            # Clean up all database entries (graph, vectors, documents)
-            try:
-                await vector_store._ensure_pool()
-                async with vector_store.pool.acquire() as conn:
-                    async with conn.transaction():
-                        await conn.execute(
-                            "DELETE FROM graph.entities WHERE document_id = $1",
-                            document_id,
-                        )
-                        await conn.execute(
-                            "DELETE FROM vectors.vl_pages WHERE document_id = $1",
-                            document_id,
-                        )
-                        await conn.execute(
-                            "DELETE FROM vectors.documents WHERE document_id = $1",
-                            document_id,
-                        )
-            except Exception as cleanup_err:
-                logger.warning(
-                    "Failed to clean up database entries for %s: %s",
-                    document_id,
-                    cleanup_err,
-                )
-            yield {
-                "event": "error",
-                "data": json.dumps(
-                    {
-                        "message": str(e),
-                        "stage": "indexing",
-                    }
-                ),
-            }
+    document_id = state.document_id
 
-    return EventSourceResponse(event_generator())
+    # Remove from active uploads immediately (allows re-upload)
+    del _active_uploads[user_id]
+
+    # Cancel the background task (triggers cleanup in _run_pipeline_task)
+    if state.task and not state.task.done():
+        state.task.cancel()
+
+    return {"status": "cancelled", "document_id": document_id}
