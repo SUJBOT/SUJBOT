@@ -26,6 +26,8 @@ from enum import Enum, auto
 from pathlib import Path
 from typing import Any, Dict, List
 
+from ..exceptions import ProviderError
+
 logger = logging.getLogger(__name__)
 
 # Threshold constants (fraction of context window)
@@ -36,7 +38,7 @@ EMERGENCY_THRESHOLD = 0.95
 # Default context window if model lookup fails
 DEFAULT_CONTEXT_WINDOW = 128_000
 
-# Emergency truncation: keep first message + this many recent messages
+# Emergency truncation: total messages to keep (first message + 6 most recent)
 EMERGENCY_KEEP_MESSAGES = 7
 
 
@@ -59,14 +61,12 @@ class ContextBudget:
     def __post_init__(self):
         if self.used_tokens < 0:
             raise ValueError(f"used_tokens must be non-negative, got {self.used_tokens}")
-        if self.max_tokens < 0:
-            raise ValueError(f"max_tokens must be non-negative, got {self.max_tokens}")
+        if self.max_tokens <= 0:
+            raise ValueError(f"max_tokens must be positive, got {self.max_tokens}")
 
     @property
     def ratio(self) -> float:
         """Usage ratio. May exceed 1.0 when context window is overflowed."""
-        if self.max_tokens <= 0:
-            return 0.0
         return self.used_tokens / self.max_tokens
 
 
@@ -90,6 +90,11 @@ class ContextBudgetMonitor:
     def context_window(self) -> int:
         return self._context_window
 
+    @property
+    def is_initialized(self) -> bool:
+        """Whether the monitor has received valid usage data."""
+        return self._initialized
+
     def update_from_response(self, response: Any) -> None:
         """Extract input_tokens from provider response and update budget."""
         usage = getattr(response, "usage", None)
@@ -98,9 +103,12 @@ class ContextBudgetMonitor:
             return
         if isinstance(usage, dict):
             tokens = usage.get("input_tokens", 0)
+        elif hasattr(usage, "input_tokens"):
+            tokens = getattr(usage, "input_tokens", 0) or 0
         else:
-            logger.debug(
-                "Response usage is %s (not dict); context budget not updated",
+            logger.warning(
+                "Response usage has unexpected type %s — context budget not updated. "
+                "Compaction will not trigger for this session.",
                 type(usage).__name__,
             )
             tokens = 0
@@ -127,23 +135,6 @@ class ContextBudgetMonitor:
             return CompactionLayer.PRUNE
         return CompactionLayer.NONE
 
-    def needs_pruning(self) -> bool:
-        """True when ratio ≥ 70% (Layer 1)."""
-        if not self._initialized:
-            return False
-        return self.check().ratio >= PRUNE_THRESHOLD
-
-    def needs_compaction(self) -> bool:
-        """True when ratio ≥ 85% (Layer 2)."""
-        if not self._initialized:
-            return False
-        return self.check().ratio >= COMPACT_THRESHOLD
-
-    def needs_emergency_truncation(self) -> bool:
-        """True when ratio ≥ 95% (Layer 3)."""
-        if not self._initialized:
-            return False
-        return self.check().ratio >= EMERGENCY_THRESHOLD
 
 
 # ---------------------------------------------------------------------------
@@ -179,7 +170,8 @@ def prune_tool_outputs(
     recent results.
 
     Args:
-        messages: Full message list (mutated copy returned).
+        messages: Full message list. A deep copy is made; the original is
+            not modified.
         protect_last_n: Number of trailing tool-result user messages to leave
             untouched.
 
@@ -340,20 +332,27 @@ def compact_with_summary(
             if hasattr(summary_response, "text")
             else str(summary_response.content)
         )
-    except Exception as e:
-        logger.warning(
+    except (ProviderError, ConnectionError, TimeoutError) as e:
+        logger.error(
             "Layer 2 compaction LLM call failed: %s — returning messages unchanged",
             e,
             exc_info=True,
         )
         return messages
 
-    # Rebuild: first_msg + summary as assistant message + tail
+    # Rebuild: first_msg + summary + bridging user msg + tail
+    # Tail from agent loop always starts with assistant (even count from
+    # alternating sequence ending with user), so a bridging user message
+    # is needed to maintain valid role alternation for the Anthropic API.
     compacted = [
         first_msg,
         {
             "role": "assistant",
             "content": f"[Context summary from earlier conversation]\n\n{summary_text}",
+        },
+        {
+            "role": "user",
+            "content": "[Continuing from context summary above. Please proceed with the task.]",
         },
     ] + tail
 
@@ -376,14 +375,15 @@ def emergency_truncate(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Layer 3: Last-resort fallback.
 
-    Keeps first message plus the 6 most recent messages, discarding
-    everything in between.
+    Keeps first message plus the most recent messages (total count
+    defined by EMERGENCY_KEEP_MESSAGES), discarding everything in between.
     """
     if len(messages) <= EMERGENCY_KEEP_MESSAGES:
         return messages
 
+    keep_recent = EMERGENCY_KEEP_MESSAGES - 1  # first message + this many recent
     truncated_count = len(messages) - EMERGENCY_KEEP_MESSAGES
-    result = [messages[0]] + messages[-6:]
+    result = [messages[0]] + messages[-keep_recent:]
     logger.warning(
         "Context compaction Layer 3 (emergency): truncated %d messages (keeping %d)",
         truncated_count,

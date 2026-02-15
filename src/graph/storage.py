@@ -98,7 +98,7 @@ def _parse_command_count(result: Optional[str]) -> int:
 
 
 def _parse_dedup_verdict(text: str) -> bool:
-    """Parse LLM dedup verdict from structured JSON or plain text fallback."""
+    """Parse LLM dedup verdict from structured JSON, regex extraction, or plain text fallback."""
     text = text.strip()
     # Strip markdown code fences
     text = re.sub(r"^```(?:json)?\s*\n?", "", text)
@@ -108,8 +108,12 @@ def _parse_dedup_verdict(text: str) -> bool:
         data = json.loads(text)
         if isinstance(data, dict):
             return str(data.get("verdict", "")).strip().upper() == "YES"
-    except json.JSONDecodeError:
         logger.debug(
+            "Dedup verdict JSON is %s (not dict), trying regex fallback",
+            type(data).__name__,
+        )
+    except json.JSONDecodeError:
+        logger.info(
             "Dedup verdict not valid JSON, trying regex/plain-text fallback. Preview: %s",
             text[:120],
         )
@@ -1020,6 +1024,7 @@ class GraphStorageAdapter:
         Args:
             similarity_threshold: Cosine similarity threshold for candidate pairs
             llm_provider: LLM provider for arbitration (required for actual merges)
+            max_candidates: Global cap on candidate pairs to evaluate. Defaults to 500.
 
         Returns:
             Dict with merge stats

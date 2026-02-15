@@ -92,7 +92,7 @@ class BaseAgent(ABC):
     """
     Abstract base class for all agents.
 
-    Defines standard interface that all 8 agents must implement.
+    Defines standard interface that all specialized agents must implement.
     Enforces:
     - Configuration validation
     - Tool distribution rules
@@ -194,12 +194,10 @@ class BaseAgent(ABC):
 
     async def handle_error(self, error: Exception, state: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Handle errors gracefully.
+        Record error and update execution state.
 
-        Implements fallback strategy:
-        1. Retry with exponential backoff
-        2. Degrade gracefully (use cached results)
-        3. Escalate to orchestrator
+        Assigns a unique error ID for tracking, appends the error message
+        to state, and marks the execution phase as 'error'.
 
         Args:
             error: Exception that occurred
@@ -208,7 +206,7 @@ class BaseAgent(ABC):
         Returns:
             Updated state with error recorded
         """
-        # Track error with unique ID for Sentry
+        # Track error with unique ID
         from .error_tracker import track_error, ErrorSeverity
 
         error_id = track_error(
@@ -316,7 +314,7 @@ class BaseAgent(ABC):
         return state
 
     # ========================================================================
-    # AUTONOMOUS AGENTIC PATTERN (CLAUDE.md CONSTRAINT #0)
+    # AUTONOMOUS AGENTIC PATTERN (CLAUDE.md Critical Constraint #2: Autonomous Agents)
     # ========================================================================
     # Methods for building truly autonomous agents where LLM decides tool calling
 
@@ -503,7 +501,7 @@ class BaseAgent(ABC):
         if not content or len(content) <= max_length:
             return content
 
-        # Calculate split points (60% beginning, 40% end)
+        # Calculate split points (60% beginning, 35% end, 5% for truncation marker)
         head_length = int(max_length * 0.6)
         tail_length = int(max_length * 0.35)
 
@@ -875,9 +873,16 @@ class BaseAgent(ABC):
                 if action == CompactionLayer.EMERGENCY:
                     messages = emergency_truncate(messages)
                 elif action == CompactionLayer.COMPACT:
+                    pre_len = len(messages)
                     messages = compact_with_summary(messages, provider)
+                    if len(messages) == pre_len:
+                        # Compaction failed — escalate to Layer 3 to prevent retry loop
+                        self.logger.warning("Layer 2 compaction unchanged, escalating to Layer 3")
+                        messages = emergency_truncate(messages)
                 elif action == CompactionLayer.PRUNE:
                     messages = prune_tool_outputs(messages)
+                elif action != CompactionLayer.NONE:
+                    self.logger.debug("Unrecognized compaction action: %s", action)
 
                 # Check for early stopping conditions (prevent over-searching)
                 should_stop, stop_reason = self._should_stop_early(tool_call_history, iteration)

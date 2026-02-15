@@ -35,7 +35,7 @@ class SingleAgentRunner:
     Replaces MultiAgentRunner by:
     - Using one LLM call loop instead of orchestrator + specialist routing
     - Exposing ALL tools (search, expand_context, etc.) to one agent
-    - Loading system prompt from prompts/agents/unified.txt
+    - Loading system prompt from configurable path (default: prompts/agents/unified.txt)
     """
 
     def __init__(self, config: Dict[str, Any]):
@@ -606,9 +606,16 @@ class SingleAgentRunner:
                     if action == CompactionLayer.EMERGENCY:
                         messages = emergency_truncate(messages)
                     elif action == CompactionLayer.COMPACT:
+                        pre_len = len(messages)
                         messages = compact_with_summary(messages, provider)
+                        if len(messages) == pre_len:
+                            # Compaction failed — escalate to Layer 3 to prevent retry loop
+                            logger.warning("Layer 2 compaction unchanged, escalating to Layer 3")
+                            messages = emergency_truncate(messages)
                     elif action == CompactionLayer.PRUNE:
                         messages = prune_tool_outputs(messages)
+                    elif action != CompactionLayer.NONE:
+                        logger.debug("Unrecognized compaction action: %s", action)
 
                     # Early stop: 2+ consecutive empty searches
                     if self._should_stop_early(tool_call_history):
