@@ -32,7 +32,7 @@ PDF Pages (images)
 3. **Community detection**: The Leiden algorithm (via igraph) groups densely connected entities into communities at multiple hierarchy levels.
 4. **Community summarization**: Each community gets an LLM-generated title and summary describing its theme and key entities.
 
-## Entity Types (10)
+## Entity Types (15)
 
 | Type | Description | Example |
 |------|-------------|---------|
@@ -42,10 +42,15 @@ PDF Pages (images)
 | `ORGANIZATION` | Organizations | SUJB, CEZ |
 | `PERSON` | Named persons | — |
 | `CONCEPT` | Abstract concepts | jaderna bezpecnost |
-| `REQUIREMENT` | Requirements/obligations | — |
+| `REQUIREMENT` | Measurable technical/procedural criteria | limit davky 20 mSv/rok |
 | `FACILITY` | Physical facilities | JE Dukovany |
 | `ROLE` | Organizational roles | — |
 | `DOCUMENT` | Referenced documents | — |
+| `OBLIGATION` | Duties imposed by regulation | spravce musi vest zaznamy |
+| `PROHIBITION` | Bans or restrictions | zakazuje se zpracovani |
+| `PERMISSION` | Rights, exceptions, allowances | zpracovani je povoleno se souhlasem |
+| `EVIDENCE` | Proof of compliance in documents | Kapitola 5 popisuje zaznamy |
+| `CONTROL` | Mechanisms/measures for compliance | sifrovani dat v klidu |
 
 ## Relationship Types (9)
 
@@ -163,7 +168,7 @@ Each community is then summarized by an LLM (`src/graph/community_summarizer.py`
 
 ## Agent Tools
 
-The agent accesses the graph via three tools:
+The agent accesses the graph via four tools:
 
 ### `graph_search`
 
@@ -188,6 +193,16 @@ Searches community summaries by semantic similarity (embedding) or lists all com
 **Input:** `{"query": "radiation protection", "level": 0, "limit": 5}`
 **Returns:** Matching community titles, summaries, and member entity counts.
 **Use case:** Answer broad/thematic questions about the corpus.
+
+### `compliance_check`
+
+Checks document compliance against regulations using communities as compliance domains. Chains community search → requirement extraction → evidence matching → LLM assessment.
+
+**Input:** `{"query": "GDPR compliance", "document_id": "doc_policy", "community_level": 0}`
+**Returns:** Structured report with per-requirement findings (MET/UNMET/PARTIAL/UNCLEAR), evidence, confidence scores, and overall compliance score.
+**Use case:** Gap analysis, document compliance checking, regulatory querying.
+
+Communities serve as natural "compliance domains" — Leiden clustering groups related OBLIGATION/REQUIREMENT/EVIDENCE/CONTROL entities. Communities with requirements but no evidence indicate compliance gaps.
 
 ## Backfill Scripts
 
@@ -235,6 +250,7 @@ Key files:
 | `src/agent/tools/graph_search.py` | Agent tool: semantic entity search |
 | `src/agent/tools/graph_context.py` | Agent tool: N-hop relationship traversal |
 | `src/agent/tools/graph_communities.py` | Agent tool: semantic community search |
+| `src/agent/tools/compliance_check.py` | Agent tool: community-based compliance assessment |
 | `scripts/graph_rag_build.py` | Backfill: entity extraction + communities |
 | `scripts/graph_embed_backfill.py` | Backfill: search embeddings (multilingual-e5-small) |
 | `scripts/graph_fts_migrate.py` | Backfill: FTS tsvector columns + triggers |

@@ -118,7 +118,7 @@ docker network connect sujbot_sujbot_db_net sujbot_backend
 
 ```
 User Query → SingleAgentRunner (autonomous tool loop)
-  → RAG Tools (search, expand_context, get_document_info, etc.)
+  → RAG Tools (search, expand_context, get_document_info, compliance_check, etc.)
   → Retrieval: OCR mode (HyDE + Expansion Fusion) or VL mode (Jina v4 cosine)
   → Storage (PostgreSQL: vectors + checkpoints)
 ```
