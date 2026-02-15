@@ -4,7 +4,7 @@
 
 CREATE SCHEMA IF NOT EXISTS graph;
 
--- Ensure pg_trgm extension for fuzzy text search on entity names
+-- pg_trgm for trigram index on entity names (fast prefix/substring matching)
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 -- unaccent for diacritics-insensitive search (bezpecnost → bezpečnost)

@@ -8,7 +8,10 @@ Follows PostgresVectorStoreAdapter pattern: asyncpg pool + sync wrappers.
 import asyncio
 import json
 import logging
-from typing import Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from .embedder import GraphEmbedder
 
 import asyncpg
 import numpy as np
@@ -35,6 +38,21 @@ def _entity_from_row(row: asyncpg.Record) -> Dict[str, Any]:
         "description": row["description"],
         "document_id": row["document_id"],
     }
+
+
+def _community_from_row(row: asyncpg.Record) -> Dict[str, Any]:
+    """Convert an asyncpg Record to a community dict. Shared by all community queries."""
+    result = {
+        "community_id": row["community_id"],
+        "level": row["level"],
+        "title": row["title"],
+        "summary": row["summary"],
+        "entity_ids": row["entity_ids"],
+        "metadata": row["metadata"] or {},
+    }
+    if "score" in row.keys():
+        result["score"] = float(row["score"])
+    return result
 
 
 def _in_placeholders(values, start: int = 1) -> str:
@@ -80,14 +98,16 @@ class GraphStorageAdapter:
         self,
         pool: Optional[asyncpg.Pool] = None,
         connection_string: Optional[str] = None,
-        embedder: Optional[Any] = None,
+        embedder: Optional["GraphEmbedder"] = None,
     ):
         """
         Initialize with existing pool or connection string.
 
         Args:
             pool: Existing asyncpg pool (preferred — avoids duplicate connections).
+                  When provided, the caller owns the pool lifecycle (we won't close it).
             connection_string: PostgreSQL DSN (creates new pool if pool is None).
+                  When used, this adapter owns and will close the pool.
             embedder: Optional GraphEmbedder for semantic search on entities/communities.
                 When provided, search methods use cosine similarity on embeddings.
                 When None, falls back to full-text search.
@@ -274,12 +294,14 @@ class GraphStorageAdapter:
 
         if self._embedder:
             return await self._search_entities_by_embedding(query, entity_type, limit)
+        logger.debug("No embedder configured, falling back to FTS for entity search")
         return await self._search_entities_by_fts(query, entity_type, limit)
 
     async def _search_entities_by_embedding(
         self, query: str, entity_type: Optional[str], limit: int
     ) -> List[Dict]:
-        query_vec = _vec_to_pg(self._embedder.encode_query(query))
+        vec = await asyncio.to_thread(self._embedder.encode_query, query)
+        query_vec = _vec_to_pg(vec)
         params: list = [query_vec]
         param_idx = 1
 
@@ -534,17 +556,7 @@ class GraphStorageAdapter:
                 f"Failed to get communities at level {level}: {e}", cause=e
             ) from e
 
-        return [
-            {
-                "community_id": row["community_id"],
-                "level": row["level"],
-                "title": row["title"],
-                "summary": row["summary"],
-                "entity_ids": row["entity_ids"],
-                "metadata": row["metadata"] or {},
-            }
-            for row in rows
-        ]
+        return [_community_from_row(row) for row in rows]
 
     def search_communities(
         self, query: str, level: int = 0, limit: int = 10
@@ -562,12 +574,14 @@ class GraphStorageAdapter:
 
         if self._embedder:
             return await self._search_communities_by_embedding(query, level, limit)
+        logger.debug("No embedder configured, falling back to FTS for community search")
         return await self._search_communities_by_fts(query, level, limit)
 
     async def _search_communities_by_embedding(
         self, query: str, level: int, limit: int
     ) -> List[Dict]:
-        query_vec = _vec_to_pg(self._embedder.encode_query(query))
+        vec = await asyncio.to_thread(self._embedder.encode_query, query)
+        query_vec = _vec_to_pg(vec)
         sql = """
             SELECT community_id, level, title, summary, summary_model, entity_ids, metadata,
                    1 - (search_embedding <=> $1::vector) AS score
@@ -584,18 +598,7 @@ class GraphStorageAdapter:
                 f"Community embedding search failed for query '{query}': {e}", cause=e
             ) from e
 
-        return [
-            {
-                "community_id": row["community_id"],
-                "level": row["level"],
-                "title": row["title"],
-                "summary": row["summary"],
-                "entity_ids": row["entity_ids"],
-                "metadata": row["metadata"] or {},
-                "score": float(row["score"]),
-            }
-            for row in rows
-        ]
+        return [_community_from_row(row) for row in rows]
 
     async def _search_communities_by_fts(
         self, query: str, level: int, limit: int
@@ -617,18 +620,7 @@ class GraphStorageAdapter:
                 f"Community FTS search failed for query '{query}': {e}", cause=e
             ) from e
 
-        return [
-            {
-                "community_id": row["community_id"],
-                "level": row["level"],
-                "title": row["title"],
-                "summary": row["summary"],
-                "entity_ids": row["entity_ids"],
-                "metadata": row["metadata"] or {},
-                "score": float(row["score"]),
-            }
-            for row in rows
-        ]
+        return [_community_from_row(row) for row in rows]
 
     def get_community_entities(self, community_id: int) -> List[Dict]:
         """Get entity details for a community."""

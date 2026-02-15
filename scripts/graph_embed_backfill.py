@@ -3,7 +3,8 @@
 Backfill search_embedding (multilingual-e5-small, 384-dim) for graph tables.
 
 Embeds entities, relationships, and communities, then stores vectors in PostgreSQL.
-Safe to run multiple times — only processes rows where search_embedding IS NULL.
+Creates HNSW indexes after embedding. Safe to run multiple times — only processes
+rows where search_embedding IS NULL.
 
 Usage:
     uv run python scripts/graph_embed_backfill.py
@@ -15,19 +16,16 @@ import sys
 import time
 
 import asyncpg
-import numpy as np
 from dotenv import load_dotenv
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from src.graph.storage import _vec_to_pg  # noqa: E402
+
 load_dotenv()
 
 BATCH_SIZE = 256
-
-
-def vec_to_pg(vec: np.ndarray) -> str:
-    return "[" + ",".join(map(str, vec.flatten().tolist())) + "]"
 
 
 async def add_columns(conn: asyncpg.Connection):
@@ -61,7 +59,7 @@ async def backfill_entities(conn: asyncpg.Connection, embedder):
         embeddings = embedder.encode_passages(batch_texts)
 
         records = [
-            (r["entity_id"], vec_to_pg(embeddings[j]))
+            (r["entity_id"], _vec_to_pg(embeddings[j]))
             for j, r in enumerate(batch_rows)
         ]
         await conn.executemany(
@@ -98,7 +96,7 @@ async def backfill_relationships(conn: asyncpg.Connection, embedder):
         embeddings = embedder.encode_passages(batch_texts)
 
         records = [
-            (r["relationship_id"], vec_to_pg(embeddings[j]))
+            (r["relationship_id"], _vec_to_pg(embeddings[j]))
             for j, r in enumerate(batch_rows)
         ]
         await conn.executemany(
@@ -127,7 +125,7 @@ async def backfill_communities(conn: asyncpg.Connection, embedder):
         embeddings = embedder.encode_passages(batch_texts)
 
         records = [
-            (r["community_id"], vec_to_pg(embeddings[j]))
+            (r["community_id"], _vec_to_pg(embeddings[j]))
             for j, r in enumerate(batch_rows)
         ]
         await conn.executemany(
@@ -161,7 +159,11 @@ async def main():
         sys.exit(1)
 
     print(f"Connecting to: {dsn.split('@')[-1]}")
-    conn = await asyncpg.connect(dsn)
+    try:
+        conn = await asyncpg.connect(dsn)
+    except (asyncpg.PostgresError, OSError) as e:
+        print(f"ERROR: Failed to connect to database: {e}")
+        sys.exit(1)
 
     try:
         await add_columns(conn)

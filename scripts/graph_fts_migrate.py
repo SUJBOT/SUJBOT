@@ -30,7 +30,11 @@ async def migrate():
         sys.exit(1)
 
     print(f"Connecting to: {dsn.split('@')[-1]}")
-    conn = await asyncpg.connect(dsn)
+    try:
+        conn = await asyncpg.connect(dsn)
+    except (asyncpg.PostgresError, OSError) as e:
+        print(f"ERROR: Failed to connect to database: {e}")
+        sys.exit(1)
 
     try:
         # 1. Ensure unaccent extension

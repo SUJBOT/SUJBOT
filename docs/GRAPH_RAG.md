@@ -102,7 +102,7 @@ document_id      TEXT NOT NULL
 search_tsv       TSVECTOR             -- auto-populated by trigger
 search_embedding vector(384)          -- multilingual-e5-small
 metadata         JSONB
-created_at       TIMESTAMP DEFAULT NOW()
+created_at       TIMESTAMPTZ DEFAULT NOW()
 
 UNIQUE (name, entity_type, document_id)
 CREATE INDEX idx_entities_name_trgm ON graph.entities USING gin(name gin_trgm_ops);
@@ -120,14 +120,16 @@ relationship_type  TEXT NOT NULL     -- one of the 9 types above
 description        TEXT
 weight             REAL DEFAULT 1.0
 source_page_id     TEXT
-search_embedding   vector(384)       -- multilingual-e5-small
+search_embedding   vector(384)       -- multilingual-e5-small (stored, not independently searched)
 metadata           JSONB
-created_at         TIMESTAMP DEFAULT NOW()
+created_at         TIMESTAMPTZ DEFAULT NOW()
 
 CREATE INDEX idx_rel_source ON graph.relationships(source_entity_id);
 CREATE INDEX idx_rel_target ON graph.relationships(target_entity_id);
 CREATE INDEX idx_relationships_embedding ON graph.relationships USING hnsw(search_embedding vector_cosine_ops);
 ```
+
+> **Note:** Relationship embeddings are stored for future use but not independently searched by agent tools. Relationships are currently discovered via `graph_context` (N-hop CTE traversal from entities).
 
 ### `graph.communities`
 
@@ -141,7 +143,7 @@ entity_ids       INT[] NOT NULL        -- Array of entity IDs in this community
 search_tsv       TSVECTOR              -- auto-populated by trigger
 search_embedding vector(384)           -- multilingual-e5-small
 metadata         JSONB
-created_at       TIMESTAMP DEFAULT NOW()
+created_at       TIMESTAMPTZ DEFAULT NOW()
 
 CREATE INDEX idx_communities_level ON graph.communities(level);
 CREATE INDEX idx_communities_search_tsv ON graph.communities USING gin(search_tsv);
