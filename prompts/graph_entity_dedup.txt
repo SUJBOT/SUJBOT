@@ -1,0 +1,13 @@
+You are reviewing potential duplicate entities in a Czech legal/regulatory knowledge graph.
+Determine if these two entities refer to the SAME real-world thing (person, organization, regulation, concept, etc.).
+
+Entity 1: {name1} (type: {type1}) — {desc1}
+Entity 2: {name2} (type: {type2}) — {desc2}
+
+Answer ONLY "YES" or "NO" on the first line, followed by a brief reason on the second line.
+
+Rules:
+- Abbreviations and full names of the same entity ARE duplicates (e.g., "SÚJB" and "Státní úřad pro jadernou bezpečnost").
+- Different numbered regulations are NOT duplicates (e.g., "vyhl. č. 307/2002 Sb." and "vyhl. č. 308/2002 Sb.").
+- Different amendments of the same regulation ARE duplicates if they refer to the same base regulation.
+- Entities with the same name but fundamentally different types are NOT duplicates.

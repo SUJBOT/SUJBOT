@@ -10,6 +10,8 @@ Usage:
     uv run python scripts/graph_rag_build.py --doc-id BZ_VR1     # single document
     uv run python scripts/graph_rag_build.py --skip-extraction   # re-run community detection + summarization
     uv run python scripts/graph_rag_build.py --skip-communities  # extraction only
+    uv run python scripts/graph_rag_build.py --dedup             # run dedup before community detection
+    uv run python scripts/graph_rag_build.py --dedup-only        # run only dedup, skip extraction + communities
 """
 
 import argparse
@@ -34,6 +36,8 @@ from backend.constants import get_variant_model
 from src.agent.providers.factory import create_provider
 from src.config import get_config
 from src.graph import create_graph_components
+from src.graph.embedder import GraphEmbedder
+from src.graph.post_processor import rebuild_graph_communities
 from src.storage.postgres_adapter import PostgresVectorStoreAdapter
 from src.vl.page_store import PageStore
 
@@ -229,17 +233,30 @@ async def async_main(args):
     )
 
     # Create graph components (shares vector_store pool)
+    graph_embedder = GraphEmbedder()
     graph_storage, entity_extractor, community_detector, community_summarizer = (
-        create_graph_components(pool=vector_store.pool, provider=provider)
+        create_graph_components(pool=vector_store.pool, provider=provider, embedder=graph_embedder)
     )
 
     try:
         # Phase 1: Extract entities
-        if not args.skip_extraction:
+        if not args.skip_extraction and not args.dedup_only:
             await extract_entities(args, graph_storage, entity_extractor, page_store, vector_store)
 
-        # Phase 2: Communities
-        if not args.skip_communities:
+        # Phase 2: Dedup + Communities (via post-processor or legacy path)
+        if args.dedup or args.dedup_only:
+            _log_phase("DEDUP + COMMUNITY REBUILD (via post-processor)")
+            stats = await rebuild_graph_communities(
+                graph_storage=graph_storage,
+                community_detector=community_detector,
+                community_summarizer=community_summarizer,
+                graph_embedder=graph_embedder,
+                llm_provider=provider,
+                enable_dedup=True,
+                semantic_threshold=args.dedup_threshold,
+            )
+            logger.info(f"Post-processor result: {stats}")
+        elif not args.skip_communities and not args.dedup_only:
             await build_communities(args, graph_storage, community_detector, community_summarizer)
 
         stats = graph_storage.get_graph_stats()
@@ -271,6 +288,22 @@ def main():
         help="Skip entity extraction (re-run communities only)",
     )
     parser.add_argument("--skip-communities", action="store_true", help="Skip community detection")
+    parser.add_argument(
+        "--dedup",
+        action="store_true",
+        help="Run entity dedup (exact + semantic) before community detection",
+    )
+    parser.add_argument(
+        "--dedup-threshold",
+        type=float,
+        default=0.85,
+        help="Cosine similarity threshold for semantic dedup (default: 0.85)",
+    )
+    parser.add_argument(
+        "--dedup-only",
+        action="store_true",
+        help="Run only dedup + communities (skip entity extraction)",
+    )
     args = parser.parse_args()
     asyncio.run(async_main(args))
 
