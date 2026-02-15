@@ -108,51 +108,51 @@ async def index_document_pipeline(
     finally:
         doc.close()
 
-    # Embed via Jina in batches
-    batch_size = jina_client.batch_size
-    total_batches = (len(page_ids) + batch_size - 1) // batch_size
-    all_embeddings = []
+    # Run embedding and summarization concurrently (different API providers).
+    # Entity extraction must run AFTER store — graph.entities has FK to vl_pages.
+    # Progress events are funneled through an asyncio.Queue.
+    progress_queue: asyncio.Queue = asyncio.Queue()
 
-    for batch_idx in range(total_batches):
-        start = batch_idx * batch_size
-        end = min(start + batch_size, len(page_ids))
-        batch_page_ids = page_ids[start:end]
+    async def embed_task() -> np.ndarray:
+        """Embed all pages via Jina API."""
+        batch_size = jina_client.batch_size
+        total_batches = (len(page_ids) + batch_size - 1) // batch_size
+        all_embeds = []
 
-        page_images = [page_store.get_image_bytes(pid) for pid in batch_page_ids]
+        for batch_idx in range(total_batches):
+            start = batch_idx * batch_size
+            end = min(start + batch_size, len(page_ids))
+            batch_page_ids = page_ids[start:end]
 
-        batch_embeddings = await asyncio.to_thread(
-            jina_client.embed_pages, page_images
-        )
-        all_embeddings.append(batch_embeddings)
+            page_images = [page_store.get_image_bytes(pid) for pid in batch_page_ids]
+            batch_embeddings = await asyncio.to_thread(
+                jina_client.embed_pages, page_images
+            )
+            all_embeds.append(batch_embeddings)
 
-        percent = int(((batch_idx + 1) / total_batches) * 100)
-        yield {
-            "event": "progress",
-            "data": json.dumps({
+            percent = int(((batch_idx + 1) / total_batches) * 100)
+            await progress_queue.put({
                 "stage": "embedding",
                 "percent": percent,
                 "message": f"Embedding batch {batch_idx + 1}/{total_batches}",
-            }),
-        }
+            })
 
-        if batch_idx + 1 < total_batches:
-            await asyncio.sleep(3)
+            if batch_idx + 1 < total_batches:
+                await asyncio.sleep(3)
 
-    embeddings = np.vstack(all_embeddings)
+        return np.vstack(all_embeds)
 
-    # Summarize pages (if summary_provider available)
-    summaries: dict = {}
-    model_name = None
-    if summary_provider:
+    async def summarize_task() -> tuple:
+        """Summarize pages via LLM. Returns (summaries_dict, model_name)."""
+        sums: dict = {}
         try:
             prompt_path = Path(__file__).resolve().parent.parent.parent / "prompts" / "vl_page_summary.txt"
             prompt_text = prompt_path.read_text(encoding="utf-8")
-            model_name = summary_provider.get_model_name()
+            m_name = summary_provider.get_model_name()
         except Exception as e:
             logger.error(f"Summary setup failed, skipping summarization: {e}")
-            summary_provider = None
+            return sums, None
 
-    if summary_provider:
         max_consecutive_failures = 3
         consecutive_failures = 0
 
@@ -182,7 +182,7 @@ async def index_document_pipeline(
                 )
                 text = response.text.strip() if response.text else None
                 if text:
-                    summaries[page_id] = text
+                    sums[page_id] = text
                     consecutive_failures = 0
                 else:
                     consecutive_failures += 1
@@ -198,17 +198,70 @@ async def index_document_pipeline(
                 break
 
             percent = int(((i + 1) / len(page_ids)) * 100)
+            await progress_queue.put({
+                "stage": "summarizing",
+                "percent": percent,
+                "message": f"Summarizing page {i + 1}/{len(page_ids)}",
+            })
+
+        return sums, m_name
+
+    # Launch embed + summarize concurrently
+    embed_future = asyncio.create_task(embed_task())
+    summarize_future = (
+        asyncio.create_task(summarize_task()) if summary_provider else None
+    )
+
+    tasks = [t for t in [embed_future, summarize_future] if t is not None]
+    done_event = asyncio.Event()
+
+    async def _wait_all():
+        await asyncio.gather(*tasks, return_exceptions=True)
+        done_event.set()
+
+    waiter = asyncio.create_task(_wait_all())
+
+    try:
+        # Yield progress from queue until embed + summarize complete
+        while not done_event.is_set():
+            try:
+                item = await asyncio.wait_for(progress_queue.get(), timeout=0.5)
+                yield {
+                    "event": "progress",
+                    "data": json.dumps(item),
+                }
+            except asyncio.TimeoutError:
+                continue
+
+        # Drain remaining queue items
+        while not progress_queue.empty():
+            item = progress_queue.get_nowait()
             yield {
                 "event": "progress",
-                "data": json.dumps({
-                    "stage": "summarizing",
-                    "percent": percent,
-                    "message": f"Summarizing page {i + 1}/{len(page_ids)}",
-                }),
+                "data": json.dumps(item),
             }
-            await asyncio.sleep(0)
+    except (asyncio.CancelledError, GeneratorExit):
+        # Client disconnected — cancel all running tasks
+        for t in tasks:
+            t.cancel()
+        waiter.cancel()
+        logger.info("Indexing pipeline cancelled by client disconnect")
+        raise
 
-    # Store in PostgreSQL
+    # Check for task failures
+    for t in tasks:
+        exc = t.exception() if t.done() and not t.cancelled() else None
+        if exc:
+            logger.error(f"Pipeline task failed: {exc}", exc_info=exc)
+
+    # Get results
+    embeddings = embed_future.result()
+    summaries: dict = {}
+    model_name = None
+    if summarize_future:
+        summaries, model_name = summarize_future.result()
+
+    # Store in PostgreSQL (needs embeddings + summaries)
     yield {
         "event": "progress",
         "data": json.dumps({
@@ -235,33 +288,27 @@ async def index_document_pipeline(
 
     vector_store.add_vl_pages(pages, embeddings)
 
-    # Graph entity extraction (optional)
+    # Entity extraction (sequential, after store — FK on vl_pages)
     if entity_extractor and graph_storage:
         max_consecutive_failures = 3
         consecutive_failures = 0
 
         for i, page_id in enumerate(page_ids):
             try:
-                # entity_extractor.extract_from_page is sync (LLM call) → offload to thread
                 result = await asyncio.to_thread(
                     entity_extractor.extract_from_page, page_id, page_store
                 )
                 entities = result.get("entities", [])
                 relationships = result.get("relationships", [])
 
-                # graph_storage methods are async-backed → call async API directly
-                # (asyncio.to_thread + _run_async_safe would cause event loop mismatch)
                 if entities:
                     await graph_storage.async_add_entities(
                         entities, document_id, source_page_id=page_id,
                     )
-
                 if relationships:
                     await graph_storage.async_add_relationships(
                         relationships, document_id, source_page_id=page_id,
                     )
-
-                # Successful extraction (even if empty) resets the counter
                 consecutive_failures = 0
 
             except asyncio.CancelledError:
@@ -589,6 +636,36 @@ async def upload_document(
                 f"User {user.get('id', 'unknown')} uploaded and indexed "
                 f"{safe_filename} ({pdf_path.stem}, category={category})"
             )
+
+        except (asyncio.CancelledError, GeneratorExit):
+            logger.info(
+                "Upload cancelled for %s (user %s)",
+                safe_filename, user.get("id", "unknown"),
+            )
+            # Clean up files synchronously (always works)
+            if pdf_path.exists():
+                pdf_path.unlink()
+            doc_dir = page_store.store_dir / document_id
+            if doc_dir.exists():
+                shutil.rmtree(doc_dir, ignore_errors=True)
+            # DB cleanup as fire-and-forget task (await unreliable in GeneratorExit)
+            async def _cleanup_db():
+                try:
+                    await vector_store._ensure_pool()
+                    async with vector_store.pool.acquire() as conn:
+                        await conn.execute(
+                            "DELETE FROM vectors.vl_pages WHERE document_id = $1",
+                            document_id,
+                        )
+                        await conn.execute(
+                            "DELETE FROM vectors.documents WHERE document_id = $1",
+                            document_id,
+                        )
+                    logger.info("DB cleanup completed for cancelled upload: %s", document_id)
+                except Exception as e:
+                    logger.warning("DB cleanup failed for %s: %s", document_id, e)
+            asyncio.create_task(_cleanup_db())
+            return
 
         except Exception as e:
             logger.error(

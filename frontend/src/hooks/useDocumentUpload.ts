@@ -24,7 +24,7 @@ export function useDocumentUpload() {
   const [result, setResult] = useState<UploadResult | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  const startUpload = useCallback(async (file: File) => {
+  const startUpload = useCallback(async (file: File, category?: string) => {
     setIsUploading(true);
     setProgress(null);
     setError(null);
@@ -33,7 +33,7 @@ export function useDocumentUpload() {
     abortRef.current = new AbortController();
 
     try {
-      for await (const event of apiService.uploadDocument(file, abortRef.current.signal)) {
+      for await (const event of apiService.uploadDocument(file, abortRef.current.signal, category)) {
         if (event.event === 'progress') {
           setProgress(event.data as UploadProgress);
         } else if (event.event === 'complete') {

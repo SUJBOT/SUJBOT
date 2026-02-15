@@ -26,8 +26,10 @@ export function DocumentBrowser({ isOpen, onClose }: DocumentBrowserProps) {
   const [error, setError] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { isUploading, progress, error: uploadError, result: uploadResult, startUpload, reset: resetUpload } = useDocumentUpload();
+  const { isUploading, progress, error: uploadError, result: uploadResult, startUpload, cancelUpload, reset: resetUpload } = useDocumentUpload();
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<'documentation' | 'legislation'>('documentation');
 
   // Load documents when opening
   useEffect(() => {
@@ -119,8 +121,9 @@ export function DocumentBrowser({ isOpen, onClose }: DocumentBrowserProps) {
     }
 
     resetUpload();
-    startUpload(file);
-  }, [startUpload, resetUpload, t]);
+    setPendingFile(file);
+    setSelectedCategory('documentation');
+  }, [resetUpload, t]);
 
   const formatSize = (bytes: number): string => {
     if (bytes < 1024 * 1024) {
@@ -221,7 +224,21 @@ export function DocumentBrowser({ isOpen, onClose }: DocumentBrowserProps) {
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs text-accent-600 dark:text-accent-400">
                 <span>{t(`documentBrowser.${progress.stage}` as any, progress.message)}</span>
-                <span>{progress.percent}%</span>
+                <div className="flex items-center gap-2">
+                  <span>{progress.percent}%</span>
+                  <button
+                    onClick={cancelUpload}
+                    className={cn(
+                      'p-0.5 rounded',
+                      'text-accent-400 hover:text-red-500',
+                      'dark:text-accent-500 dark:hover:text-red-400',
+                      'transition-colors'
+                    )}
+                    title={t('common.cancel')}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
               </div>
               <div className="w-full h-1.5 bg-accent-200 dark:bg-accent-700 rounded-full overflow-hidden">
                 <div
@@ -249,6 +266,76 @@ export function DocumentBrowser({ isOpen, onClose }: DocumentBrowserProps) {
               <span>{validationError}</span>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Category selection dialog */}
+      {pendingFile && !isUploading && (
+        <div className={cn(
+          'px-4 py-3',
+          'border-b border-accent-200 dark:border-accent-700'
+        )}>
+          <p className="text-sm font-medium text-accent-800 dark:text-accent-200 mb-2">
+            {t('documentBrowser.selectCategory')}
+          </p>
+          <div className="flex gap-2 mb-3">
+            <button
+              onClick={() => setSelectedCategory('legislation')}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border transition-colors',
+                selectedCategory === 'legislation'
+                  ? 'bg-amber-100 dark:bg-amber-900/30 border-amber-400 dark:border-amber-600 text-amber-800 dark:text-amber-300'
+                  : 'bg-accent-50 dark:bg-accent-800 border-accent-200 dark:border-accent-600 text-accent-600 dark:text-accent-400 hover:bg-accent-100 dark:hover:bg-accent-700'
+              )}
+            >
+              <Scale size={14} />
+              {t('documentBrowser.legislation')}
+            </button>
+            <button
+              onClick={() => setSelectedCategory('documentation')}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border transition-colors',
+                selectedCategory === 'documentation'
+                  ? 'bg-blue-100 dark:bg-blue-900/30 border-blue-400 dark:border-blue-600 text-blue-800 dark:text-blue-300'
+                  : 'bg-accent-50 dark:bg-accent-800 border-accent-200 dark:border-accent-600 text-accent-600 dark:text-accent-400 hover:bg-accent-100 dark:hover:bg-accent-700'
+              )}
+            >
+              <BookOpen size={14} />
+              {t('documentBrowser.documentation')}
+            </button>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-accent-500 dark:text-accent-400 truncate max-w-[60%]">
+              {pendingFile.name}
+            </span>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setPendingFile(null)}
+                className={cn(
+                  'text-xs px-3 py-1.5 rounded-lg',
+                  'text-accent-600 dark:text-accent-400',
+                  'hover:bg-accent-100 dark:hover:bg-accent-700',
+                  'transition-colors'
+                )}
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                onClick={() => {
+                  startUpload(pendingFile, selectedCategory);
+                  setPendingFile(null);
+                }}
+                className={cn(
+                  'text-xs px-3 py-1.5 rounded-lg',
+                  'bg-blue-500 text-white',
+                  'hover:bg-blue-600',
+                  'transition-colors'
+                )}
+              >
+                {t('documentBrowser.startUpload')}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

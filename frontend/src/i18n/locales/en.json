@@ -17,6 +17,10 @@
     "storing": "Storing in database...",
     "uploadComplete": "Document indexed successfully",
     "uploadError": "Upload failed",
+    "selectCategory": "Select document category",
+    "startUpload": "Upload",
+    "summarizing": "Generating page summaries...",
+    "graph_extraction": "Extracting entities...",
     "pdfOnly": "Only PDF files are supported",
     "fileTooLarge": "File too large (max 100 MB)",
     "alreadyExists": "Document already exists"
@@ -139,7 +143,8 @@
     "error": "Error",
     "verifyingSession": "Verifying session...",
     "justNow": "Just now",
-    "ok": "OK"
+    "ok": "OK",
+    "cancel": "Cancel"
   },
   "language": {
     "switchTo": "Switch language",
