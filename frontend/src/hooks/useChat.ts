@@ -326,7 +326,7 @@ export function useChat() {
         const userMessage: Message = {
           id: `msg_${Date.now()}_user`,
           role: 'user',
-          content: content.trim() || (attachments?.length ? `[${attachments.length} file(s) attached]` : ''),
+          content: content.trim() || (attachments?.length ? `[${attachments.length} attachment(s)]` : ''),
           timestamp: new Date().toISOString(),
           // Store selected context metadata for display below message
           selectedContext: selectedContext ? {

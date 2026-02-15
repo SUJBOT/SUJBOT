@@ -119,8 +119,10 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled, refreshSpen
   }, [attachmentError]);
 
   const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
+    // Snapshot files BEFORE resetting input — FileList is a live DOM reference
+    // that gets emptied when input.value is cleared
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
 
     // Reset file input for re-selection of same file
     e.target.value = '';
@@ -131,7 +133,7 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled, refreshSpen
       return;
     }
 
-    const filesToProcess = Array.from(files).slice(0, remainingSlots);
+    const filesToProcess = files.slice(0, remainingSlots);
     if (files.length > remainingSlots) {
       setAttachmentError(t('attachments.tooManyFiles'));
     }
@@ -245,7 +247,7 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled, refreshSpen
                     'hover:text-blue-600 dark:hover:text-blue-300',
                     'transition-colors duration-150'
                   )}
-                  title="Remove"
+                  title={t('attachments.remove')}
                 >
                   <X size={10} />
                 </button>
@@ -290,7 +292,7 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled, refreshSpen
               onClick={handleAttachClick}
               disabled={disabled || attachments.length >= MAX_ATTACHMENTS}
               className={cn(
-                'flex-shrink-0 self-end',
+                'flex-shrink-0 self-center',
                 'w-10 h-10 rounded-xl',
                 'flex items-center justify-center',
                 'transition-all duration-200',
@@ -332,7 +334,7 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled, refreshSpen
               type="button"
               onClick={handleCancel}
               className={cn(
-                'flex-shrink-0 self-end',
+                'flex-shrink-0 self-center',
                 'w-12 h-12 rounded-xl',
                 'bg-red-600 dark:bg-red-500',
                 'text-white',
@@ -352,7 +354,7 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled, refreshSpen
               type="submit"
               disabled={disabled || !hasContent || isMessageTooLong}
               className={cn(
-                'flex-shrink-0 self-end',
+                'flex-shrink-0 self-center',
                 'w-12 h-12 rounded-xl',
                 'flex items-center justify-center',
                 'transition-all duration-200',

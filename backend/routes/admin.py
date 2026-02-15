@@ -1197,7 +1197,7 @@ async def graph_data(
                 try:
                     comm_filter.append(int(c))
                 except ValueError:
-                    pass
+                    logger.warning("Invalid community_id in filter: %r", c)
     type_filter = [t.strip() for t in entity_types.split(",") if t.strip()] if entity_types else []
 
     if not doc_filter and not comm_filter and not type_filter:
@@ -1293,28 +1293,34 @@ async def graph_data(
                             if eid in node_ids and eid not in community_map:
                                 community_map[eid] = crow["community_id"]
 
+            nodes = [
+                {
+                    "id": row["entity_id"],
+                    "name": row["name"],
+                    "type": row["entity_type"],
+                    "description": row["description"],
+                    "document_id": row["document_id"],
+                    "community_id": community_map.get(row["entity_id"]),
+                }
+                for row in node_rows
+            ]
+
+            return {
+                "nodes": nodes,
+                "edges": edges,
+                "total_matching": total_matching,
+                "limited": total_matching > limit,
+            }
+
     except asyncpg.PostgresError as e:
         logger.error(f"Database error fetching graph data: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch graph data",
         )
-
-    nodes = [
-        {
-            "id": row["entity_id"],
-            "name": row["name"],
-            "type": row["entity_type"],
-            "description": row["description"],
-            "document_id": row["document_id"],
-            "community_id": community_map.get(row["entity_id"]),
-        }
-        for row in node_rows
-    ]
-
-    return {
-        "nodes": nodes,
-        "edges": edges,
-        "total_matching": total_matching,
-        "limited": total_matching > limit,
-    }
+    except Exception as e:
+        logger.error(f"Unexpected error in graph data: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch graph data",
+        )

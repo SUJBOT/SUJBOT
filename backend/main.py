@@ -530,10 +530,14 @@ async def health_check():
 
 def _pdf_to_page_images(pdf_bytes: bytes, max_pages: int = 10, dpi: int = 150) -> list:
     """Render PDF bytes to PNG page images for multimodal LLM context."""
-    import base64
     import fitz
 
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    except Exception as e:
+        logger.error("Failed to open PDF attachment (%d bytes): %s", len(pdf_bytes), e)
+        raise ValueError(f"Cannot open PDF: {e}") from e
+
     images = []
     try:
         zoom = dpi / 72.0
@@ -565,8 +569,6 @@ def _build_attachment_blocks(attachments: list) -> list:
     - PDF → render pages to PNG images (max 10 pages)
     - Text documents → extract text content (max 30K chars)
     """
-    import base64
-    from pathlib import Path
     from src.vl.document_converter import DocumentConverter, SUPPORTED_EXTENSIONS
 
     blocks = []
@@ -599,15 +601,15 @@ def _build_attachment_blocks(attachments: list) -> list:
             })
 
         elif mime == "application/pdf":
-            # Render PDF pages to images
+            # Render PDF pages to images (with per-page labels for tool access)
             try:
                 page_images = _pdf_to_page_images(raw_bytes)
-                blocks.extend(page_images)
-                page_count = len(page_images)
-                blocks.append({
-                    "type": "text",
-                    "text": f"[Attached PDF: {att.filename} — {page_count} page(s) shown]",
-                })
+                for page_num, img_block in enumerate(page_images, 1):
+                    blocks.append(img_block)
+                    blocks.append({
+                        "type": "text",
+                        "text": f"[Attached PDF: {att.filename}, page {page_num}]",
+                    })
             except Exception as e:
                 logger.warning(f"Failed to render PDF attachment {att.filename}: {e}")
                 blocks.append({
@@ -858,7 +860,7 @@ async def chat_stream(
                     {
                         "filename": att.filename,
                         "mime_type": att.mime_type,
-                        "size_bytes": len(base64.b64decode(att.base64_data)),
+                        "size_bytes": len(att.base64_data) * 3 // 4,
                     }
                     for att in request.attachments
                 ]
@@ -934,7 +936,17 @@ async def chat_stream(
                     )
                 except Exception as e:
                     logger.error(f"Failed to process attachments: {e}", exc_info=True)
-                    # Continue without attachments rather than failing the request
+                    # Notify user that attachments could not be processed
+                    yield {
+                        "event": "error",
+                        "data": json.dumps(
+                            {
+                                "error": "Attachments could not be processed. Continuing without them.",
+                                "type": "AttachmentError",
+                            },
+                            ensure_ascii=True,
+                        ),
+                    }
 
             async for event in agent_adapter.stream_response(
                 query=query,

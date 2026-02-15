@@ -32,6 +32,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from backend.config import PDF_BASE_DIR
 from backend.middleware.auth import get_current_user
+from src.exceptions import ConversionError
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 logger = logging.getLogger(__name__)
@@ -855,6 +856,23 @@ async def _run_pipeline_task(state: UploadState, content: bytes) -> None:
             }
         )
 
+    except ConversionError as e:
+        logger.error(
+            "Document conversion failed for %s (user %d): %s",
+            state.filename,
+            state.user_id,
+            e,
+            exc_info=True,
+        )
+        _cleanup_upload_files(state.pdf_path, page_store, document_id)
+        state.error = str(e)
+        state.events.append(
+            {
+                "event": "error",
+                "data": json.dumps({"message": str(e), "stage": "converting"}),
+            }
+        )
+
     except Exception as e:
         logger.error(
             "Upload indexing failed for %s (user %d): %s",
@@ -932,6 +950,7 @@ async def upload_document(
         )
 
     # Validate file type
+    from src.exceptions import ConversionError
     from src.vl.document_converter import SUPPORTED_EXTENSIONS, DocumentConverter
 
     if not file.filename:

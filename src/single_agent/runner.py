@@ -8,6 +8,7 @@ LLM that decides which tools to call and when to stop.
 import asyncio
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
@@ -645,12 +646,10 @@ class SingleAgentRunner:
                     "page": None,
                 }
             elif block.get("type") == "text" and pending_image is not None:
-                # Parse label: "[Attached PDF: doc.pdf, page 3]" or "[Attached image: photo.jpg]"
+                # Parse label: "[Attached PDF: doc.pdf, page 1]" or "[Attached image: photo.jpg]"
                 text = block.get("text", "")
-                import re
-
                 pdf_match = re.match(
-                    r"\[Attached PDF: (.+?), page (\d+)(?:.*?)?\]", text
+                    r"\[Attached PDF: (.+?), page (\d+)\]", text
                 )
                 img_match = re.match(r"\[Attached image: (.+?)\]", text)
 

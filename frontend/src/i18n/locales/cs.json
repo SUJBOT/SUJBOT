@@ -330,6 +330,7 @@
   },
   "attachments": {
     "attach": "Připojit soubor",
+    "remove": "Odebrat",
     "fileTooLarge": "Soubor je příliš velký (max 10 MB)",
     "unsupportedType": "Nepodporovaný typ souboru. Podporováno: obrázky, PDF, DOCX, TXT, Markdown, HTML, LaTeX",
     "tooManyFiles": "Maximálně 5 souborů",

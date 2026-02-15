@@ -328,6 +328,7 @@
   },
   "attachments": {
     "attach": "Attach file",
+    "remove": "Remove",
     "fileTooLarge": "File too large (max 10 MB)",
     "unsupportedType": "Unsupported file type. Supported: images, PDF, DOCX, TXT, Markdown, HTML, LaTeX",
     "tooManyFiles": "Maximum 5 files",

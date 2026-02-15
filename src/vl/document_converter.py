@@ -110,7 +110,10 @@ class DocumentConverter:
             else:
                 return _decode_text(content)
         except Exception as e:
-            logger.warning(f"Text extraction failed for {ext}, falling back to raw decode: {e}")
+            logger.warning(f"Text extraction failed for {ext}: {e}", exc_info=True)
+            # Binary formats produce garbled text when raw-decoded — return error message
+            if ext in (".docx", ".pdf"):
+                return f"[Error: Could not extract text from {ext} file: {e}]"
             return _decode_text(content)
 
     @staticmethod
@@ -244,8 +247,8 @@ class DocumentConverter:
         except Exception:
             try:
                 writer.close()
-            except Exception:
-                pass
+            except Exception as cleanup_err:
+                logger.debug("Failed to close DocumentWriter during cleanup: %s", cleanup_err)
             raise
 
     async def _latex_to_pdf(self, content: bytes) -> bytes:
@@ -261,9 +264,12 @@ class DocumentConverter:
             input_path.write_bytes(content)
 
             # Two passes for cross-references
+            output_path = Path(tmpdir) / "input.pdf"
             for pass_num in range(2):
                 proc = await asyncio.create_subprocess_exec(
                     "pdflatex",
+                    "--no-shell-escape",
+                    "-no-parse-first-line",
                     "-interaction=nonstopmode",
                     "-output-directory",
                     tmpdir,
@@ -281,7 +287,9 @@ class DocumentConverter:
                         details={"timeout": 120, "pass": pass_num + 1},
                     )
 
-            output_path = Path(tmpdir) / "input.pdf"
+                # After pass 1, skip pass 2 if no output was produced
+                if pass_num == 0 and proc.returncode != 0 and not output_path.exists():
+                    break
             if not output_path.exists():
                 # Try to extract a useful error from the log
                 log_path = Path(tmpdir) / "input.log"

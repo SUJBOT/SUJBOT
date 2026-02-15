@@ -377,42 +377,6 @@ export class ApiService {
   }
 
   /**
-   * Check for an active upload and stream its status via SSE.
-   * Yields nothing if no active upload (204 response).
-   */
-  async *getUploadStatus(): AsyncGenerator<SSEEvent, void, unknown> {
-    let response;
-    try {
-      response = await fetch(`${API_BASE_URL}/documents/upload-status`, {
-        method: 'GET',
-        credentials: 'include',
-      });
-    } catch {
-      return; // Network error — no active upload
-    }
-
-    if (response.status === 204 || !response.ok) {
-      return;
-    }
-
-    const reader = response.body?.getReader();
-    if (!reader) return;
-
-    yield* parseSSEStream(reader, { timeoutMs: 10 * 60 * 1000 });
-  }
-
-  /**
-   * Cancel an active upload on the backend
-   */
-  async cancelUpload(): Promise<void> {
-    await fetch(`${API_BASE_URL}/documents/upload-cancel`, {
-      method: 'POST',
-      headers: this.getHeaders(),
-      credentials: 'include',
-    });
-  }
-
-  /**
    * Stream clarification response using Server-Sent Events (SSE)
    *
    * Called when user responds to clarification questions. Resumes the workflow.
