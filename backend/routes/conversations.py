@@ -6,7 +6,9 @@ All endpoints require JWT authentication and verify conversation ownership.
 """
 
 from datetime import datetime
+import pathlib
 from typing import Dict, List, Optional
+import shutil
 import uuid
 import logging
 
@@ -18,6 +20,8 @@ from src.storage.postgres_adapter import PostgreSQLStorageAdapter
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 logger = logging.getLogger(__name__)
+
+ATTACHMENTS_DIR = pathlib.Path("data/attachments")
 
 # ============================================================================
 # Pydantic Models
@@ -298,6 +302,12 @@ async def delete_conversation(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Conversation not found or you do not have access to it"
             )
+
+        # Cleanup attachment files
+        att_dir = ATTACHMENTS_DIR / conversation_id
+        if att_dir.exists():
+            shutil.rmtree(att_dir, ignore_errors=True)
+            logger.info(f"Cleaned up attachments for conversation {conversation_id}")
 
         return None  # 204 No Content
     except HTTPException:

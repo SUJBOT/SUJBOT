@@ -19,6 +19,7 @@ interface ContextMenuState {
 interface SidebarProps {
   conversations: Conversation[];
   currentConversationId: string | null;
+  streamingConversationIds: Set<string>;
   onSelectConversation: (id: string) => void;
   onNewConversation: () => void;
   onDeleteConversation: (id: string) => void;
@@ -28,6 +29,7 @@ interface SidebarProps {
 export function Sidebar({
   conversations,
   currentConversationId,
+  streamingConversationIds,
   onSelectConversation,
   onNewConversation,
   onDeleteConversation,
@@ -118,6 +120,7 @@ export function Sidebar({
                   key={conversation.id}
                   conversation={conversation}
                   isActive={currentConversationId === conversation.id}
+                  isStreaming={streamingConversationIds.has(conversation.id)}
                   isEditing={editingId === conversation.id}
                   onSelect={onSelectConversation}
                   onDelete={onDeleteConversation}
@@ -182,6 +185,7 @@ export function Sidebar({
 interface ConversationItemProps {
   conversation: Conversation;
   isActive: boolean;
+  isStreaming: boolean;
   isEditing: boolean;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
@@ -193,6 +197,7 @@ interface ConversationItemProps {
 function ConversationItem({
   conversation,
   isActive,
+  isStreaming,
   isEditing,
   onSelect,
   onDelete,
@@ -240,7 +245,14 @@ function ConversationItem({
           : 'hover:bg-accent-100 dark:hover:bg-accent-800/50 hover:translate-x-1'
       )}
     >
-      <MessageSquare size={16} className="flex-shrink-0" />
+      {isStreaming ? (
+        <span
+          className="flex-shrink-0 w-3.5 h-3.5 rounded-full border-2 border-accent-300 dark:border-accent-600 border-t-accent-700 dark:border-t-accent-300 animate-spin"
+          title={t('sidebar.generating')}
+        />
+      ) : (
+        <MessageSquare size={16} className="flex-shrink-0" />
+      )}
       <div className="flex-1 min-w-0">
         {isEditing ? (
           <input

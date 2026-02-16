@@ -55,6 +55,7 @@ function MainApp() {
     conversations,
     currentConversation,
     isStreaming,
+    streamingConversationIds,
     clarificationData,
     awaitingClarification,
     spendingLimitError,
@@ -207,6 +208,7 @@ function MainApp() {
           <Sidebar
             conversations={conversations}
             currentConversationId={currentConversation?.id || null}
+            streamingConversationIds={streamingConversationIds}
             onSelectConversation={handleSelectConversation}
             onNewConversation={createConversation}
             onDeleteConversation={deleteConversation}

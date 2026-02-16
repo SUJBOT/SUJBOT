@@ -1,5 +1,8 @@
 /**
  * useChat hook - Manages chat state and SSE streaming
+ *
+ * Supports per-conversation parallel streaming: multiple conversations
+ * can stream responses simultaneously, each with isolated state.
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
@@ -32,6 +35,13 @@ export interface SpendingLimitError {
   spending_limit_czk: number;
 }
 
+// Per-conversation streaming state (mutable, stored in ref map)
+interface StreamingState {
+  currentMessage: Message | null;
+  currentToolCalls: Map<string, ToolCall>;
+  abortController: AbortController;
+}
+
 export function useChat() {
   const { isAuthenticated } = useAuth();
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -39,12 +49,18 @@ export function useChat() {
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(
     getValidConversationIdFromUrl
   );
-  const [isStreaming, setIsStreaming] = useState(false);
+  // Set of conversation IDs currently streaming (React state for UI re-renders)
+  const [streamingConversationIds, setStreamingConversationIds] = useState<Set<string>>(new Set());
   const [clarificationData, setClarificationData] = useState<ClarificationData | null>(null);
   const [awaitingClarification, setAwaitingClarification] = useState(false);
   // Spending tracking
   const [spendingLimitError, setSpendingLimitError] = useState<SpendingLimitError | null>(null);
   const [spendingRefreshTrigger, setSpendingRefreshTrigger] = useState(0);
+
+  // Derived: is the CURRENT conversation streaming? (backward-compatible API)
+  const isStreaming = currentConversationId
+    ? streamingConversationIds.has(currentConversationId)
+    : false;
 
   // Sync URL with current conversation ID (for refresh persistence and shareable links)
   useEffect(() => {
@@ -108,27 +124,25 @@ export function useChat() {
     }
   }, [conversations, currentConversationId]);
 
-  // Refs for managing streaming state
-  const currentMessageRef = useRef<Message | null>(null);
-  const currentToolCallsRef = useRef<Map<string, ToolCall>>(new Map());
-
-  // AbortController for cancelling streaming on page refresh/navigation
-  // This ensures backend doesn't continue processing when user leaves the page
-  const abortControllerRef = useRef<AbortController | null>(null);
+  // Per-conversation streaming state map (mutable ref, no re-renders)
+  const streamingRefsMap = useRef<Map<string, StreamingState>>(new Map());
 
   // Warn user and cancel streaming on page unload (refresh, close, navigation)
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      // Only show warning if actively streaming
-      if (abortControllerRef.current) {
+      // Only show warning if any conversation is actively streaming
+      if (streamingRefsMap.current.size > 0) {
         // Standard way to show browser's "Leave page?" dialog
         e.preventDefault();
         // For older browsers (Chrome < 119)
         e.returnValue = '';
 
-        console.log('🔄 useChat: Aborting stream due to page unload');
-        abortControllerRef.current.abort();
-        abortControllerRef.current = null;
+        console.log('🔄 useChat: Aborting all streams due to page unload');
+        for (const [id, state] of streamingRefsMap.current) {
+          console.log(`  Aborting stream for conversation ${id}`);
+          state.abortController.abort();
+        }
+        streamingRefsMap.current.clear();
       }
     };
 
@@ -136,10 +150,10 @@ export function useChat() {
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       // Also cleanup on hook unmount
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-        abortControllerRef.current = null;
+      for (const [, state] of streamingRefsMap.current) {
+        state.abortController.abort();
       }
+      streamingRefsMap.current.clear();
     };
   }, []);
 
@@ -261,8 +275,22 @@ export function useChat() {
 
   /**
    * Delete a conversation
+   * If the conversation is currently streaming, abort its stream first.
    */
   const deleteConversation = useCallback(async (id: string) => {
+    // Abort stream if this conversation is currently streaming
+    const streamState = streamingRefsMap.current.get(id);
+    if (streamState) {
+      console.log(`🛑 useChat: Aborting stream for deleted conversation ${id}`);
+      streamState.abortController.abort();
+      streamingRefsMap.current.delete(id);
+      setStreamingConversationIds(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+
     try {
       // Delete from server
       await apiService.deleteConversation(id);
@@ -285,6 +313,11 @@ export function useChat() {
 
   /**
    * Send a message and stream the response
+   *
+   * Per-conversation isolation: each call creates its own StreamingState in the
+   * streamingRefsMap. The captured `conversation.id` scopes all SSE handlers to
+   * that conversation, allowing multiple concurrent streams.
+   *
    * @param content - The message content to send
    * @param addUserMessage - Whether to add a new user message (false for regenerate/edit)
    * @param selectedContext - Optional selected text from PDF for additional context
@@ -298,7 +331,8 @@ export function useChat() {
       pageStart: number;
       pageEnd: number;
     } | null, attachments?: Attachment[] | null) => {
-      if (isStreaming || (!content.trim() && (!attachments || attachments.length === 0))) {
+      // Content validation (conversation-independent)
+      if (!content.trim() && (!attachments || attachments.length === 0)) {
         return;
       }
 
@@ -317,6 +351,12 @@ export function useChat() {
         }
       } else {
         conversation = await createConversation();
+      }
+
+      // Per-conversation streaming guard: block double-send to the SAME conversation
+      if (streamingRefsMap.current.has(conversation.id)) {
+        console.log(`⚠️ useChat: Conversation ${conversation.id} is already streaming, ignoring send`);
+        return;
       }
 
       let updatedConversation: Conversation;
@@ -363,22 +403,26 @@ export function useChat() {
         prev.map((c) => (c.id === updatedConversation.id ? updatedConversation : c))
       );
 
-      // Initialize assistant message with agent progress
-      currentMessageRef.current = {
-        id: `msg_${Date.now()}_assistant`,
-        role: 'assistant',
-        content: '',
-        timestamp: new Date().toISOString(),
-        toolCalls: [],
-        agentProgress: {
-          currentAgent: 'orchestrator', // Start with orchestrator immediately
-          currentMessage: 'Initializing...',
-          completedAgents: [],
-          activeTools: [],
-          isStreaming: true // Keep indicator visible until done event
-        }
+      // Create per-conversation streaming state
+      const streamState: StreamingState = {
+        currentMessage: {
+          id: `msg_${Date.now()}_assistant`,
+          role: 'assistant',
+          content: '',
+          timestamp: new Date().toISOString(),
+          toolCalls: [],
+          agentProgress: {
+            currentAgent: 'orchestrator', // Start with orchestrator immediately
+            currentMessage: 'Initializing...',
+            completedAgents: [],
+            activeTools: [],
+            isStreaming: true // Keep indicator visible until done event
+          }
+        },
+        currentToolCalls: new Map(),
+        abortController: new AbortController(),
       };
-      currentToolCallsRef.current = new Map();
+      streamingRefsMap.current.set(conversation.id, streamState);
 
       // IMMEDIATE UPDATE: Add placeholder message to state so UI shows "Thinking..." instantly
       // This prevents the "empty gap" before first backend event arrives
@@ -387,19 +431,13 @@ export function useChat() {
           if (c.id !== updatedConversation.id) return c;
           return {
             ...c,
-            messages: [...c.messages, currentMessageRef.current!]
+            messages: [...c.messages, streamState.currentMessage!]
           };
         })
       );
 
-      setIsStreaming(true);
-
-      // Create new AbortController for this stream
-      // Abort any previous stream first (shouldn't happen but defensive)
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-      abortControllerRef.current = new AbortController();
+      // Add to streaming set (triggers UI re-render for spinners/buttons)
+      setStreamingConversationIds(prev => new Set([...prev, conversation.id]));
 
       try {
         // Prepare message history for context (last 10 pairs = 20 messages)
@@ -425,7 +463,7 @@ export function useChat() {
           page_end: selectedContext.pageEnd,
         } : null;
 
-        // Convert attachments to API format (camelCase → snake_case)
+        // Convert attachments to API format (camelCase -> snake_case)
         const apiAttachments = attachments?.length
           ? attachments.map(att => ({
               filename: att.filename,
@@ -440,7 +478,7 @@ export function useChat() {
           conversation.id,
           !addUserMessage,  // Skip saving user message when regenerating/editing (already exists)
           messageHistory,   // Pass conversation history for context
-          abortControllerRef.current.signal,  // Allow cancellation on page refresh
+          streamState.abortController.signal,  // Allow cancellation on page refresh
           apiSelectedContext,  // Pass selected text from PDF for additional context
           apiAttachments,  // Pass file attachments for multimodal context
         )) {
@@ -453,8 +491,8 @@ export function useChat() {
               console.info('Tool health:', event.data.summary);
             }
             // Store tool health in message metadata for debugging
-            if (currentMessageRef.current) {
-              currentMessageRef.current.toolHealth = {
+            if (streamState.currentMessage) {
+              streamState.currentMessage.toolHealth = {
                 healthy: event.data.healthy,
                 summary: event.data.summary,
                 unavailableTools: event.data.unavailable_tools,
@@ -464,27 +502,27 @@ export function useChat() {
           }
           // Handle agent progress events
           else if (event.event === 'agent_start') {
-            if (currentMessageRef.current && currentMessageRef.current.agentProgress) {
+            if (streamState.currentMessage && streamState.currentMessage.agentProgress) {
               // Mark previous agent as completed
-              if (currentMessageRef.current.agentProgress.currentAgent) {
-                currentMessageRef.current.agentProgress.completedAgents.push(
-                  currentMessageRef.current.agentProgress.currentAgent
+              if (streamState.currentMessage.agentProgress.currentAgent) {
+                streamState.currentMessage.agentProgress.completedAgents.push(
+                  streamState.currentMessage.agentProgress.currentAgent
                 );
               }
 
               // Set new current agent and clear activeTools
-              currentMessageRef.current.agentProgress.currentAgent = event.data.agent;
-              currentMessageRef.current.agentProgress.currentMessage = event.data.message;
-              currentMessageRef.current.agentProgress.activeTools = [];
+              streamState.currentMessage.agentProgress.currentAgent = event.data.agent;
+              streamState.currentMessage.agentProgress.currentMessage = event.data.message;
+              streamState.currentMessage.agentProgress.activeTools = [];
 
               // Update UI - IMPORTANT: Deep copy agentProgress to trigger React re-render
               // Capture snapshot of current message to avoid race conditions where ref becomes null
-              const currentMessageSnapshot = { ...currentMessageRef.current };
-              const currentAgentProgressSnapshot = currentMessageRef.current.agentProgress
+              const currentMessageSnapshot = { ...streamState.currentMessage };
+              const currentAgentProgressSnapshot = streamState.currentMessage.agentProgress
                 ? {
-                  ...currentMessageRef.current.agentProgress,
-                  activeTools: [...(currentMessageRef.current.agentProgress.activeTools || [])],
-                  completedAgents: [...(currentMessageRef.current.agentProgress.completedAgents || [])]
+                  ...streamState.currentMessage.agentProgress,
+                  activeTools: [...(streamState.currentMessage.agentProgress.activeTools || [])],
+                  completedAgents: [...(streamState.currentMessage.agentProgress.completedAgents || [])]
                 }
                 : undefined;
 
@@ -514,23 +552,23 @@ export function useChat() {
           }
           else if (event.event === 'tool_call') {
             // Tool call event (running/completed/failed)
-            if (currentMessageRef.current && currentMessageRef.current.agentProgress) {
+            if (streamState.currentMessage && streamState.currentMessage.agentProgress) {
               const { tool, status, timestamp } = event.data;
 
               if (status === 'running') {
                 // Add new tool to activeTools
-                currentMessageRef.current.agentProgress.activeTools.push({
+                streamState.currentMessage.agentProgress.activeTools.push({
                   tool,
                   status,
                   timestamp
                 });
               } else if (status === 'completed' || status === 'failed') {
                 // Update status of existing tool
-                const toolIndex = currentMessageRef.current.agentProgress.activeTools.findIndex(
+                const toolIndex = streamState.currentMessage.agentProgress.activeTools.findIndex(
                   t => t.tool === tool && t.status === 'running'
                 );
                 if (toolIndex >= 0) {
-                  currentMessageRef.current.agentProgress.activeTools[toolIndex].status = status;
+                  streamState.currentMessage.agentProgress.activeTools[toolIndex].status = status;
                 }
               }
 
@@ -543,9 +581,9 @@ export function useChat() {
                   const lastMsg = messages[messages.length - 1];
 
                   if (lastMsg?.role === 'assistant') {
-                    messages[messages.length - 1] = { ...currentMessageRef.current! };
+                    messages[messages.length - 1] = { ...streamState.currentMessage! };
                   } else {
-                    messages.push({ ...currentMessageRef.current! });
+                    messages.push({ ...streamState.currentMessage! });
                   }
 
                   return { ...c, messages };
@@ -555,18 +593,18 @@ export function useChat() {
           }
           else if (event.event === 'text_delta') {
             // Append text delta
-            if (currentMessageRef.current) {
+            if (streamState.currentMessage) {
               // Transition to synthesizing phase when text starts arriving
-              if (currentMessageRef.current.agentProgress && currentMessageRef.current.agentProgress.currentAgent && currentMessageRef.current.agentProgress.currentAgent !== 'synthesizing') {
-                currentMessageRef.current.agentProgress.completedAgents.push(
-                  currentMessageRef.current.agentProgress.currentAgent
+              if (streamState.currentMessage.agentProgress && streamState.currentMessage.agentProgress.currentAgent && streamState.currentMessage.agentProgress.currentAgent !== 'synthesizing') {
+                streamState.currentMessage.agentProgress.completedAgents.push(
+                  streamState.currentMessage.agentProgress.currentAgent
                 );
-                currentMessageRef.current.agentProgress.currentAgent = 'synthesizing';
-                currentMessageRef.current.agentProgress.currentMessage = null;
-                currentMessageRef.current.agentProgress.activeTools = [];
+                streamState.currentMessage.agentProgress.currentAgent = 'synthesizing';
+                streamState.currentMessage.agentProgress.currentMessage = null;
+                streamState.currentMessage.agentProgress.activeTools = [];
               }
 
-              currentMessageRef.current.content += event.data.content;
+              streamState.currentMessage.content += event.data.content;
 
               // Update UI
               setConversations((prev) =>
@@ -578,10 +616,10 @@ export function useChat() {
 
                   if (lastMsg?.role === 'assistant') {
                     // Update existing assistant message
-                    messages[messages.length - 1] = { ...currentMessageRef.current! };
+                    messages[messages.length - 1] = { ...streamState.currentMessage! };
                   } else {
                     // Add new assistant message
-                    messages.push({ ...currentMessageRef.current! });
+                    messages.push({ ...streamState.currentMessage! });
                   }
 
                   return { ...c, messages };
@@ -592,7 +630,7 @@ export function useChat() {
           else if (event.event === 'tool_result') {
             // Tool execution completed
             const callId = event.data.call_id;
-            const existingToolCall = currentToolCallsRef.current.get(callId);
+            const existingToolCall = streamState.currentToolCalls.get(callId);
 
             if (existingToolCall) {
               existingToolCall.result = event.data.result;
@@ -600,9 +638,9 @@ export function useChat() {
               existingToolCall.success = event.data.success;
               existingToolCall.status = event.data.success ? 'completed' : 'failed';
 
-              if (currentMessageRef.current) {
-                currentMessageRef.current.toolCalls = Array.from(
-                  currentToolCallsRef.current.values()
+              if (streamState.currentMessage) {
+                streamState.currentMessage.toolCalls = Array.from(
+                  streamState.currentToolCalls.values()
                 );
               }
 
@@ -612,7 +650,7 @@ export function useChat() {
                   if (c.id !== updatedConversation.id) return c;
 
                   const messages = [...c.messages];
-                  messages[messages.length - 1] = { ...currentMessageRef.current! };
+                  messages[messages.length - 1] = { ...streamState.currentMessage! };
 
                   return { ...c, messages };
                 })
@@ -621,21 +659,21 @@ export function useChat() {
               // Tool result without matching tool call (race condition or backend error)
               console.error('❌ Received tool_result for unknown call_id:', {
                 callId,
-                knownCallIds: Array.from(currentToolCallsRef.current.keys()),
+                knownCallIds: Array.from(streamState.currentToolCalls.keys()),
                 resultData: event.data
               });
 
               // Add warning message to chat
-              if (currentMessageRef.current) {
-                currentMessageRef.current.content +=
+              if (streamState.currentMessage) {
+                streamState.currentMessage.content +=
                   `\n\n[Warning: Received result for tool call ${callId} but call not found]`;
               }
             }
           } else if (event.event === 'tool_calls_summary') {
             // Tool calls summary from backend
-            if (currentMessageRef.current && event.data.tool_calls) {
+            if (streamState.currentMessage && event.data.tool_calls) {
               // Convert backend tool calls to frontend format
-              currentMessageRef.current.toolCalls = event.data.tool_calls.map((tc: any) => ({
+              streamState.currentMessage.toolCalls = event.data.tool_calls.map((tc: any) => ({
                 id: tc.id,
                 name: tc.name,
                 input: tc.input,
@@ -652,7 +690,7 @@ export function useChat() {
                   if (c.id !== updatedConversation.id) return c;
 
                   const messages = [...c.messages];
-                  messages[messages.length - 1] = { ...currentMessageRef.current! };
+                  messages[messages.length - 1] = { ...streamState.currentMessage! };
 
                   return { ...c, messages };
                 })
@@ -662,7 +700,7 @@ export function useChat() {
             // Cost tracking summary with per-agent breakdown
             console.log('💰 FRONTEND: Cost summary received:', event.data);
 
-            if (currentMessageRef.current) {
+            if (streamState.currentMessage) {
               // Validate and sanitize cost data
               const totalCost = typeof event.data.total_cost === 'number' ? event.data.total_cost : 0;
               const inputTokens = typeof event.data.total_input_tokens === 'number' ? event.data.total_input_tokens : 0;
@@ -677,7 +715,7 @@ export function useChat() {
                 console.error('❌ Invalid token counts:', { inputTokens, outputTokens });
               }
 
-              currentMessageRef.current.cost = {
+              streamState.currentMessage.cost = {
                 totalCost: Math.max(0, totalCost),
                 inputTokens: Math.max(0, inputTokens),
                 outputTokens: Math.max(0, outputTokens),
@@ -692,7 +730,7 @@ export function useChat() {
                   if (c.id !== updatedConversation.id) return c;
 
                   const messages = [...c.messages];
-                  messages[messages.length - 1] = { ...currentMessageRef.current! };
+                  messages[messages.length - 1] = { ...streamState.currentMessage! };
 
                   return { ...c, messages };
                 })
@@ -719,18 +757,18 @@ export function useChat() {
             }
           } else if (event.event === 'message_saved') {
             // Message saved to database - capture message ID for feedback
-            if (currentMessageRef.current && event.data?.message_id) {
-              currentMessageRef.current.dbMessageId = event.data.message_id;
+            if (streamState.currentMessage && event.data?.message_id) {
+              streamState.currentMessage.dbMessageId = event.data.message_id;
             }
           } else if (event.event === 'done') {
             // Stream completed - mark streaming as finished
-            if (currentMessageRef.current?.agentProgress) {
-              currentMessageRef.current.agentProgress.isStreaming = false;
-              currentMessageRef.current.agentProgress.currentAgent = null;
+            if (streamState.currentMessage?.agentProgress) {
+              streamState.currentMessage.agentProgress.isStreaming = false;
+              streamState.currentMessage.agentProgress.currentAgent = null;
             }
             // Capture run_id for feedback correlation (LangSmith trace ID)
-            if (currentMessageRef.current && event.data?.run_id) {
-              currentMessageRef.current.runId = event.data.run_id;
+            if (streamState.currentMessage && event.data?.run_id) {
+              streamState.currentMessage.runId = event.data.run_id;
             }
             // Don't break yet - wait for message_saved event
           } else if (event.event === 'error') {
@@ -749,15 +787,15 @@ export function useChat() {
               break;
             }
 
-            if (currentMessageRef.current) {
-              currentMessageRef.current.content += `\n\n[Error: ${event.data.error}]`;
+            if (streamState.currentMessage) {
+              streamState.currentMessage.content += `\n\n[Error: ${event.data.error}]`;
             }
           }
         }
 
         // Ensure final message is in state before saving
         // Capture the ref value before async operations
-        const finalMessage = currentMessageRef.current;
+        const finalMessage = streamState.currentMessage;
         if (finalMessage) {
           setConversations((prev) =>
             prev.map((c) => {
@@ -804,21 +842,24 @@ export function useChat() {
           console.error('Error stack:', (error as Error).stack);
 
           // Add error message
-          if (currentMessageRef.current) {
-            currentMessageRef.current.content += `\n\n[Error: ${(error as Error).message}]`;
+          if (streamState.currentMessage) {
+            streamState.currentMessage.content += `\n\n[Error: ${(error as Error).message}]`;
           }
         }
       } finally {
-        setIsStreaming(false);
-        currentMessageRef.current = null;
-        currentToolCallsRef.current = new Map();
-        abortControllerRef.current = null;  // Cleanup abort controller
+        // Clean up per-conversation streaming state
+        streamingRefsMap.current.delete(conversation.id);
+        setStreamingConversationIds(prev => {
+          const next = new Set(prev);
+          next.delete(conversation.id);
+          return next;
+        });
         // Invalidate spending cache and trigger refresh after each message
         apiService.invalidateSpendingCache();
         setSpendingRefreshTrigger((prev) => prev + 1);
       }
     },
-    [isStreaming, createConversation, currentConversationId, conversations]
+    [createConversation, currentConversationId, conversations]
   );
 
   /**
@@ -826,7 +867,8 @@ export function useChat() {
    */
   const editMessage = useCallback(
     async (messageId: string, newContent: string) => {
-      if (isStreaming || !newContent.trim()) return;
+      // Per-conversation guard: block edit only if THIS conversation is streaming
+      if (streamingRefsMap.current.has(currentConversationId ?? '') || !newContent.trim()) return;
 
       // Use functional update to get current conversation state
       let shouldSend = false;
@@ -884,7 +926,7 @@ export function useChat() {
         await sendMessage(newContent);
       }
     },
-    [isStreaming, sendMessage, currentConversationId]
+    [sendMessage, currentConversationId]
   );
 
   /**
@@ -892,7 +934,8 @@ export function useChat() {
    */
   const regenerateMessage = useCallback(
     async (messageId: string) => {
-      if (isStreaming) {
+      // Per-conversation guard: block regenerate only if THIS conversation is streaming
+      if (streamingRefsMap.current.has(currentConversationId ?? '')) {
         return;
       }
 
@@ -968,7 +1011,7 @@ export function useChat() {
       // Pass false to prevent adding a new user message (we're regenerating from existing)
       await sendMessage(userMessageContent, false);
     },
-    [isStreaming, sendMessage, currentConversationId, cleanMessages]
+    [sendMessage, currentConversationId, cleanMessages]
   );
 
   /**
@@ -993,17 +1036,20 @@ export function useChat() {
         return;
       }
 
-      // Initialize assistant message for resumed workflow
-      currentMessageRef.current = {
-        id: `msg_${Date.now()}_assistant`,
-        role: 'assistant',
-        content: '',
-        timestamp: new Date().toISOString(),
-        toolCalls: [],
+      // Create per-conversation streaming state for clarification
+      const streamState: StreamingState = {
+        currentMessage: {
+          id: `msg_${Date.now()}_assistant`,
+          role: 'assistant',
+          content: '',
+          timestamp: new Date().toISOString(),
+          toolCalls: [],
+        },
+        currentToolCalls: new Map(),
+        abortController: new AbortController(),
       };
-      currentToolCallsRef.current = new Map();
-
-      setIsStreaming(true);
+      streamingRefsMap.current.set(conversation.id, streamState);
+      setStreamingConversationIds(prev => new Set([...prev, conversation.id]));
 
       try {
         // Stream clarification response from backend
@@ -1012,8 +1058,8 @@ export function useChat() {
 
           if (event.event === 'text_delta') {
             // Append text delta
-            if (currentMessageRef.current) {
-              currentMessageRef.current.content += event.data.content;
+            if (streamState.currentMessage) {
+              streamState.currentMessage.content += event.data.content;
 
               setConversations((prev) =>
                 prev.map((c) => {
@@ -1023,9 +1069,9 @@ export function useChat() {
                   const lastMsg = messages[messages.length - 1];
 
                   if (lastMsg?.role === 'assistant') {
-                    messages[messages.length - 1] = { ...currentMessageRef.current! };
+                    messages[messages.length - 1] = { ...streamState.currentMessage! };
                   } else {
-                    messages.push({ ...currentMessageRef.current! });
+                    messages.push({ ...streamState.currentMessage! });
                   }
 
                   return { ...c, messages };
@@ -1034,8 +1080,8 @@ export function useChat() {
             }
           } else if (event.event === 'cost_summary') {
             // Cost tracking update
-            if (currentMessageRef.current) {
-              currentMessageRef.current.cost = {
+            if (streamState.currentMessage) {
+              streamState.currentMessage.cost = {
                 totalCost: event.data.total_cost,
                 inputTokens: event.data.input_tokens,
                 outputTokens: event.data.output_tokens,
@@ -1048,7 +1094,7 @@ export function useChat() {
                   if (c.id !== conversation.id) return c;
 
                   const messages = [...c.messages];
-                  messages[messages.length - 1] = { ...currentMessageRef.current! };
+                  messages[messages.length - 1] = { ...streamState.currentMessage! };
 
                   return { ...c, messages };
                 })
@@ -1056,32 +1102,32 @@ export function useChat() {
             }
           } else if (event.event === 'message_saved') {
             // Message saved to database - capture message ID for feedback
-            if (currentMessageRef.current && event.data?.message_id) {
-              currentMessageRef.current.dbMessageId = event.data.message_id;
+            if (streamState.currentMessage && event.data?.message_id) {
+              streamState.currentMessage.dbMessageId = event.data.message_id;
             }
           } else if (event.event === 'done') {
             // Stream completed - mark streaming as finished
-            if (currentMessageRef.current?.agentProgress) {
-              currentMessageRef.current.agentProgress.isStreaming = false;
-              currentMessageRef.current.agentProgress.currentAgent = null;
+            if (streamState.currentMessage?.agentProgress) {
+              streamState.currentMessage.agentProgress.isStreaming = false;
+              streamState.currentMessage.agentProgress.currentAgent = null;
             }
             // Capture run_id for feedback correlation (LangSmith trace ID)
-            if (currentMessageRef.current && event.data?.run_id) {
-              currentMessageRef.current.runId = event.data.run_id;
+            if (streamState.currentMessage && event.data?.run_id) {
+              streamState.currentMessage.runId = event.data.run_id;
             }
             // Don't break yet - wait for message_saved event
           } else if (event.event === 'error') {
             // Error occurred
             console.error('Clarification stream error:', event.data);
 
-            if (currentMessageRef.current) {
-              currentMessageRef.current.content += `\n\n[Error: ${event.data.error}]`;
+            if (streamState.currentMessage) {
+              streamState.currentMessage.content += `\n\n[Error: ${event.data.error}]`;
             }
           }
         }
 
         // Save final message
-        const finalMessage = currentMessageRef.current;
+        const finalMessage = streamState.currentMessage;
         if (finalMessage) {
           setConversations((prev) =>
             prev.map((c) => {
@@ -1112,13 +1158,17 @@ export function useChat() {
       } catch (error) {
         console.error('❌ Error during clarification streaming:', error);
 
-        if (currentMessageRef.current) {
-          currentMessageRef.current.content += `\n\n[Error: ${(error as Error).message}]`;
+        if (streamState.currentMessage) {
+          streamState.currentMessage.content += `\n\n[Error: ${(error as Error).message}]`;
         }
       } finally {
-        setIsStreaming(false);
-        currentMessageRef.current = null;
-        currentToolCallsRef.current = new Map();
+        // Clean up per-conversation streaming state
+        streamingRefsMap.current.delete(conversation.id);
+        setStreamingConversationIds(prev => {
+          const next = new Set(prev);
+          next.delete(conversation.id);
+          return next;
+        });
       }
     },
     [clarificationData, conversations, currentConversationId, cleanMessages]
@@ -1131,10 +1181,21 @@ export function useChat() {
     console.log('🚫 FRONTEND: Clarification cancelled - continuing with original query');
     setClarificationData(null);
     setAwaitingClarification(false);
-    setIsStreaming(false);
 
-    // Optionally: Could show a message to the user that clarification was skipped
-  }, []);
+    // Clean up streaming state for current conversation if it was streaming
+    if (currentConversationId) {
+      const streamState = streamingRefsMap.current.get(currentConversationId);
+      if (streamState) {
+        streamState.abortController.abort();
+        streamingRefsMap.current.delete(currentConversationId);
+      }
+      setStreamingConversationIds(prev => {
+        const next = new Set(prev);
+        next.delete(currentConversationId);
+        return next;
+      });
+    }
+  }, [currentConversationId]);
 
   /**
    * Rename a conversation
@@ -1206,53 +1267,55 @@ export function useChat() {
   );
 
   /**
-   * Cancel ongoing streaming
-   * Aborts the current stream and cleans up state
+   * Cancel ongoing streaming for a specific conversation
+   * @param conversationId - Optional conversation ID to cancel. Defaults to current conversation.
    */
-  const cancelStreaming = useCallback(() => {
-    if (abortControllerRef.current) {
-      console.log('🛑 useChat: User cancelled streaming');
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-
-      // Clear agent progress in the message state (fixes progress animation on cancel)
-      // IMPORTANT: Messages are stored in conversations[].messages, not a separate state
-      if (currentMessageRef.current && currentConversationId) {
-        const messageId = currentMessageRef.current.id;
-        setConversations((prev) =>
-          prev.map((conv) => {
-            if (conv.id !== currentConversationId) return conv;
-            return {
-              ...conv,
-              messages: conv.messages.map((msg) =>
-                msg.id === messageId
-                  ? {
-                      ...msg,
-                      agentProgress: msg.agentProgress
-                        ? { ...msg.agentProgress, isStreaming: false, currentAgent: null }
-                        : undefined,
-                    }
-                  : msg
-              ),
-            };
-          })
-        );
-      } else {
-        // Log why we couldn't update state (helps debug edge cases)
-        console.warn('⚠️ useChat: Could not clear agent progress on cancel', {
-          hasCurrentMessage: !!currentMessageRef.current,
-          hasConversationId: !!currentConversationId,
-        });
-      }
-
-      // Clean up streaming state
-      setIsStreaming(false);
-      currentMessageRef.current = null;
-      currentToolCallsRef.current = new Map();
-    } else {
-      // Log when there's nothing to cancel (helps debug)
-      console.log('🛑 useChat: cancelStreaming called but no active stream');
+  const cancelStreaming = useCallback((conversationId?: string) => {
+    const targetId = conversationId || currentConversationId;
+    if (!targetId) {
+      console.log('🛑 useChat: cancelStreaming called but no target conversation');
+      return;
     }
+
+    const streamState = streamingRefsMap.current.get(targetId);
+    if (!streamState) {
+      console.log('🛑 useChat: cancelStreaming called but no active stream for', targetId);
+      return;
+    }
+
+    console.log('🛑 useChat: User cancelled streaming for conversation', targetId);
+    streamState.abortController.abort();
+
+    // Clear agent progress in the message state (fixes progress animation on cancel)
+    if (streamState.currentMessage) {
+      const messageId = streamState.currentMessage.id;
+      setConversations((prev) =>
+        prev.map((conv) => {
+          if (conv.id !== targetId) return conv;
+          return {
+            ...conv,
+            messages: conv.messages.map((msg) =>
+              msg.id === messageId
+                ? {
+                    ...msg,
+                    agentProgress: msg.agentProgress
+                      ? { ...msg.agentProgress, isStreaming: false, currentAgent: null }
+                      : undefined,
+                  }
+                : msg
+            ),
+          };
+        })
+      );
+    }
+
+    // Clean up streaming state
+    streamingRefsMap.current.delete(targetId);
+    setStreamingConversationIds(prev => {
+      const next = new Set(prev);
+      next.delete(targetId);
+      return next;
+    });
   }, [currentConversationId]);
 
   /**
@@ -1266,6 +1329,7 @@ export function useChat() {
     conversations,
     currentConversation,
     isStreaming,
+    streamingConversationIds,
     clarificationData,
     awaitingClarification,
     spendingLimitError,

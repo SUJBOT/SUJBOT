@@ -615,6 +615,7 @@ export class ApiService {
       let attachments = undefined;
       if (msg.role === 'user' && msg.metadata?.attachments && Array.isArray(msg.metadata.attachments)) {
         attachments = msg.metadata.attachments.map((att: any) => ({
+          attachmentId: att.attachment_id,
           filename: att.filename,
           mimeType: att.mime_type,
           sizeBytes: att.size_bytes,
@@ -727,6 +728,13 @@ export class ApiService {
     }
 
     return response.json();
+  }
+
+  /**
+   * Get URL for a stored attachment file.
+   */
+  getAttachmentUrl(conversationId: string, attachmentId: string): string {
+    return `${API_BASE_URL}/attachments/${encodeURIComponent(conversationId)}/${encodeURIComponent(attachmentId)}`;
   }
 
   /**
