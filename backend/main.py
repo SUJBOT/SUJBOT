@@ -40,6 +40,7 @@ import json
 import logging
 import mimetypes
 import os
+import re
 import uuid
 from pathlib import Path
 from typing import Optional, Dict, List
@@ -773,18 +774,36 @@ def _save_attachment_files(
     conversation_id: str,
     attachments: list,
 ) -> list[dict]:
-    """Save attachment files to disk and return metadata with attachment_ids."""
+    """Save attachment files to disk and return metadata with attachment_ids.
+
+    This is a blocking (synchronous) function — the caller must run it via
+    asyncio.to_thread() to avoid blocking the event loop.
+    """
+    # Validate conversation_id format (hex UUID, 32 chars) to prevent path traversal
+    if not re.fullmatch(r"[0-9a-f]{32}", conversation_id):
+        raise ValueError(f"Invalid conversation_id format: {conversation_id}")
+
     attachment_dir = ATTACHMENTS_DIR / conversation_id
     attachment_dir.mkdir(parents=True, exist_ok=True)
 
     metadata_list = []
     for att in attachments:
         att_id = uuid.uuid4().hex[:16]
-        ext = Path(att.filename).suffix or ".bin"
+        # Sanitize extension: only allow alphanumeric chars to prevent path traversal
+        raw_ext = Path(att.filename).suffix or ".bin"
+        safe_ext = re.sub(r"[^a-zA-Z0-9]", "", raw_ext.lstrip("."))[:10]
+        ext = f".{safe_ext}" if safe_ext else ".bin"
         file_path = attachment_dir / f"{att_id}{ext}"
 
-        file_data = base64.b64decode(att.base64_data)
-        file_path.write_bytes(file_data)
+        try:
+            file_data = base64.b64decode(att.base64_data)
+            file_path.write_bytes(file_data)
+        except Exception as e:
+            logger.error(
+                "Failed to save attachment %s (id=%s) for conversation %s: %s",
+                att.filename, att_id, conversation_id, e, exc_info=True,
+            )
+            continue  # Skip this attachment but save others
 
         metadata_list.append({
             "attachment_id": att_id,
@@ -1239,15 +1258,18 @@ async def get_attachment(
     conversation_id: str,
     attachment_id: str,
     user: dict = Depends(get_current_user),
+    adapter: PostgreSQLStorageAdapter = Depends(get_postgres_adapter),
 ):
     """Retrieve a saved attachment file. Requires conversation ownership."""
-    import re
+    # Validate conversation_id format (hex UUID, 32 chars) to prevent path traversal
+    if not re.fullmatch(r"[0-9a-f]{32}", conversation_id):
+        raise HTTPException(status_code=400, detail="Invalid conversation ID")
 
     # Validate attachment_id is a hex string (prevent glob injection)
     if not re.fullmatch(r"[0-9a-f]{16}", attachment_id):
         raise HTTPException(status_code=400, detail="Invalid attachment ID")
 
-    owns = await postgres_adapter.verify_conversation_ownership(
+    owns = await adapter.verify_conversation_ownership(
         conversation_id, user["id"]
     )
     if not owns:

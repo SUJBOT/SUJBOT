@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, Pencil } from 'lucide-react';
+import { Plus, MessageSquare, Trash2, Pencil } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Virtuoso } from 'react-virtuoso';
 import { cn } from '../../design-system/utils/cn';
@@ -245,11 +245,13 @@ function ConversationItem({
           : 'hover:bg-accent-100 dark:hover:bg-accent-800/50 hover:translate-x-1'
       )}
     >
-      {isStreaming && (
+      {isStreaming ? (
         <span
           className="flex-shrink-0 w-3.5 h-3.5 rounded-full border-2 border-accent-300 dark:border-accent-600 border-t-accent-700 dark:border-t-accent-300 animate-spin"
           title={t('sidebar.generating')}
         />
+      ) : (
+        <MessageSquare size={16} className="flex-shrink-0" />
       )}
       <div className="flex-1 min-w-0">
         {isEditing ? (
