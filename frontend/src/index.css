@@ -307,14 +307,19 @@ body {
   background-color: rgba(250, 204, 21, 0.7);
 }
 
-/* Search highlight (amber, distinct from chunk highlight yellow) */
-.react-pdf__Page__textContent mark.search-highlight {
-  background-color: rgba(251, 191, 36, 0.6); /* amber-400 */
-  color: transparent;
-  border-radius: 2px;
-  padding: 2px 0;
+/* Override text layer opacity when search highlights are present.
+   react-pdf sets opacity: 0.2 on the text layer (for invisible text selection).
+   Without this override, highlight backgrounds are effectively invisible. */
+.react-pdf__Page__textContent:has(.search-hl) {
+  opacity: 1 !important;
 }
 
-.dark .react-pdf__Page__textContent mark.search-highlight {
-  background-color: rgba(251, 191, 36, 0.5);
+/* Search highlight — DOM-based (applied via JS classList, works across TextItem boundaries) */
+.react-pdf__Page__textContent span.search-hl {
+  background-color: rgba(255, 120, 0, 0.75) !important;
+  border-radius: 2px;
+}
+
+.dark .react-pdf__Page__textContent span.search-hl {
+  background-color: rgba(255, 140, 0, 0.7) !important;
 }
