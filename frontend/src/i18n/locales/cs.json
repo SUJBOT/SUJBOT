@@ -44,7 +44,8 @@
     "messageCount_other": "{{count}} zpráv",
     "rename": "Přejmenovat",
     "delete": "Smazat",
-    "deleteConversation": "Smazat konverzaci"
+    "deleteConversation": "Smazat konverzaci",
+    "generating": "Generuje odpověď…"
   },
   "chat": {
     "placeholder": "Zeptejte se na právní nebo technické dokumenty...",
@@ -337,7 +338,10 @@
     "pdfTruncated": "PDF zkráceno na prvních {{max}} stran",
     "filesAttached_one": "{{count}} soubor připojen",
     "filesAttached_few": "{{count}} soubory připojeny",
-    "filesAttached_other": "{{count}} souborů připojeno"
+    "filesAttached_other": "{{count}} souborů připojeno",
+    "download": "Stáhnout",
+    "close": "Zavřít",
+    "previewUnavailable": "Náhled bude dostupný po obnovení stránky"
   },
   "citation": {
     "preview": "Náhled",

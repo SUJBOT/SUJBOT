@@ -203,6 +203,7 @@ export function ChatContainer({
                       onRegenerate={onRegenerateMessage}
                       disabled={isStreaming}
                       responseDurationMs={responseDurationMs}
+                      conversationId={conversation?.id}
                     />
                   </div>
                 );

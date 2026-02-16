@@ -38,14 +38,16 @@ import asyncio
 import base64
 import json
 import logging
+import mimetypes
 import os
+import uuid
 from pathlib import Path
 from typing import Optional, Dict, List
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sse_starlette.sse import EventSourceResponse
 
 # Import agent adapter and models
@@ -764,6 +766,37 @@ async def _maybe_generate_title(
     return title  # Return whatever we generated (may be None)
 
 
+ATTACHMENTS_DIR = Path("data/attachments")
+
+
+def _save_attachment_files(
+    conversation_id: str,
+    attachments: list,
+) -> list[dict]:
+    """Save attachment files to disk and return metadata with attachment_ids."""
+    attachment_dir = ATTACHMENTS_DIR / conversation_id
+    attachment_dir.mkdir(parents=True, exist_ok=True)
+
+    metadata_list = []
+    for att in attachments:
+        att_id = uuid.uuid4().hex[:16]
+        ext = Path(att.filename).suffix or ".bin"
+        file_path = attachment_dir / f"{att_id}{ext}"
+
+        file_data = base64.b64decode(att.base64_data)
+        file_path.write_bytes(file_data)
+
+        metadata_list.append({
+            "attachment_id": att_id,
+            "filename": att.filename,
+            "mime_type": att.mime_type,
+            "size_bytes": len(file_data),
+        })
+        logger.debug(f"Saved attachment {att.filename} as {file_path}")
+
+    return metadata_list
+
+
 @app.post("/chat/stream")
 async def chat_stream(
     request: ChatRequest,
@@ -852,18 +885,13 @@ async def chat_stream(
                     }
                 }
 
-            # Add attachment metadata (filenames/types only, NOT base64 data)
+            # Save attachment files to disk and store metadata
             if request.attachments:
                 if user_metadata is None:
                     user_metadata = {}
-                user_metadata["attachments"] = [
-                    {
-                        "filename": att.filename,
-                        "mime_type": att.mime_type,
-                        "size_bytes": len(att.base64_data) * 3 // 4,
-                    }
-                    for att in request.attachments
-                ]
+                user_metadata["attachments"] = await asyncio.to_thread(
+                    _save_attachment_files, request.conversation_id, request.attachments
+                )
 
             await adapter.append_message(
                 conversation_id=request.conversation_id,
@@ -1204,6 +1232,43 @@ async def delete_message(conversation_id: str, message_id: str):
     """Delete a message from conversation history (frontend-managed)."""
     logger.info(f"Message delete requested: conversation={conversation_id}, message={message_id}")
     return {"success": True}
+
+
+@app.get("/attachments/{conversation_id}/{attachment_id}")
+async def get_attachment(
+    conversation_id: str,
+    attachment_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """Retrieve a saved attachment file. Requires conversation ownership."""
+    import re
+
+    # Validate attachment_id is a hex string (prevent glob injection)
+    if not re.fullmatch(r"[0-9a-f]{16}", attachment_id):
+        raise HTTPException(status_code=400, detail="Invalid attachment ID")
+
+    owns = await postgres_adapter.verify_conversation_ownership(
+        conversation_id, user["id"]
+    )
+    if not owns:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    att_dir = ATTACHMENTS_DIR / conversation_id
+    if not att_dir.exists():
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    matches = list(att_dir.glob(f"{attachment_id}.*"))
+    if not matches:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    file_path = matches[0]
+    content_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
+
+    return FileResponse(
+        path=str(file_path),
+        media_type=content_type,
+        filename=file_path.name,
+    )
 
 
 @app.get("/")

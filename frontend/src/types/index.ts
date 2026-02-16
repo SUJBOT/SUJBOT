@@ -69,6 +69,7 @@ export interface Attachment {
  * Used to display attachment indicators after page refresh.
  */
 export interface MessageAttachmentMeta {
+  attachmentId?: string;
   filename: string;
   mimeType: string;
   sizeBytes: number;

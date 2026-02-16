@@ -43,7 +43,8 @@
     "messageCount_other": "{{count}} messages",
     "rename": "Rename",
     "delete": "Delete",
-    "deleteConversation": "Delete conversation"
+    "deleteConversation": "Delete conversation",
+    "generating": "Generating response…"
   },
   "chat": {
     "placeholder": "Ask about legal or technical documents...",
@@ -334,7 +335,10 @@
     "tooManyFiles": "Maximum 5 files",
     "pdfTruncated": "PDF truncated to first {{max}} pages",
     "filesAttached_one": "{{count}} file attached",
-    "filesAttached_other": "{{count}} files attached"
+    "filesAttached_other": "{{count}} files attached",
+    "download": "Download",
+    "close": "Close",
+    "previewUnavailable": "Preview available after page refresh"
   },
   "citation": {
     "preview": "Preview",

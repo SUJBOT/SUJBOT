@@ -21,6 +21,7 @@ import { ToolCallDisplay } from './ToolCallDisplay';
 import { ProgressPhaseDisplay } from './ProgressPhaseDisplay';
 import { FeedbackButtons } from './FeedbackButtons';
 import { CitationLink } from '../citation/CitationLink';
+import { AttachmentPreviewModal } from './AttachmentPreviewModal';
 import { preprocessCitations } from '../../utils/citations';
 
 /**
@@ -63,6 +64,7 @@ interface ChatMessageProps {
   onRegenerate: (messageId: string) => void;
   disabled?: boolean;
   responseDurationMs?: number; // Duration in milliseconds for assistant responses
+  conversationId?: string;
 }
 
 function ChatMessageInner({
@@ -72,12 +74,14 @@ function ChatMessageInner({
   onRegenerate,
   disabled = false,
   responseDurationMs,
+  conversationId,
 }: ChatMessageProps) {
   const { t } = useTranslation();
   const isUser = message.role === 'user';
   const [isEditing, setIsEditing] = useState(false);
   const [editedContent, setEditedContent] = useState(message.content);
   const [isCopied, setIsCopied] = useState(false);
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
 
   const handleEdit = () => {
     setIsEditing(true);
@@ -149,15 +153,19 @@ function ChatMessageInner({
         {isUser && message.attachments && message.attachments.length > 0 && (
           <div className={cn('flex flex-wrap gap-1.5', 'justify-end')}>
             {message.attachments.map((att, idx) => (
-              <div
+              <button
                 key={idx}
+                type="button"
+                onClick={() => setPreviewIndex(idx)}
                 className={cn(
                   'inline-flex items-center gap-1.5 px-2.5 py-1',
                   'bg-blue-50 dark:bg-blue-900/30',
                   'text-blue-700 dark:text-blue-300',
                   'rounded-lg',
                   'border border-blue-200 dark:border-blue-800',
-                  'text-xs'
+                  'text-xs',
+                  'cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-900/50',
+                  'transition-colors'
                 )}
               >
                 {att.mimeType.startsWith('image/') ? (
@@ -173,7 +181,7 @@ function ChatMessageInner({
                 <span className="text-blue-400 dark:text-blue-500">
                   ({(att.sizeBytes / 1024).toFixed(0)} KB)
                 </span>
-              </div>
+              </button>
             ))}
           </div>
         )}
@@ -684,6 +692,19 @@ function ChatMessageInner({
               </>
             )}
           </div>
+
+        {/* Attachment preview modal */}
+        {previewIndex !== null && message.attachments && (
+          <AttachmentPreviewModal
+            isOpen={previewIndex !== null}
+            attachments={message.attachments.map(att => ({
+              meta: att,
+              conversationId,
+            }))}
+            initialIndex={previewIndex}
+            onClose={() => setPreviewIndex(null)}
+          />
+        )}
         </div>
       </div>
     </div>

@@ -9,6 +9,7 @@ import { cn } from '../../design-system/utils/cn';
 import { useAuth } from '../../contexts/AuthContext';
 import { apiService, type SpendingInfo } from '../../services/api';
 import type { TextSelection, Attachment } from '../../types';
+import { AttachmentPreviewModal } from './AttachmentPreviewModal';
 
 const ALLOWED_MIME_TYPES = new Set([
   'image/png',
@@ -60,6 +61,7 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled, refreshSpen
   const [message, setMessage] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [spending, setSpending] = useState<SpendingInfo | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -214,7 +216,7 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled, refreshSpen
         {/* Attachment preview chips */}
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-2" style={{ animation: 'chipIn 0.15s ease-out' }}>
-            {attachments.map(att => (
+            {attachments.map((att, idx) => (
               <div
                 key={att.id}
                 className={cn(
@@ -226,17 +228,27 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled, refreshSpen
                   'text-xs'
                 )}
               >
-                {att.mimeType.startsWith('image/') ? (
-                  <Image size={12} />
-                ) : (
-                  <File size={12} />
-                )}
-                <span className="truncate max-w-[150px]" title={att.filename}>
-                  {att.filename}
-                </span>
-                <span className="text-blue-400 dark:text-blue-500">
-                  ({(att.sizeBytes / 1024).toFixed(0)} KB)
-                </span>
+                <button
+                  type="button"
+                  onClick={() => setPreviewIndex(idx)}
+                  className={cn(
+                    'inline-flex items-center gap-1.5',
+                    'cursor-pointer hover:text-blue-900 dark:hover:text-blue-100',
+                    'transition-colors'
+                  )}
+                >
+                  {att.mimeType.startsWith('image/') ? (
+                    <Image size={12} />
+                  ) : (
+                    <File size={12} />
+                  )}
+                  <span className="truncate max-w-[150px]" title={att.filename}>
+                    {att.filename}
+                  </span>
+                  <span className="text-blue-400 dark:text-blue-500">
+                    ({(att.sizeBytes / 1024).toFixed(0)} KB)
+                  </span>
+                </button>
                 <button
                   type="button"
                   onClick={() => removeAttachment(att.id)}
@@ -452,6 +464,23 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled, refreshSpen
         </div>
 
       </div>
+
+      {/* Attachment preview modal (pre-send) */}
+      {previewIndex !== null && (
+        <AttachmentPreviewModal
+          isOpen={previewIndex !== null}
+          attachments={attachments.map(att => ({
+            meta: {
+              filename: att.filename,
+              mimeType: att.mimeType,
+              sizeBytes: att.sizeBytes,
+            },
+            base64Data: att.base64Data,
+          }))}
+          initialIndex={previewIndex}
+          onClose={() => setPreviewIndex(null)}
+        />
+      )}
     </form>
   );
 }
