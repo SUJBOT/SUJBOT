@@ -1,4 +1,17 @@
-# Changelog — 13.–15. února 2026
+# Changelog — 13.–16. února 2026
+
+## 15. PDF search — diakritika, zvýrazňování, scroll (PR #30, 16. února 2026)
+- Diacritics-insensitive full-text search v PDF preview: `normalizeText()` stripuje LaTeX spacing modifiers (ˇ˘˙˚˛˜˝ U+02C7–U+02DD) s okolním whitespace, poté NFD + combining marks
+- Počítání výskytů místo stránek: "1 / 12" namísto "1 / 3 pages"
+- DOM-based cross-span highlighting: post-processing text layeru s position mapping (`normToOrig[]`) — funguje i pro LaTeX PDF kde je slovo rozloženo přes více TextItems
+- CSS `:has(.search-hl)` override opacity text layeru (react-pdf default 0.2 → 1.0) pro viditelné oranžové zvýraznění
+- Přímý `scrollTop` výpočet namísto nespolehlivého `scrollIntoView` v nested overflow kontejnerech; dvou-fázový scroll (rough page → refined highlight)
+- Split efektů: `[documentId]` reset vs `[initialPage]` navigace — oprava bugu kdy kliknutí na jinou citaci neposouvalo PDF
+- Odstraněn citation hover preview tooltip (`CitationPreview.tsx` smazán)
+
+## 16. Nginx cache-control fix (PR #31, 16. února 2026)
+- `Cache-Control: no-store, no-cache, must-revalidate` na SPA fallback `location /` v frontend nginx
+- Prevence `Failed to fetch dynamically imported module` po rebuildu frontendu (prohlížeč cachoval starý `index.html` s neexistujícími chunk hashi)
 
 ## 0. Integrace QPP retrieval confidence do search pipeline (15. února 2026)
 - `score_retrieval_general()` z `rag_confidence/` integrován do `SearchTool`
@@ -122,7 +135,7 @@
 ---
 
 **Statistiky:**
-- 14 merged PRs (#13–#27)
-- ~60 commitů
+- 18 merged PRs (#13–#31)
+- ~65 commitů
 - Net: cca -29 000 řádků (hlavně díky OCR removal)
 - Nové moduly: `src/graph/`, `rag_confidence/`, `src/retrieval/`, `src/vl/document_converter.py`, `benchmark_criteria/`
