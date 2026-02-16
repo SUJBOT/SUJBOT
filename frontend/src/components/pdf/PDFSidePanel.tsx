@@ -73,6 +73,22 @@ function textContainsPhrase(text: string, phrases: string[]): boolean {
   return phrases.some(phrase => normalizedText.includes(phrase));
 }
 
+/**
+ * Strip diacritics and lowercase for accent-insensitive search.
+ * Handles:
+ * 1. Standard Unicode combining marks (U+0300–U+036F)
+ * 2. LaTeX-style spacing modifier letters (ˇ U+02C7, ˘˙˚˛˜˝ U+02D8–U+02DD)
+ *    which appear in LaTeX-generated PDFs as separate characters before
+ *    the base letter, often with whitespace: "ˇ c" instead of "č".
+ *    We strip the modifier AND any adjacent whitespace to rejoin the word.
+ */
+const normalizeText = (text: string): string =>
+  text
+    .replace(/\s*[\u02c7\u02d8-\u02dd]\s*/g, '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+
 export function PDFSidePanel({
   isOpen,
   documentId,
@@ -94,7 +110,7 @@ export function PDFSidePanel({
   // Search state
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<Array<{ pageNumber: number }>>([]);
+  const [searchResults, setSearchResults] = useState<Array<{ pageNumber: number; matchIndex: number }>>([]);
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -126,11 +142,11 @@ export function PDFSidePanel({
       return;
     }
 
-    const query = debouncedQuery.toLowerCase();
+    const query = normalizeText(debouncedQuery);
     let cancelled = false;
 
     (async () => {
-      const results: Array<{ pageNumber: number }> = [];
+      const results: Array<{ pageNumber: number; matchIndex: number }> = [];
       for (let i = 1; i <= numPages; i++) {
         if (cancelled) return;
         try {
@@ -138,10 +154,13 @@ export function PDFSidePanel({
           const textContent = await page.getTextContent();
           const pageText = textContent.items
             .map((item: any) => item.str)
-            .join(' ')
-            .toLowerCase();
-          if (pageText.includes(query)) {
-            results.push({ pageNumber: i });
+            .join('');
+          const normalizedPageText = normalizeText(pageText);
+          let startIdx = 0;
+          let matchIdx = 0;
+          while ((startIdx = normalizedPageText.indexOf(query, startIdx)) !== -1) {
+            results.push({ pageNumber: i, matchIndex: matchIdx++ });
+            startIdx += query.length;
           }
         } catch {
           // Skip pages that fail to load
@@ -149,21 +168,19 @@ export function PDFSidePanel({
       }
       if (!cancelled) {
         setSearchResults(results);
-        setCurrentMatchIndex(results.length > 0 ? 0 : 0);
+        setCurrentMatchIndex(0);
       }
     })();
 
     return () => { cancelled = true; };
   }, [debouncedQuery, numPages]);
 
-  // Navigate to current match page
+  // Navigate to current match — scroll to the page, then refine to the highlight
   useEffect(() => {
     if (searchResults.length === 0 || currentMatchIndex >= searchResults.length) return;
     const targetPage = searchResults[currentMatchIndex].pageNumber;
-    const el = pageRefs.current.get(targetPage);
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
+    const matchOnPage = searchResults[currentMatchIndex].matchIndex;
+
     // Ensure the page is loaded
     setLoadedPages(prev => {
       const next = new Set(prev);
@@ -172,6 +189,49 @@ export function PDFSidePanel({
       if (numPages && targetPage < numPages) next.add(targetPage + 1);
       return next;
     });
+
+    // scrollIntoView doesn't work reliably with nested overflow containers,
+    // so we calculate scrollTop directly on containerRef.
+    const scrollToTarget = (el: Element) => {
+      const container = containerRef.current;
+      if (!container) return;
+      let offset = 0;
+      let current: Element | null = el;
+      while (current && current !== container) {
+        offset += (current as HTMLElement).offsetTop;
+        current = (current as HTMLElement).offsetParent;
+      }
+      container.scrollTo({ top: offset - container.clientHeight / 2, behavior: 'smooth' });
+    };
+
+    // Phase 1: Immediately scroll to the page wrapper (rough positioning)
+    const pageEl = pageRefs.current.get(targetPage);
+    if (pageEl) {
+      scrollToTarget(pageEl);
+    }
+
+    // Phase 2: Refine scroll to the exact highlight once DOM highlights are applied.
+    let cancelled = false;
+    const refineScroll = (attempts: number) => {
+      if (cancelled) return;
+      const el = pageRefs.current.get(targetPage);
+      if (!el) return;
+
+      const highlights = el.querySelectorAll('span.search-hl');
+      if (highlights.length > 0) {
+        const hl = highlights[Math.min(matchOnPage, highlights.length - 1)] ?? highlights[0];
+        scrollToTarget(hl);
+        return;
+      }
+
+      // Retry up to ~3s (page rendering + highlight delay can take time for large PDFs)
+      if (attempts < 30) {
+        setTimeout(() => refineScroll(attempts + 1), 100);
+      }
+    };
+
+    setTimeout(() => refineScroll(0), 300);
+    return () => { cancelled = true; };
   }, [currentMatchIndex, searchResults, numPages]);
 
   const handleSearchNext = useCallback(() => {
@@ -238,7 +298,7 @@ export function PDFSidePanel({
     fetchPdf();
   }, [documentId, pdfUrl, isOpen, t]);
 
-  // Reset state when document changes
+  // Reset state when document changes (full reload)
   useEffect(() => {
     setError(null);
     setIsLoading(true);
@@ -248,7 +308,36 @@ export function PDFSidePanel({
     setLoadedPages(new Set());
     scrolledToInitialRef.current = false;
     renderedPagesRef.current = new Set();
-  }, [documentId, initialPage]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [documentId]);
+
+  // Navigate to new page when initialPage changes within the same loaded document
+  useEffect(() => {
+    if (!numPages || !pdfData) return;
+
+    setCurrentVisiblePage(initialPage);
+    scrolledToInitialRef.current = false;
+
+    // Ensure target page and neighbors are loaded
+    setLoadedPages(prev => {
+      const next = new Set(prev);
+      for (let i = Math.max(1, initialPage - 1); i <= Math.min(numPages, initialPage + 2); i++) {
+        next.add(i);
+      }
+      return next;
+    });
+
+    // If page is already rendered, scroll immediately
+    const el = pageRefs.current.get(initialPage);
+    if (el && renderedPagesRef.current.has(initialPage)) {
+      requestAnimationFrame(() => {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        scrolledToInitialRef.current = true;
+      });
+    }
+    // Otherwise handlePageRenderSuccess will scroll when the page renders
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPage]);
 
   // Handle document load success
   const onDocumentLoadSuccess = useCallback(
@@ -430,31 +519,107 @@ export function PDFSidePanel({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose, searchOpen]);
 
-  // Custom text renderer for highlighting (chunks + search)
+  // Custom text renderer for chunk highlighting only
   const customTextRenderer = useCallback(
     (textItem: TextItem) => {
-      let str = textItem.str;
+      const str = textItem.str;
       if (!str.trim()) return str;
 
-      // Chunk highlight (existing behavior)
       if (highlightPhrases.length > 0 && textContainsPhrase(str, highlightPhrases)) {
         return `<mark class="chunk-highlight">${str}</mark>`;
       }
 
-      // Search highlight
-      if (debouncedQuery.trim()) {
-        const query = debouncedQuery.trim();
-        const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const regex = new RegExp(`(${escaped})`, 'gi');
-        if (regex.test(str)) {
-          return str.replace(regex, '<mark class="search-highlight">$1</mark>');
-        }
-      }
-
       return str;
     },
-    [highlightPhrases, debouncedQuery]
+    [highlightPhrases]
   );
+
+  // DOM-based search highlighting: works across TextItem boundaries (needed for LaTeX PDFs
+  // where diacritics are separate characters, splitting words across multiple spans)
+  useEffect(() => {
+    // Clear all previous search highlights
+    containerRef.current?.querySelectorAll('.search-hl').forEach(el => {
+      el.classList.remove('search-hl');
+    });
+
+    if (!debouncedQuery.trim() || searchResults.length === 0) return;
+
+    const query = normalizeText(debouncedQuery);
+    const matchPages = new Set(searchResults.map(r => r.pageNumber));
+
+    const applyHighlights = () => {
+      matchPages.forEach(pageNum => {
+        const pageEl = pageRefs.current.get(pageNum);
+        if (!pageEl) return;
+
+        const textLayer = pageEl.querySelector('.react-pdf__Page__textContent');
+        if (!textLayer) return;
+
+        // Get all text spans (react-pdf renders each TextItem as a <span>)
+        const spans = Array.from(textLayer.querySelectorAll('span'));
+        if (spans.length === 0) return;
+
+        // Build concatenated text and track span boundaries
+        let fullText = '';
+        const spanRanges: Array<{ span: Element; start: number; end: number }> = [];
+        for (const span of spans) {
+          const text = span.textContent || '';
+          spanRanges.push({ span, start: fullText.length, end: fullText.length + text.length });
+          fullText += text;
+        }
+
+        // Normalize with position mapping (original index for each normalized char)
+        const normChars: string[] = [];
+        const normToOrig: number[] = [];
+        let i = 0;
+        while (i < fullText.length) {
+          const code = fullText.charCodeAt(i);
+
+          // Spacing modifier (ˇ˘˙˚˛˜˝): skip it + surrounding whitespace
+          if (code >= 0x02c7 && code <= 0x02dd) {
+            // Remove preceding whitespace from output
+            while (normChars.length > 0 && normChars[normChars.length - 1] === ' ') {
+              normChars.pop();
+              normToOrig.pop();
+            }
+            i++; // skip modifier
+            while (i < fullText.length && /\s/.test(fullText[i])) i++; // skip trailing whitespace
+            continue;
+          }
+
+          // NFD decompose, strip combining marks, lowercase
+          const decomposed = fullText[i].normalize('NFD');
+          for (const ch of decomposed) {
+            if (ch.charCodeAt(0) >= 0x0300 && ch.charCodeAt(0) <= 0x036f) continue;
+            normChars.push(ch.toLowerCase());
+            normToOrig.push(i);
+          }
+          i++;
+        }
+
+        const normalizedFull = normChars.join('');
+
+        // Find all match positions in normalized text, map back to original spans
+        let searchIdx = 0;
+        while ((searchIdx = normalizedFull.indexOf(query, searchIdx)) !== -1) {
+          const origStart = normToOrig[searchIdx];
+          const origEnd = normToOrig[Math.min(searchIdx + query.length - 1, normToOrig.length - 1)] + 1;
+
+          // Mark all spans that overlap with [origStart, origEnd)
+          for (const { span, start, end } of spanRanges) {
+            if (start < origEnd && end > origStart) {
+              span.classList.add('search-hl');
+            }
+          }
+          searchIdx += query.length;
+        }
+      });
+    };
+
+    // Delay to ensure text layer has rendered
+    const timer = setTimeout(applyHighlights, 400);
+    return () => clearTimeout(timer);
+  }, [debouncedQuery, searchResults, loadedPages]);
 
   if (!isOpen) return null;
 
@@ -682,7 +847,7 @@ export function PDFSidePanel({
                     renderAnnotationLayer={true}
                     onRenderSuccess={() => handlePageRenderSuccess(pageNum)}
                     customTextRenderer={
-                      (pageNum === initialPage && highlightPhrases.length > 0) || debouncedQuery.trim()
+                      pageNum === initialPage && highlightPhrases.length > 0
                         ? customTextRenderer
                         : undefined
                     }
