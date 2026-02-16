@@ -25,6 +25,22 @@ CREATE TABLE graph.entities (
     UNIQUE(name, entity_type, document_id)
 );
 
+-- Entity aliases: tracks alternative names, abbreviations, translations
+-- Prevents re-creation of merged entities under non-canonical names
+CREATE TABLE graph.entity_aliases (
+    alias_id    SERIAL PRIMARY KEY,
+    entity_id   INT NOT NULL REFERENCES graph.entities(entity_id) ON DELETE CASCADE,
+    alias       TEXT NOT NULL,
+    alias_type  TEXT NOT NULL DEFAULT 'variant',
+        -- 'variant', 'abbreviation', 'translation', 'acronym', 'former_name'
+    language    TEXT,            -- NULL = same as source, 'en', 'cs'
+    source      TEXT,           -- 'exact_dedup', 'semantic_dedup', 'extraction', 'manual'
+    created_at  TIMESTAMPTZ DEFAULT now()
+);
+CREATE UNIQUE INDEX idx_entity_aliases_unique ON graph.entity_aliases (lower(alias), entity_id);
+CREATE INDEX idx_entity_aliases_lookup ON graph.entity_aliases (lower(alias));
+CREATE INDEX idx_entity_aliases_entity ON graph.entity_aliases (entity_id);
+
 -- Relationships between entities
 CREATE TABLE graph.relationships (
     relationship_id SERIAL PRIMARY KEY,

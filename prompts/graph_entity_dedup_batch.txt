@@ -1,0 +1,17 @@
+You are reviewing potential duplicate entities in a Czech legal/regulatory knowledge graph.
+All entities below are of type: {entity_type}
+
+For each numbered pair, determine if they refer to the SAME real-world thing.
+
+{pairs}
+
+Rules:
+- Abbreviations and full names ARE duplicates ("SÚJB" = "Státní úřad pro jadernou bezpečnost")
+- Name variants with/without qualifiers ARE duplicates if same thing
+- Case-only differences ARE duplicates
+- Different numbered regulations are NOT duplicates ("vyhl. č. 307/2002 Sb." ≠ "vyhl. č. 308/2002 Sb.")
+- Different amendments of same regulation ARE duplicates
+- General vs specific references to the same thing ARE duplicates
+
+Respond with ONLY a JSON object, no other text:
+{{"verdicts": ["YES" or "NO" for each pair, in order]}}

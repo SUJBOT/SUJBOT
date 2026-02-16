@@ -192,19 +192,62 @@ async def _embed_new_entities(
     graph_embedder: "GraphEmbedder",
     batch_size: int = 256,
 ) -> int:
-    """Embed entities that have NULL search_embedding."""
+    """Embed entities that have NULL search_embedding.
+
+    Uses alias-enriched text for better dedup candidate discovery:
+    ``"SÚJB (ORGANIZATION). Also known as: Státní úřad pro jadernou bezpečnost. description"``
+    """
+    await graph_storage._ensure_pool()
+
+    # Fetch entities needing embedding
+    fetch_sql = (
+        "SELECT entity_id, name, entity_type, coalesce(description, '') AS description "
+        "FROM graph.entities WHERE search_embedding IS NULL ORDER BY entity_id"
+    )
+    async with graph_storage.pool.acquire() as conn:
+        rows = await conn.fetch(fetch_sql)
+
+    if not rows:
+        logger.info("No entities need embedding")
+        return 0
+
+    # Batch-fetch aliases for all entities that need embedding
+    entity_ids = [r["entity_id"] for r in rows]
+    alias_map: Dict[int, List[str]] = {eid: [] for eid in entity_ids}
+
+    # Fetch in chunks to avoid huge IN clauses
+    for i in range(0, len(entity_ids), 500):
+        chunk = entity_ids[i : i + 500]
+        ph = ", ".join(f"${j + 1}" for j in range(len(chunk)))
+        async with graph_storage.pool.acquire() as conn:
+            alias_rows = await conn.fetch(
+                f"SELECT entity_id, alias FROM graph.entity_aliases "
+                f"WHERE entity_id IN ({ph}) ORDER BY entity_id",
+                *chunk,
+            )
+        for ar in alias_rows:
+            alias_map[ar["entity_id"]].append(ar["alias"])
+
+    # Build enriched text for each entity
+    def enriched_text(r) -> str:
+        aliases = alias_map.get(r["entity_id"], [])
+        parts = [f"{r['name']} ({r['entity_type']})"]
+        if aliases:
+            parts.append(f"Also known as: {', '.join(aliases)}")
+        if r["description"]:
+            parts.append(r["description"])
+        return ". ".join(parts)
+
     return await _embed_rows(
         graph_storage=graph_storage,
         graph_embedder=graph_embedder,
-        fetch_sql=(
-            "SELECT entity_id, name, entity_type, coalesce(description, '') AS description "
-            "FROM graph.entities WHERE search_embedding IS NULL ORDER BY entity_id"
-        ),
+        fetch_sql=fetch_sql,
         id_column="entity_id",
-        text_fn=lambda r: f"{r['name']} ({r['entity_type']}): {r['description']}",
+        text_fn=enriched_text,
         update_sql="UPDATE graph.entities SET search_embedding = $2::vector WHERE entity_id = $1",
         label="entities",
         batch_size=batch_size,
+        prefetched_rows=rows,
     )
 
 
@@ -238,15 +281,22 @@ async def _embed_rows(
     update_sql: str,
     label: str,
     batch_size: int = 256,
+    prefetched_rows=None,
 ) -> int:
     """Fetch rows with NULL embeddings, encode them, and store the vectors.
 
     Shared implementation for entity and community embedding.
+
+    Args:
+        prefetched_rows: If provided, skip the fetch_sql query and use these rows directly.
     """
     await graph_storage._ensure_pool()
 
-    async with graph_storage.pool.acquire() as conn:
-        rows = await conn.fetch(fetch_sql)
+    if prefetched_rows is not None:
+        rows = prefetched_rows
+    else:
+        async with graph_storage.pool.acquire() as conn:
+            rows = await conn.fetch(fetch_sql)
 
     if not rows:
         logger.info(f"No {label} need embedding")

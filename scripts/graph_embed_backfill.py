@@ -31,18 +31,20 @@ BATCH_SIZE = 256
 async def add_columns(conn: asyncpg.Connection):
     """Add search_embedding columns if they don't exist."""
     for table in ("entities", "relationships", "communities"):
-        await conn.execute(f"""
+        await conn.execute(
+            f"""
             DO $$ BEGIN
                 ALTER TABLE graph.{table} ADD COLUMN search_embedding vector(384);
             EXCEPTION WHEN duplicate_column THEN NULL;
             END $$;
-        """)
+        """
+        )
     print("Columns ready.")
 
 
 async def backfill_entities(conn: asyncpg.Connection, embedder):
     rows = await conn.fetch(
-        "SELECT entity_id, name, coalesce(description, '') AS description "
+        "SELECT entity_id, name, entity_type, coalesce(description, '') AS description "
         "FROM graph.entities WHERE search_embedding IS NULL "
         "ORDER BY entity_id"
     )
@@ -50,18 +52,33 @@ async def backfill_entities(conn: asyncpg.Connection, embedder):
         print("Entities: all already embedded.")
         return
 
-    print(f"Entities: embedding {len(rows)} rows...")
-    texts = [f"{r['name']} {r['description']}" for r in rows]
+    # Fetch aliases for enriched embedding text
+    alias_map: dict[int, list[str]] = {}
+    alias_rows = await conn.fetch(
+        "SELECT entity_id, alias FROM graph.entity_aliases ORDER BY entity_id"
+    )
+    for ar in alias_rows:
+        alias_map.setdefault(ar["entity_id"], []).append(ar["alias"])
+
+    print(f"Entities: embedding {len(rows)} rows (with {len(alias_rows)} aliases)...")
+
+    def enriched_text(r):
+        aliases = alias_map.get(r["entity_id"], [])
+        parts = [f"{r['name']} ({r['entity_type']})"]
+        if aliases:
+            parts.append(f"Also known as: {', '.join(aliases)}")
+        if r["description"]:
+            parts.append(r["description"])
+        return ". ".join(parts)
+
+    texts = [enriched_text(r) for r in rows]
 
     for i in range(0, len(texts), BATCH_SIZE):
         batch_texts = texts[i : i + BATCH_SIZE]
         batch_rows = rows[i : i + BATCH_SIZE]
         embeddings = embedder.encode_passages(batch_texts)
 
-        records = [
-            (r["entity_id"], _vec_to_pg(embeddings[j]))
-            for j, r in enumerate(batch_rows)
-        ]
+        records = [(r["entity_id"], _vec_to_pg(embeddings[j])) for j, r in enumerate(batch_rows)]
         await conn.executemany(
             "UPDATE graph.entities SET search_embedding = $2::vector WHERE entity_id = $1",
             records,
@@ -70,7 +87,8 @@ async def backfill_entities(conn: asyncpg.Connection, embedder):
 
 
 async def backfill_relationships(conn: asyncpg.Connection, embedder):
-    rows = await conn.fetch("""
+    rows = await conn.fetch(
+        """
         SELECT r.relationship_id, r.relationship_type,
                coalesce(r.description, '') AS description,
                s.name AS source_name, t.name AS target_name
@@ -79,7 +97,8 @@ async def backfill_relationships(conn: asyncpg.Connection, embedder):
         JOIN graph.entities t ON r.target_entity_id = t.entity_id
         WHERE r.search_embedding IS NULL
         ORDER BY r.relationship_id
-    """)
+    """
+    )
     if not rows:
         print("Relationships: all already embedded.")
         return
@@ -96,8 +115,7 @@ async def backfill_relationships(conn: asyncpg.Connection, embedder):
         embeddings = embedder.encode_passages(batch_texts)
 
         records = [
-            (r["relationship_id"], _vec_to_pg(embeddings[j]))
-            for j, r in enumerate(batch_rows)
+            (r["relationship_id"], _vec_to_pg(embeddings[j])) for j, r in enumerate(batch_rows)
         ]
         await conn.executemany(
             "UPDATE graph.relationships SET search_embedding = $2::vector WHERE relationship_id = $1",
@@ -124,10 +142,7 @@ async def backfill_communities(conn: asyncpg.Connection, embedder):
         batch_rows = rows[i : i + BATCH_SIZE]
         embeddings = embedder.encode_passages(batch_texts)
 
-        records = [
-            (r["community_id"], _vec_to_pg(embeddings[j]))
-            for j, r in enumerate(batch_rows)
-        ]
+        records = [(r["community_id"], _vec_to_pg(embeddings[j])) for j, r in enumerate(batch_rows)]
         await conn.executemany(
             "UPDATE graph.communities SET search_embedding = $2::vector WHERE community_id = $1",
             records,
@@ -142,10 +157,12 @@ async def create_indexes(conn: asyncpg.Connection):
         ("relationships", "idx_relationships_embedding"),
         ("communities", "idx_communities_embedding"),
     ]:
-        await conn.execute(f"""
+        await conn.execute(
+            f"""
             CREATE INDEX IF NOT EXISTS {col}
             ON graph.{table} USING hnsw(search_embedding vector_cosine_ops);
-        """)
+        """
+        )
     print("HNSW indexes ready.")
 
 

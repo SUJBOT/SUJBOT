@@ -1,4 +1,39 @@
-# Changelog — 13.–15. února 2026
+# Changelog — 13.–16. února 2026
+
+## Sofistikovaná deduplikace entit v Knowledge Grafu (16. února 2026)
+
+### Fáze 1: Entity Alias System
+- Nová tabulka `graph.entity_aliases` s unikátním indexem, ON DELETE CASCADE
+- Metody `async_add_alias()`, `async_lookup_alias()`, `async_get_aliases()`, `async_migrate_aliases()`
+- Lookup alias při `async_add_entities()` — routuje na existující entitu místo vytváření duplikátu
+- Migrace aliasů při merge v `_merge_entity_group()` s `dedup_source` parametrem
+- Heuristika `_infer_alias_type()`: uppercase 2-10 znaků → abbreviation, jinak variant
+- Migrační skript `scripts/graph_alias_migrate.py`
+
+### Fáze 2: LLM Batch Canonicalization
+- Nový batch prompt `prompts/graph_entity_dedup_batch.txt` — 20 párů/volání
+- `_batch_llm_canonicalize()` seskupuje kandidáty podle entity_type
+- `_parse_batch_verdicts()` pro parsování JSON pole verdiktů s regex fallbackem
+- Automatický fallback na sekvenční arbitraci při selhání batch parsingu
+
+### Fáze 3: Enhanced Candidate Discovery
+- KNN limit 3 → 10 pro širší záběr kandidátů
+- Cross-type kompatibilita: REGULATION↔DOCUMENT↔STANDARD, CONCEPT↔REQUIREMENT
+- Alias-based candidates v semantic dedup SQL (UNION ALL s entity_aliases tabulkou)
+- Obohacené embedding texty s aliasy: "SÚJB (ORGANIZATION). Also known as: Státní úřad..."
+- Aktualizovaný `scripts/graph_embed_backfill.py`
+
+### Fáze 4: Abbreviation-Aware Extraction
+- Nový modul `src/graph/abbreviation_detector.py` — heuristiky pro české zkratky
+- Rozšířený extraction prompt — pole `abbreviations` a `name_en` v LLM outputu
+- `EntityExtractor._parse_response()` parsuje nová volitelná pole
+- `async_add_entities()` ukládá abbreviations a name_en jako aliasy
+- Fix: Unicode regex pro české uvozovky „..." (U+201E/U+201C)
+
+### Testy
+- 50+ nových testů v `tests/graph/test_entity_dedup_enhanced.py`
+- Alias CRUD, batch verdict parsing, abbreviation detection, entity extractor parsing
+- Cross-type compatibility, batch LLM canonicalization s fallbackem
 
 ## 0. Integrace QPP retrieval confidence do search pipeline (15. února 2026)
 - `score_retrieval_general()` z `rag_confidence/` integrován do `SearchTool`

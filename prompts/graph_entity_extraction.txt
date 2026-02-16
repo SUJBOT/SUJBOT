@@ -34,6 +34,8 @@ Extract all entities and relationships from this page image. This is a Czech leg
 - Keep entity names concise but unambiguous.
 - Use CONSISTENT names for the same entity — do NOT create variants like "reaktor VR-1" AND "školní reaktor VR-1" for the same thing. Pick one canonical name.
 - Always prefer the FULL name over abbreviations (e.g., use "Státní úřad pro jadernou bezpečnost" instead of "SÚJB", use "školní reaktor VR-1" instead of just "VR-1").
+- If the page introduces an abbreviation (e.g., "dále jen „SÚJB""), include it in the "abbreviations" array.
+- If you know the English name of a Czech entity, include it in "name_en".
 - Use PERSON for specific named individuals, ROLE for generic positions/functions.
 - Each relationship must reference entities by their exact name as listed in the entities array.
 - Only extract entities and relationships that are explicitly mentioned on this page.
@@ -44,10 +46,18 @@ Respond with ONLY a JSON object, no other text:
 ```json
 {
   "entities": [
-    {"name": "...", "type": "REGULATION", "description": "..."}
+    {
+      "name": "Státní úřad pro jadernou bezpečnost",
+      "type": "ORGANIZATION",
+      "description": "Czech nuclear regulatory authority",
+      "abbreviations": ["SÚJB"],
+      "name_en": "State Office for Nuclear Safety"
+    }
   ],
   "relationships": [
     {"source": "entity name", "target": "entity name", "type": "REFERENCES", "description": "..."}
   ]
 }
 ```
+
+Note: "abbreviations" and "name_en" are optional — include only when the information is present on the page.

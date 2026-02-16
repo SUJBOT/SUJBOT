@@ -127,6 +127,54 @@ def _parse_dedup_verdict(text: str) -> bool:
     return text.strip().upper().startswith("YES")
 
 
+def _parse_batch_verdicts(text: str, expected_count: int) -> Optional[List[bool]]:
+    """Parse batch LLM response into list of YES/NO verdicts.
+
+    Returns list of booleans if parsing succeeds and count matches,
+    or None to signal caller should fall back to sequential arbitration.
+    """
+    text = text.strip()
+    text = re.sub(r"^```(?:json)?\s*\n?", "", text)
+    text = re.sub(r"\n?```\s*$", "", text)
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        # Try regex extraction of verdicts array
+        match = re.search(r'"verdicts"\s*:\s*\[([^\]]+)\]', text)
+        if not match:
+            logger.info("Batch verdict parse failed: no JSON or verdicts array found")
+            return None
+        items = re.findall(r'"(YES|NO)"', match.group(1), re.IGNORECASE)
+        if len(items) != expected_count:
+            logger.info(
+                f"Batch verdict count mismatch: got {len(items)}, expected {expected_count}"
+            )
+            return None
+        return [v.upper() == "YES" for v in items]
+
+    if isinstance(data, dict):
+        verdicts = data.get("verdicts", [])
+    elif isinstance(data, list):
+        verdicts = data
+    else:
+        return None
+
+    if len(verdicts) != expected_count:
+        logger.info(f"Batch verdict count mismatch: got {len(verdicts)}, expected {expected_count}")
+        return None
+
+    return [str(v).strip().upper() == "YES" for v in verdicts]
+
+
+def _infer_alias_type(name: str) -> str:
+    """Heuristic: short uppercase string → 'abbreviation', else 'variant'."""
+    stripped = name.strip()
+    if 2 <= len(stripped) <= 10 and stripped == stripped.upper() and stripped.isalpha():
+        return "abbreviation"
+    return "variant"
+
+
 class GraphStorageAdapter:
     """
     PostgreSQL storage for knowledge graph (entities, relationships, communities).
@@ -187,6 +235,88 @@ class GraphStorageAdapter:
             await self.pool.close()
 
     # =========================================================================
+    # Entity Alias Operations
+    # =========================================================================
+
+    async def async_add_alias(
+        self,
+        conn: asyncpg.Connection,
+        entity_id: int,
+        alias: str,
+        alias_type: str = "variant",
+        language: Optional[str] = None,
+        source: Optional[str] = None,
+    ) -> bool:
+        """Add an alias for an entity (idempotent via ON CONFLICT DO NOTHING).
+
+        Returns True if a new alias was inserted, False if it already existed.
+        """
+        result = await conn.execute(
+            """
+            INSERT INTO graph.entity_aliases (entity_id, alias, alias_type, language, source)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (lower(alias), entity_id) DO NOTHING
+            """,
+            entity_id,
+            alias,
+            alias_type,
+            language,
+            source,
+        )
+        return _parse_command_count(result) > 0
+
+    async def async_lookup_alias(
+        self, conn: asyncpg.Connection, name: str, entity_type: Optional[str] = None
+    ) -> Optional[int]:
+        """Look up an entity_id by alias (case-insensitive).
+
+        Optionally filters by entity_type. Returns the entity_id or None.
+        """
+        if entity_type:
+            return await conn.fetchval(
+                """
+                SELECT e.entity_id FROM graph.entity_aliases a
+                JOIN graph.entities e ON a.entity_id = e.entity_id
+                WHERE lower(a.alias) = lower($1) AND e.entity_type = $2
+                LIMIT 1
+                """,
+                name,
+                entity_type,
+            )
+        return await conn.fetchval(
+            "SELECT entity_id FROM graph.entity_aliases WHERE lower(alias) = lower($1) LIMIT 1",
+            name,
+        )
+
+    async def async_get_aliases(self, conn: asyncpg.Connection, entity_id: int) -> List[str]:
+        """Get all aliases for an entity."""
+        rows = await conn.fetch(
+            "SELECT alias FROM graph.entity_aliases WHERE entity_id = $1 ORDER BY alias",
+            entity_id,
+        )
+        return [r["alias"] for r in rows]
+
+    async def async_migrate_aliases(
+        self, conn: asyncpg.Connection, from_entity_id: int, to_entity_id: int
+    ) -> int:
+        """Move all aliases from one entity to another (used during merge).
+
+        Skips aliases that already exist on the target entity (ON CONFLICT DO NOTHING).
+        Returns count of aliases migrated.
+        """
+        result = await conn.execute(
+            """
+            INSERT INTO graph.entity_aliases (entity_id, alias, alias_type, language, source)
+            SELECT $2, alias, alias_type, language, source
+            FROM graph.entity_aliases WHERE entity_id = $1
+            ON CONFLICT (lower(alias), entity_id) DO NOTHING
+            """,
+            from_entity_id,
+            to_entity_id,
+        )
+        return _parse_command_count(result)
+
+    # =========================================================================
     # Entity & Relationship Storage
     # =========================================================================
 
@@ -207,20 +337,9 @@ class GraphStorageAdapter:
         await self._ensure_pool()
 
         page_ids_arr = [source_page_id] if source_page_id else []
-        records = [
-            (
-                e["name"],
-                e["type"],
-                e.get("description"),
-                page_ids_arr,
-                document_id,
-                json.dumps(e.get("metadata", {})),
-            )
-            for e in entities
-        ]
 
         # On conflict: append new page IDs to existing array (deduplicated via array union)
-        sql = """
+        upsert_sql = """
             INSERT INTO graph.entities (name, entity_type, description, source_page_ids, document_id, metadata)
             VALUES ($1, $2, $3, $4::text[], $5, $6::jsonb)
             ON CONFLICT (name, entity_type, document_id) DO UPDATE SET
@@ -231,18 +350,81 @@ class GraphStorageAdapter:
                     ) AS pid WHERE pid IS NOT NULL
                 ),
                 metadata = graph.entities.metadata || EXCLUDED.metadata
+            RETURNING entity_id
         """
 
         try:
             async with self.pool.acquire() as conn:
-                await conn.executemany(sql, records)
+                processed = 0
+                for e in entities:
+                    name = e["name"]
+                    etype = e["type"]
+
+                    # Check if this name is an alias for an existing entity
+                    existing_id = await self.async_lookup_alias(conn, name, etype)
+                    if existing_id is not None:
+                        # Route to existing entity: update page_ids + add alias
+                        if page_ids_arr:
+                            await conn.execute(
+                                """
+                                UPDATE graph.entities SET source_page_ids = (
+                                    SELECT array_agg(DISTINCT pid)
+                                    FROM unnest(source_page_ids || $2::text[]) AS pid
+                                    WHERE pid IS NOT NULL
+                                ) WHERE entity_id = $1
+                                """,
+                                existing_id,
+                                page_ids_arr,
+                            )
+                        logger.debug(
+                            f"Entity '{name}' ({etype}) routed to existing entity "
+                            f"{existing_id} via alias lookup"
+                        )
+                        processed += 1
+                        continue
+
+                    # Normal upsert
+                    record = (
+                        name,
+                        etype,
+                        e.get("description"),
+                        page_ids_arr,
+                        document_id,
+                        json.dumps(e.get("metadata", {})),
+                    )
+                    entity_id = await conn.fetchval(upsert_sql, *record)
+
+                    # Store abbreviations from extraction as aliases
+                    for abbr in e.get("abbreviations", []):
+                        if abbr and abbr.strip():
+                            await self.async_add_alias(
+                                conn,
+                                entity_id,
+                                abbr.strip(),
+                                alias_type="abbreviation",
+                                source="extraction",
+                            )
+                    # Store English name as alias
+                    name_en = e.get("name_en", "")
+                    if name_en and name_en.strip():
+                        await self.async_add_alias(
+                            conn,
+                            entity_id,
+                            name_en.strip(),
+                            alias_type="translation",
+                            language="en",
+                            source="extraction",
+                        )
+
+                    processed += 1
+
         except asyncpg.PostgresError as e:
             raise GraphStoreError(
-                f"Failed to add {len(records)} entities for document {document_id}: {e}",
+                f"Failed to add entities for document {document_id}: {e}",
                 cause=e,
             ) from e
 
-        return len(records)
+        return processed
 
     def add_relationships(
         self, relationships: List[Dict], document_id: str, source_page_id: Optional[str] = None
@@ -257,7 +439,7 @@ class GraphStorageAdapter:
     async def _resolve_entity_id(
         conn: asyncpg.Connection, name: str, document_id: str
     ) -> Optional[int]:
-        """Resolve entity name to ID: document-scoped first, then cross-document fallback."""
+        """Resolve entity name to ID: document-scoped first, cross-document, then alias fallback."""
         entity_id = await conn.fetchval(
             "SELECT entity_id FROM graph.entities WHERE name = $1 AND document_id = $2 LIMIT 1",
             name,
@@ -266,6 +448,11 @@ class GraphStorageAdapter:
         if entity_id is None:
             entity_id = await conn.fetchval(
                 "SELECT entity_id FROM graph.entities WHERE name = $1 LIMIT 1", name
+            )
+        if entity_id is None:
+            entity_id = await conn.fetchval(
+                "SELECT entity_id FROM graph.entity_aliases WHERE lower(alias) = lower($1) LIMIT 1",
+                name,
             )
         return entity_id
 
@@ -398,18 +585,32 @@ class GraphStorageAdapter:
         type_filter = ""
         if entity_type:
             param_idx += 1
-            type_filter = f"AND entity_type = ${param_idx}"
+            type_filter = f"AND e.entity_type = ${param_idx}"
             params.append(entity_type)
 
         param_idx += 1
         params.append(limit)
 
+        # UNION with alias table: find entities whose aliases match the query
         sql = f"""
-            SELECT {_ENTITY_COLS}, metadata,
-                   ts_rank(search_tsv, plainto_tsquery('simple', unaccent($1))) AS score
-            FROM graph.entities
-            WHERE search_tsv @@ plainto_tsquery('simple', unaccent($1))
-            {type_filter}
+            SELECT {_ENTITY_COLS}, metadata, score FROM (
+                SELECT e.entity_id, e.name, e.entity_type, e.description,
+                       e.document_id, e.source_page_ids, e.metadata,
+                       ts_rank(e.search_tsv, plainto_tsquery('simple', unaccent($1))) AS score
+                FROM graph.entities e
+                WHERE e.search_tsv @@ plainto_tsquery('simple', unaccent($1))
+                {type_filter}
+
+                UNION
+
+                SELECT e.entity_id, e.name, e.entity_type, e.description,
+                       e.document_id, e.source_page_ids, e.metadata,
+                       1.0 AS score
+                FROM graph.entity_aliases a
+                JOIN graph.entities e ON a.entity_id = e.entity_id
+                WHERE lower(a.alias) = lower($1)
+                {type_filter}
+            ) sub
             ORDER BY score DESC
             LIMIT ${param_idx}
         """
@@ -811,6 +1012,118 @@ class GraphStorageAdapter:
     # Entity Deduplication
     # =========================================================================
 
+    async def _batch_llm_canonicalize(
+        self,
+        candidates: list,
+        llm_provider: Any,
+        single_prompt_template: str,
+        batch_size: int = 20,
+    ) -> List[tuple]:
+        """Batch LLM arbitration: group candidates by entity_type, batch pairs per call.
+
+        Falls back to single-pair arbitration if batch parsing fails.
+
+        Returns list of confirmed (id1, id2) pairs.
+        """
+        # Load batch prompt template
+        batch_prompt_path = (
+            Path(__file__).resolve().parent.parent.parent
+            / "prompts"
+            / "graph_entity_dedup_batch.txt"
+        )
+        if not batch_prompt_path.exists():
+            batch_prompt_path = Path("prompts") / "graph_entity_dedup_batch.txt"
+        use_batch = batch_prompt_path.exists()
+        if use_batch:
+            batch_template = batch_prompt_path.read_text(encoding="utf-8")
+
+        # Group candidates by entity_type for batching
+        by_type: Dict[str, list] = {}
+        for cand in candidates:
+            by_type.setdefault(cand["type1"], []).append(cand)
+
+        confirmed_pairs: List[tuple] = []
+
+        for entity_type, type_cands in by_type.items():
+            # Process in batches
+            for i in range(0, len(type_cands), batch_size):
+                batch = type_cands[i : i + batch_size]
+
+                if use_batch and len(batch) > 1:
+                    # Build batch prompt
+                    pair_lines = []
+                    for j, cand in enumerate(batch, 1):
+                        pair_lines.append(
+                            f"Pair {j}: \"{cand['name1']}\" ({cand['desc1'] or 'No description'}) "
+                            f"vs \"{cand['name2']}\" ({cand['desc2'] or 'No description'})"
+                        )
+                    pairs_text = "\n".join(pair_lines)
+                    prompt = batch_template.format(entity_type=entity_type, pairs=pairs_text)
+
+                    try:
+                        response = await asyncio.to_thread(
+                            llm_provider.create_message,
+                            messages=[{"role": "user", "content": prompt}],
+                            tools=[],
+                            system="",
+                            max_tokens=200,
+                            temperature=0.0,
+                        )
+                        verdicts = _parse_batch_verdicts(response.text or "", len(batch))
+                        if verdicts is not None:
+                            for cand, is_yes in zip(batch, verdicts):
+                                if is_yes:
+                                    confirmed_pairs.append((cand["id1"], cand["id2"]))
+                                    logger.info(
+                                        f"LLM confirmed merge: '{cand['name1']}' ≈ "
+                                        f"'{cand['name2']}' (sim={cand['similarity']:.3f})"
+                                    )
+                            continue  # Batch succeeded, skip fallback
+                    except (KeyboardInterrupt, SystemExit, MemoryError):
+                        raise
+                    except Exception as e:
+                        logger.warning(
+                            f"Batch LLM call failed for {entity_type}, "
+                            f"falling back to sequential: {e}"
+                        )
+
+                # Fallback: sequential single-pair arbitration
+                for cand in batch:
+                    prompt = single_prompt_template.format(
+                        name1=cand["name1"],
+                        type1=cand["type1"],
+                        desc1=cand["desc1"] or "No description",
+                        name2=cand["name2"],
+                        type2=cand["type2"],
+                        desc2=cand["desc2"] or "No description",
+                    )
+                    try:
+                        response = await asyncio.to_thread(
+                            llm_provider.create_message,
+                            messages=[{"role": "user", "content": prompt}],
+                            tools=[],
+                            system="",
+                            max_tokens=100,
+                            temperature=0.0,
+                        )
+                        answer = (response.text or "").strip()
+                        if _parse_dedup_verdict(answer):
+                            confirmed_pairs.append((cand["id1"], cand["id2"]))
+                            logger.info(
+                                f"LLM confirmed merge: '{cand['name1']}' ≈ "
+                                f"'{cand['name2']}' (sim={cand['similarity']:.3f})"
+                            )
+                    except (KeyboardInterrupt, SystemExit, MemoryError):
+                        raise
+                    except Exception as e:
+                        logger.warning(
+                            f"LLM arbitration failed for '{cand['name1']}' vs "
+                            f"'{cand['name2']}': {e}",
+                            exc_info=True,
+                        )
+
+        return confirmed_pairs
+
     async def _merge_entity_group(
         self,
         conn,
@@ -818,10 +1131,12 @@ class GraphStorageAdapter:
         duplicate_ids: List[int],
         merged_description: Optional[str] = None,
         canonical_name: Optional[str] = None,
+        dedup_source: str = "exact_dedup",
     ) -> int:
         """Merge duplicate entities into canonical within an open transaction.
 
         Remaps relationships, removes self-references and duplicate edges,
+        saves non-canonical names as aliases, transfers aliases from duplicates,
         updates canonical entity, and deletes duplicates.
 
         Args:
@@ -831,10 +1146,21 @@ class GraphStorageAdapter:
             merged_description: If provided, set as canonical's description.
                 When None, only the search_embedding is cleared.
             canonical_name: If provided, rename canonical entity to this name.
+            dedup_source: Source label for aliases ('exact_dedup', 'semantic_dedup').
 
         Returns:
             Number of duplicate entity rows deleted.
         """
+        # Collect names from duplicates (and old canonical name) BEFORE any changes
+        all_merge_ids = [canonical_id] + duplicate_ids
+        ph = ", ".join(f"${i + 1}" for i in range(len(all_merge_ids)))
+        name_rows = await conn.fetch(
+            f"SELECT entity_id, name FROM graph.entities WHERE entity_id IN ({ph})",
+            *all_merge_ids,
+        )
+        names_by_id = {r["entity_id"]: r["name"] for r in name_rows}
+        canonical_current_name = names_by_id.get(canonical_id, "")
+
         # Remap relationships from duplicates to canonical
         for dup_id in duplicate_ids:
             await conn.execute(
@@ -869,9 +1195,26 @@ class GraphStorageAdapter:
             canonical_id,
         )
 
+        # Transfer aliases from duplicate entities to canonical
+        for dup_id in duplicate_ids:
+            await self.async_migrate_aliases(conn, dup_id, canonical_id)
+            # Delete source aliases (already copied or skipped as duplicates)
+            await conn.execute("DELETE FROM graph.entity_aliases WHERE entity_id = $1", dup_id)
+
+        # Save non-canonical names as aliases of the canonical entity
+        final_name = canonical_name or canonical_current_name
+        for eid in all_merge_ids:
+            name = names_by_id.get(eid, "")
+            if name and name.lower() != final_name.lower():
+                await self.async_add_alias(
+                    conn,
+                    canonical_id,
+                    name,
+                    alias_type=_infer_alias_type(name),
+                    source=dedup_source,
+                )
+
         # Collect all source_page_ids from all entities being merged
-        all_merge_ids = [canonical_id] + duplicate_ids
-        ph = ", ".join(f"${i + 1}" for i in range(len(all_merge_ids)))
         merged_page_ids = await conn.fetchval(
             f"SELECT array_agg(DISTINCT pid) FROM ("
             f"  SELECT unnest(source_page_ids) AS pid FROM graph.entities "
@@ -1035,27 +1378,40 @@ class GraphStorageAdapter:
             logger.info("No LLM provider for semantic dedup — skipping")
             return {"candidates_found": 0, "llm_confirmed": 0, "entities_removed": 0}
 
-        # Load dedup prompt (try relative to source first, then cwd)
-        prompt_path = (
-            Path(__file__).resolve().parent.parent.parent / "prompts" / "graph_entity_dedup.txt"
-        )
-        if not prompt_path.exists():
-            prompt_path = Path("prompts") / "graph_entity_dedup.txt"
-        if not prompt_path.exists():
-            logger.error(f"Dedup prompt not found at {prompt_path}, skipping semantic dedup")
+        # Load dedup prompts (batch + single-pair fallback)
+        prompts_dir = Path(__file__).resolve().parent.parent.parent / "prompts"
+
+        batch_prompt_path = prompts_dir / "graph_entity_dedup_batch.txt"
+        if not batch_prompt_path.exists():
+            batch_prompt_path = Path("prompts") / "graph_entity_dedup_batch.txt"
+
+        single_prompt_path = prompts_dir / "graph_entity_dedup.txt"
+        if not single_prompt_path.exists():
+            single_prompt_path = Path("prompts") / "graph_entity_dedup.txt"
+
+        if not batch_prompt_path.exists() and not single_prompt_path.exists():
+            logger.error("Dedup prompts not found, skipping semantic dedup")
             return {
                 "candidates_found": 0,
                 "llm_confirmed": 0,
                 "entities_removed": 0,
-                "error": f"Prompt file not found: {prompt_path}",
+                "error": "Prompt files not found",
             }
-        prompt_template = prompt_path.read_text(encoding="utf-8")
+        batch_prompt_template = (
+            batch_prompt_path.read_text(encoding="utf-8") if batch_prompt_path.exists() else None
+        )
+        single_prompt_template = (
+            single_prompt_path.read_text(encoding="utf-8") if single_prompt_path.exists() else None
+        )
 
-        # Find candidate pairs via pgvector KNN (batch nearest-neighbor)
-        # LIMIT 3 per entity, global cap via max_candidates, highest similarity first
+        # Find candidate pairs from two sources:
+        # 1. pgvector KNN (LIMIT 10, cross-type compatible groups)
+        # 2. Alias-based matches (entity name matches another entity's alias)
         candidate_sql = """
-            SELECT id1, id2, name1, name2, type1, type2, desc1, desc2, similarity
+            SELECT DISTINCT ON (LEAST(id1, id2), GREATEST(id1, id2))
+                   id1, id2, name1, name2, type1, type2, desc1, desc2, similarity
             FROM (
+                -- Source 1: embedding KNN candidates
                 SELECT e1.entity_id AS id1, e2.entity_id AS id2,
                        e1.name AS name1, e2.name AS name2,
                        e1.entity_type AS type1, e2.entity_type AS type2,
@@ -1065,22 +1421,49 @@ class GraphStorageAdapter:
                 CROSS JOIN LATERAL (
                     SELECT entity_id, name, entity_type, description, search_embedding
                     FROM graph.entities e2
-                    WHERE e2.entity_type = e1.entity_type
-                      AND e2.entity_id > e1.entity_id
+                    WHERE e2.entity_id > e1.entity_id
                       AND e2.search_embedding IS NOT NULL
+                      AND (
+                          e2.entity_type = e1.entity_type
+                          OR (e1.entity_type IN ('REGULATION','DOCUMENT','STANDARD')
+                              AND e2.entity_type IN ('REGULATION','DOCUMENT','STANDARD'))
+                          OR (e1.entity_type IN ('CONCEPT','REQUIREMENT')
+                              AND e2.entity_type IN ('CONCEPT','REQUIREMENT'))
+                      )
                     ORDER BY e2.search_embedding <=> e1.search_embedding
-                    LIMIT 3
+                    LIMIT 10
                 ) e2
                 WHERE e1.search_embedding IS NOT NULL
                   AND 1 - (e1.search_embedding <=> e2.search_embedding) >= $1
+
+                UNION ALL
+
+                -- Source 2: alias-based candidates (name of one entity matches alias of another)
+                SELECT e1.entity_id AS id1, e2.entity_id AS id2,
+                       e1.name AS name1, e2.name AS name2,
+                       e1.entity_type AS type1, e2.entity_type AS type2,
+                       e1.description AS desc1, e2.description AS desc2,
+                       0.95 AS similarity  -- high confidence for alias matches
+                FROM graph.entities e1
+                JOIN graph.entity_aliases a ON lower(e1.name) = lower(a.alias)
+                JOIN graph.entities e2 ON a.entity_id = e2.entity_id
+                WHERE e1.entity_id != e2.entity_id
+                  AND e1.entity_id < e2.entity_id  -- avoid duplicate pairs
             ) sub
+            ORDER BY LEAST(id1, id2), GREATEST(id1, id2), similarity DESC
+        """
+
+        # Wrap with final ordering and limit
+        final_sql = f"""
+            SELECT id1, id2, name1, name2, type1, type2, desc1, desc2, similarity
+            FROM ({candidate_sql}) deduped
             ORDER BY similarity DESC
             LIMIT $2
         """
 
         try:
             async with self.pool.acquire() as conn:
-                candidates = await conn.fetch(candidate_sql, similarity_threshold, max_candidates)
+                candidates = await conn.fetch(final_sql, similarity_threshold, max_candidates)
         except asyncpg.PostgresError as e:
             raise GraphStoreError(
                 f"Failed to find semantic duplicate candidates: {e}", cause=e
@@ -1094,48 +1477,10 @@ class GraphStorageAdapter:
             f"Found {len(candidates)} semantic duplicate candidates (threshold={similarity_threshold})"
         )
 
-        # LLM arbitration for each candidate pair
-        confirmed_pairs = []
-        for cand in candidates:
-            prompt = prompt_template.format(
-                name1=cand["name1"],
-                type1=cand["type1"],
-                desc1=cand["desc1"] or "No description",
-                name2=cand["name2"],
-                type2=cand["type2"],
-                desc2=cand["desc2"] or "No description",
-            )
-
-            try:
-                response = await asyncio.to_thread(
-                    llm_provider.create_message,
-                    messages=[{"role": "user", "content": prompt}],
-                    tools=[],
-                    system="",
-                    max_tokens=100,
-                    temperature=0.0,
-                )
-                answer = (response.text or "").strip()
-                is_yes = _parse_dedup_verdict(answer)
-
-                if is_yes:
-                    confirmed_pairs.append((cand["id1"], cand["id2"]))
-                    logger.info(
-                        f"LLM confirmed merge: '{cand['name1']}' ≈ '{cand['name2']}' "
-                        f"(sim={cand['similarity']:.3f})"
-                    )
-                else:
-                    logger.debug(
-                        f"LLM rejected merge: '{cand['name1']}' vs '{cand['name2']}' "
-                        f"(sim={cand['similarity']:.3f}): {answer[:80]}"
-                    )
-            except (KeyboardInterrupt, SystemExit, MemoryError):
-                raise
-            except Exception as e:
-                logger.warning(
-                    f"LLM arbitration failed for '{cand['name1']}' vs '{cand['name2']}': {e}",
-                    exc_info=True,
-                )
+        # Batch LLM arbitration: group by entity_type, batch_size=20
+        confirmed_pairs = await self._batch_llm_canonicalize(
+            candidates, llm_provider, single_prompt_template or "", batch_size=20
+        )
 
         if not confirmed_pairs:
             logger.info("No semantic duplicates confirmed by LLM")
@@ -1218,7 +1563,11 @@ class GraphStorageAdapter:
             )
 
             # Merge descriptions
-            descs = [entity_info[eid]["description"] for eid in group_ids if eid in entity_info and entity_info[eid]["description"]]
+            descs = [
+                entity_info[eid]["description"]
+                for eid in group_ids
+                if eid in entity_info and entity_info[eid]["description"]
+            ]
             distinct_descs = list(dict.fromkeys(descs))
             merged_desc = " | ".join(distinct_descs)[:2000] if distinct_descs else None
 
@@ -1231,6 +1580,7 @@ class GraphStorageAdapter:
                             duplicate_ids,
                             merged_description=merged_desc,
                             canonical_name=best_name,
+                            dedup_source="semantic_dedup",
                         )
                         total_removed += removed
                         groups_succeeded += 1

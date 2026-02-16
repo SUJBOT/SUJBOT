@@ -253,11 +253,14 @@ async def test_rebuild_no_summarizer():
 
 @pytest.mark.anyio
 async def test_embed_new_entities():
-    """Test embedding entities with NULL search_embedding."""
+    """Test embedding entities with NULL search_embedding (with alias enrichment)."""
     storage = AsyncMock()
     storage._ensure_pool = AsyncMock()
 
-    # Mock pool.acquire() returning entities that need embedding
+    # Mock pool.acquire() — called multiple times:
+    # 1st: fetch entities needing embedding
+    # 2nd: fetch aliases for those entities
+    # 3rd: store embeddings
     entity_rows = [
         {
             "entity_id": 1,
@@ -267,15 +270,32 @@ async def test_embed_new_entities():
         },
         {"entity_id": 2, "name": "AtomAct", "entity_type": "REGULATION", "description": ""},
     ]
+    alias_rows = [
+        {"entity_id": 1, "alias": "Státní úřad pro jadernou bezpečnost"},
+    ]
 
-    conn_mock = AsyncMock()
-    conn_mock.fetch = AsyncMock(return_value=entity_rows)
-    conn_mock.executemany = AsyncMock()
-    acq = AsyncMock()
-    acq.__aenter__ = AsyncMock(return_value=conn_mock)
-    acq.__aexit__ = AsyncMock(return_value=False)
+    call_count = 0
+
+    def make_acq():
+        nonlocal call_count
+        conn = AsyncMock()
+        if call_count == 0:
+            # First call: fetch entities
+            conn.fetch = AsyncMock(return_value=entity_rows)
+        elif call_count == 1:
+            # Second call: fetch aliases
+            conn.fetch = AsyncMock(return_value=alias_rows)
+        else:
+            # Third+ call: store embeddings
+            conn.executemany = AsyncMock()
+        call_count += 1
+        acq = AsyncMock()
+        acq.__aenter__ = AsyncMock(return_value=conn)
+        acq.__aexit__ = AsyncMock(return_value=False)
+        return acq
+
     storage.pool = MagicMock()
-    storage.pool.acquire = MagicMock(return_value=acq)
+    storage.pool.acquire = make_acq
 
     embedder = FakeEmbedder()
     count = await _embed_new_entities(storage, embedder)

@@ -154,13 +154,21 @@ class EntityExtractor:
             etype = ent.get("type", "").strip().upper()
             if not name or etype not in ENTITY_TYPES:
                 continue
-            entities.append(
-                {
-                    "name": name,
-                    "type": etype,
-                    "description": ent.get("description", ""),
-                }
-            )
+            entity_dict = {
+                "name": name,
+                "type": etype,
+                "description": ent.get("description", ""),
+            }
+            # Parse optional abbreviation and translation fields
+            abbreviations = ent.get("abbreviations", [])
+            if isinstance(abbreviations, list):
+                entity_dict["abbreviations"] = [
+                    a.strip() for a in abbreviations if isinstance(a, str) and a.strip()
+                ]
+            name_en = ent.get("name_en", "")
+            if isinstance(name_en, str) and name_en.strip():
+                entity_dict["name_en"] = name_en.strip()
+            entities.append(entity_dict)
 
         filtered_entities = len(raw_entities) - len(entities)
         if filtered_entities > 0:
