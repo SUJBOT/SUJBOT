@@ -62,6 +62,7 @@ class JinaClient:
         self._query_cache: LRUCache[np.ndarray] = LRUCache(
             max_size=cache_max_size, name="jina_query_cache"
         )
+        self._client = httpx.Client(timeout=120.0)
 
     def _headers(self) -> dict:
         return {
@@ -88,12 +89,14 @@ class JinaClient:
 
         for attempt in range(MAX_RETRIES + 1):
             try:
-                with httpx.Client(timeout=timeout) as client:
-                    response = client.post(
-                        JINA_API_URL, json=payload, headers=self._headers()
-                    )
-                    response.raise_for_status()
-                    return response.json()
+                response = self._client.post(
+                    JINA_API_URL,
+                    json=payload,
+                    headers=self._headers(),
+                    timeout=timeout,
+                )
+                response.raise_for_status()
+                return response.json()
             except httpx.HTTPStatusError as e:
                 if e.response.status_code != 429 or attempt == MAX_RETRIES:
                     raise
@@ -118,6 +121,10 @@ class JinaClient:
             f"Jina API rate limit exceeded after {MAX_RETRIES} retries",
             cause=last_error,
         )
+
+    def close(self) -> None:
+        """Close the persistent HTTP client."""
+        self._client.close()
 
     def embed_query(self, text: str) -> np.ndarray:
         """

@@ -70,101 +70,77 @@ class TestEmbedQuery:
     """embed_query tests."""
 
     def test_embed_query_returns_array(self, client, mock_response):
-        with patch("src.vl.jina_client.httpx.Client") as MockClient:
-            MockClient.return_value.__enter__ = MagicMock(
-                return_value=MagicMock(post=MagicMock(return_value=mock_response))
-            )
-            MockClient.return_value.__exit__ = MagicMock(return_value=False)
+        client._client.post = MagicMock(return_value=mock_response)
 
-            result = client.embed_query("test query")
-            assert isinstance(result, np.ndarray)
-            assert result.shape == (JINA_DIMENSIONS,)
-            # Should be L2-normalized
-            assert abs(np.linalg.norm(result) - 1.0) < 1e-5
+        result = client.embed_query("test query")
+        assert isinstance(result, np.ndarray)
+        assert result.shape == (JINA_DIMENSIONS,)
+        # Should be L2-normalized
+        assert abs(np.linalg.norm(result) - 1.0) < 1e-5
 
     def test_embed_query_cache_hit(self, client, mock_response):
         """Second call with same query should use cache, not API."""
-        with patch("src.vl.jina_client.httpx.Client") as MockClient:
-            mock_client_instance = MagicMock()
-            mock_client_instance.post.return_value = mock_response
-            MockClient.return_value.__enter__ = MagicMock(return_value=mock_client_instance)
-            MockClient.return_value.__exit__ = MagicMock(return_value=False)
+        client._client.post = MagicMock(return_value=mock_response)
 
-            # First call → API
-            result1 = client.embed_query("test query")
-            # Second call → cache
-            result2 = client.embed_query("test query")
+        # First call → API
+        result1 = client.embed_query("test query")
+        # Second call → cache
+        result2 = client.embed_query("test query")
 
-            assert np.allclose(result1, result2)
-            # httpx.Client should only have been constructed once
-            assert MockClient.call_count == 1
+        assert np.allclose(result1, result2)
+        # post should only have been called once (second was cached)
+        assert client._client.post.call_count == 1
 
     def test_embed_query_cache_eviction(self, client, mock_response):
         """Cache with max_size=3 should evict oldest entry on 4th unique query."""
-        with patch("src.vl.jina_client.httpx.Client") as MockClient:
-            mock_client_instance = MagicMock()
-            mock_client_instance.post.return_value = mock_response
-            MockClient.return_value.__enter__ = MagicMock(return_value=mock_client_instance)
-            MockClient.return_value.__exit__ = MagicMock(return_value=False)
+        client._client.post = MagicMock(return_value=mock_response)
 
-            # Fill cache
-            client.embed_query("query1")
-            client.embed_query("query2")
-            client.embed_query("query3")
-            assert len(client._query_cache) == 3
+        # Fill cache
+        client.embed_query("query1")
+        client.embed_query("query2")
+        client.embed_query("query3")
+        assert len(client._query_cache) == 3
 
-            # This should evict query1
-            client.embed_query("query4")
-            assert len(client._query_cache) == 3
+        # This should evict query1
+        client.embed_query("query4")
+        assert len(client._query_cache) == 3
 
     def test_embed_query_http_error_raises_jina_error(self, client):
         """HTTP errors should be wrapped in JinaAPIError."""
         import httpx
 
-        with patch("src.vl.jina_client.httpx.Client") as MockClient:
-            mock_response = MagicMock()
-            mock_response.status_code = 401
-            mock_response.text = "Unauthorized"
-            mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-                "401", request=MagicMock(), response=mock_response
-            )
-            mock_client_instance = MagicMock()
-            mock_client_instance.post.return_value = mock_response
-            MockClient.return_value.__enter__ = MagicMock(return_value=mock_client_instance)
-            MockClient.return_value.__exit__ = MagicMock(return_value=False)
+        mock_response = MagicMock()
+        mock_response.status_code = 401
+        mock_response.text = "Unauthorized"
+        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "401", request=MagicMock(), response=mock_response
+        )
+        client._client.post = MagicMock(return_value=mock_response)
 
-            with pytest.raises(JinaAPIError, match="401"):
-                client.embed_query("test")
+        with pytest.raises(JinaAPIError, match="401"):
+            client.embed_query("test")
 
     def test_embed_query_missing_data_field_raises(self, client):
         """Response missing 'data' field should raise JinaAPIError."""
-        with patch("src.vl.jina_client.httpx.Client") as MockClient:
-            bad_response = MagicMock()
-            bad_response.status_code = 200
-            bad_response.raise_for_status.return_value = None
-            bad_response.json.return_value = {"error": "bad request"}
-            mock_client_instance = MagicMock()
-            mock_client_instance.post.return_value = bad_response
-            MockClient.return_value.__enter__ = MagicMock(return_value=mock_client_instance)
-            MockClient.return_value.__exit__ = MagicMock(return_value=False)
+        bad_response = MagicMock()
+        bad_response.status_code = 200
+        bad_response.raise_for_status.return_value = None
+        bad_response.json.return_value = {"error": "bad request"}
+        client._client.post = MagicMock(return_value=bad_response)
 
-            with pytest.raises(JinaAPIError, match="missing 'data'"):
-                client.embed_query("test")
+        with pytest.raises(JinaAPIError, match="missing 'data'"):
+            client.embed_query("test")
 
     def test_embed_query_missing_embedding_field_raises(self, client):
         """Response with data but missing 'embedding' should raise JinaAPIError."""
-        with patch("src.vl.jina_client.httpx.Client") as MockClient:
-            bad_response = MagicMock()
-            bad_response.status_code = 200
-            bad_response.raise_for_status.return_value = None
-            bad_response.json.return_value = {"data": [{"object": "embedding"}]}
-            mock_client_instance = MagicMock()
-            mock_client_instance.post.return_value = bad_response
-            MockClient.return_value.__enter__ = MagicMock(return_value=mock_client_instance)
-            MockClient.return_value.__exit__ = MagicMock(return_value=False)
+        bad_response = MagicMock()
+        bad_response.status_code = 200
+        bad_response.raise_for_status.return_value = None
+        bad_response.json.return_value = {"data": [{"object": "embedding"}]}
+        client._client.post = MagicMock(return_value=bad_response)
 
-            with pytest.raises(JinaAPIError, match="missing 'embedding'"):
-                client.embed_query("test")
+        with pytest.raises(JinaAPIError, match="missing 'embedding'"):
+            client.embed_query("test")
 
 
 class TestEmbedPages:
@@ -186,16 +162,12 @@ class TestEmbedPages:
             }
             return resp
 
-        with patch("src.vl.jina_client.httpx.Client") as MockClient:
-            mock_client_instance = MagicMock()
-            mock_client_instance.post.side_effect = make_batch_response
-            MockClient.return_value.__enter__ = MagicMock(return_value=mock_client_instance)
-            MockClient.return_value.__exit__ = MagicMock(return_value=False)
+        client._client.post = MagicMock(side_effect=make_batch_response)
 
-            # 10 fake images
-            images = [b"fake_png_bytes"] * 10
-            result = client.embed_pages(images)
+        # 10 fake images
+        images = [b"fake_png_bytes"] * 10
+        result = client.embed_pages(images)
 
-            assert result.shape == (10, JINA_DIMENSIONS)
-            # 10 images / batch_size 8 = 2 API calls
-            assert mock_client_instance.post.call_count == 2
+        assert result.shape == (10, JINA_DIMENSIONS)
+        # 10 images / batch_size 8 = 2 API calls
+        assert client._client.post.call_count == 2

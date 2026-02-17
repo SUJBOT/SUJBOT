@@ -13,7 +13,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import rehypeRaw from 'rehype-raw';
-import { Clock, DollarSign, Edit2, RotateCw, Check, X, FileText, Copy, Image, File } from 'lucide-react';
+import { Clock, DollarSign, Edit2, RotateCw, Check, X, FileText, Copy } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../design-system/utils/cn';
 import type { Message } from '../../types';
@@ -23,6 +23,7 @@ import { FeedbackButtons } from './FeedbackButtons';
 import { CitationLink } from '../citation/CitationLink';
 import { WebCitationLink } from '../citation/WebCitationLink';
 import { AttachmentPreviewModal } from './AttachmentPreviewModal';
+import { AttachmentChip } from './AttachmentChip';
 import { preprocessCitations } from '../../utils/citations';
 
 /**
@@ -163,35 +164,13 @@ function ChatMessageInner({
         {isUser && message.attachments && message.attachments.length > 0 && (
           <div className={cn('flex flex-wrap gap-1.5', 'justify-end')}>
             {message.attachments.map((att, idx) => (
-              <button
+              <AttachmentChip
                 key={idx}
-                type="button"
+                filename={att.filename}
+                mimeType={att.mimeType}
+                sizeBytes={att.sizeBytes}
                 onClick={() => setPreviewIndex(idx)}
-                className={cn(
-                  'inline-flex items-center gap-1.5 px-2.5 py-1',
-                  'bg-blue-50 dark:bg-blue-900/30',
-                  'text-blue-700 dark:text-blue-300',
-                  'rounded-lg',
-                  'border border-blue-200 dark:border-blue-800',
-                  'text-xs',
-                  'cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-900/50',
-                  'transition-colors'
-                )}
-              >
-                {att.mimeType.startsWith('image/') ? (
-                  <Image size={12} />
-                ) : att.mimeType === 'application/pdf' ? (
-                  <FileText size={12} />
-                ) : (
-                  <File size={12} />
-                )}
-                <span className="truncate max-w-[150px]" title={att.filename}>
-                  {att.filename}
-                </span>
-                <span className="text-blue-400 dark:text-blue-500">
-                  ({(att.sizeBytes / 1024).toFixed(0)} KB)
-                </span>
-              </button>
+              />
             ))}
           </div>
         )}

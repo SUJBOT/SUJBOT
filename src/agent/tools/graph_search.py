@@ -52,13 +52,9 @@ class GraphSearchTool(BaseTool):
         entity_type: Optional[str] = None,
         limit: int = 10,
     ) -> ToolResult:
-        graph_storage = getattr(self.config, "graph_storage", None)
-        if not graph_storage:
-            return ToolResult(
-                success=False,
-                data=None,
-                error="Knowledge graph not available (graph_storage not configured)",
-            )
+        graph_storage, err = self._get_graph_storage()
+        if err:
+            return err
 
         # Determine fetch size: if adaptive-k is enabled and graph uses
         # embedding search, fetch a larger candidate pool for thresholding.

@@ -2,14 +2,9 @@ import { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { DollarSign, Server } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../design-system/utils/cn';
+import { apiService } from '../../services/api';
 
 type Variant = 'remote' | 'local';
-
-interface VariantInfo {
-  variant: Variant;
-  display_name: string;
-  model: string;
-}
 
 interface IndicatorStyle {
   left: number;
@@ -60,14 +55,8 @@ export function AgentVariantSelector() {
 
   const loadVariant = async () => {
     try {
-      const response = await fetch('/settings/agent-variant', {
-        credentials: 'include'
-      });
-
-      if (response.ok) {
-        const data: VariantInfo = await response.json();
-        setCurrentVariant(data.variant);
-      }
+      const data = await apiService.getAgentVariant();
+      setCurrentVariant(data.variant as Variant);
     } catch (error) {
       console.error('Failed to load variant:', error);
     } finally {
@@ -80,18 +69,8 @@ export function AgentVariantSelector() {
 
     setIsSwitching(true);
     try {
-      const response = await fetch('/settings/agent-variant', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ variant })
-      });
-
-      if (response.ok) {
-        setCurrentVariant(variant);
-      } else {
-        console.error('Failed to switch variant');
-      }
+      await apiService.setAgentVariant(variant);
+      setCurrentVariant(variant);
     } catch (error) {
       console.error('Error switching variant:', error);
     } finally {

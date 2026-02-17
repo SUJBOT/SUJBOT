@@ -31,14 +31,12 @@ from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from backend.config import PDF_BASE_DIR
+from backend.deps import get_vl_components as _get_vl_components_from_deps, get_pdf_file_list, invalidate_pdf_scan_cache
 from backend.middleware.auth import get_current_user
 from src.exceptions import ConversionError
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 logger = logging.getLogger(__name__)
-
-# Module-level VL components (set by main.py during startup)
-_vl_components: Dict[str, Any] = {}
 
 MAX_UPLOAD_SIZE = 100 * 1024 * 1024  # 100 MB
 
@@ -74,35 +72,12 @@ class UploadState:
 _active_uploads: Dict[int, UploadState] = {}
 
 
-def set_vl_components(
-    jina_client: Any,
-    page_store: Any,
-    vector_store: Any,
-    summary_provider: Any = None,
-    entity_extractor: Any = None,
-    graph_storage: Any = None,
-    community_detector: Any = None,
-    community_summarizer: Any = None,
-    graph_embedder: Any = None,
-) -> None:
-    """Set VL components for upload endpoint (called from main.py lifespan)."""
-    _vl_components["jina_client"] = jina_client
-    _vl_components["page_store"] = page_store
-    _vl_components["vector_store"] = vector_store
-    _vl_components["summary_provider"] = summary_provider
-    _vl_components["entity_extractor"] = entity_extractor
-    _vl_components["graph_storage"] = graph_storage
-    _vl_components["community_detector"] = community_detector
-    _vl_components["community_summarizer"] = community_summarizer
-    _vl_components["graph_embedder"] = graph_embedder
-
-
 def _schedule_graph_rebuild(document_id: str) -> None:
     """Schedule a debounced graph rebuild. Resets timer on each call."""
     global _rebuild_timer, _rebuild_task
 
-    graph_storage = _vl_components.get("graph_storage")
-    community_detector = _vl_components.get("community_detector")
+    graph_storage = _get_vl_components_from_deps().get("graph_storage")
+    community_detector = _get_vl_components_from_deps().get("community_detector")
     if not graph_storage or not community_detector:
         logger.debug("Graph rebuild skipped: graph_storage or community_detector not configured")
         return
@@ -140,9 +115,9 @@ def _schedule_graph_rebuild(document_id: str) -> None:
             rebuild_graph_communities(
                 graph_storage=graph_storage,
                 community_detector=community_detector,
-                community_summarizer=_vl_components.get("community_summarizer"),
-                graph_embedder=_vl_components.get("graph_embedder"),
-                llm_provider=_vl_components.get("summary_provider"),
+                community_summarizer=_get_vl_components_from_deps().get("community_summarizer"),
+                graph_embedder=_get_vl_components_from_deps().get("graph_embedder"),
+                llm_provider=_get_vl_components_from_deps().get("summary_provider"),
                 document_id=document_id,
             )
         )
@@ -555,7 +530,7 @@ async def list_documents(user: Dict = Depends(get_current_user)) -> List[Documen
 
     # Fetch categories from database if available
     categories: Dict[str, str] = {}
-    vector_store = _vl_components.get("vector_store")
+    vector_store = _get_vl_components_from_deps().get("vector_store")
     if vector_store:
         try:
             await vector_store._ensure_pool()
@@ -566,16 +541,13 @@ async def list_documents(user: Dict = Depends(get_current_user)) -> List[Documen
             logger.warning(f"Failed to fetch document categories: {e}", exc_info=True)
 
     try:
-        for pdf_path in PDF_BASE_DIR.glob("*.pdf"):
-            filename = pdf_path.name
-            doc_id = pdf_path.stem  # Filename without .pdf
-
+        for doc_id, filename, size_bytes in get_pdf_file_list(PDF_BASE_DIR):
             documents.append(
                 DocumentInfo(
                     document_id=doc_id,
                     display_name=_format_display_name(filename),
                     filename=filename,
-                    size_bytes=pdf_path.stat().st_size,
+                    size_bytes=size_bytes,
                     category=categories.get(doc_id, "documentation"),
                 )
             )
@@ -748,12 +720,13 @@ async def _run_pipeline_task(state: UploadState, content: bytes) -> None:
     to state.events.  On success it schedules a graph rebuild; on cancel or
     error it cleans up files and DB.
     """
-    vector_store = _vl_components["vector_store"]
-    jina_client = _vl_components["jina_client"]
-    page_store = _vl_components["page_store"]
-    summary_provider = _vl_components.get("summary_provider")
-    entity_extractor = _vl_components.get("entity_extractor")
-    graph_storage = _vl_components.get("graph_storage")
+    vl = _get_vl_components_from_deps()
+    vector_store = vl["vector_store"]
+    jina_client = vl["jina_client"]
+    page_store = vl["page_store"]
+    summary_provider = vl.get("summary_provider")
+    entity_extractor = vl.get("entity_extractor")
+    graph_storage = vl.get("graph_storage")
     document_id = state.document_id
 
     try:
@@ -893,6 +866,7 @@ async def _run_pipeline_task(state: UploadState, content: bytes) -> None:
 
     finally:
         state.done = True
+        invalidate_pdf_scan_cache()
         _schedule_upload_state_cleanup(state.user_id, state)
 
 
@@ -943,7 +917,7 @@ async def upload_document(
             detail="Category must be 'documentation' or 'legislation'",
         )
     # Validate VL components are available
-    if not _vl_components:
+    if not _get_vl_components_from_deps():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="VL indexing pipeline not initialized",

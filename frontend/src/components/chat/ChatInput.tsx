@@ -3,13 +3,14 @@
  */
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Square, FileText, X, Paperclip, Image, File } from 'lucide-react';
+import { Send, Square, FileText, X, Paperclip } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../design-system/utils/cn';
 import { useAuth } from '../../contexts/AuthContext';
 import { apiService, type SpendingInfo } from '../../services/api';
 import type { TextSelection, Attachment } from '../../types';
 import { AttachmentPreviewModal } from './AttachmentPreviewModal';
+import { AttachmentChip } from './AttachmentChip';
 
 const ALLOWED_MIME_TYPES = new Set([
   'image/png',
@@ -217,53 +218,15 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled, refreshSpen
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-2" style={{ animation: 'chipIn 0.15s ease-out' }}>
             {attachments.map((att, idx) => (
-              <div
+              <AttachmentChip
                 key={att.id}
-                className={cn(
-                  'inline-flex items-center gap-1.5 px-2.5 py-1',
-                  'bg-blue-50 dark:bg-blue-900/30',
-                  'text-blue-700 dark:text-blue-300',
-                  'rounded-lg',
-                  'border border-blue-200 dark:border-blue-800',
-                  'text-xs'
-                )}
-              >
-                <button
-                  type="button"
-                  onClick={() => setPreviewIndex(idx)}
-                  className={cn(
-                    'inline-flex items-center gap-1.5',
-                    'cursor-pointer hover:text-blue-900 dark:hover:text-blue-100',
-                    'transition-colors'
-                  )}
-                >
-                  {att.mimeType.startsWith('image/') ? (
-                    <Image size={12} />
-                  ) : (
-                    <File size={12} />
-                  )}
-                  <span className="truncate max-w-[150px]" title={att.filename}>
-                    {att.filename}
-                  </span>
-                  <span className="text-blue-400 dark:text-blue-500">
-                    ({(att.sizeBytes / 1024).toFixed(0)} KB)
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => removeAttachment(att.id)}
-                  className={cn(
-                    'p-0.5 rounded-full -mr-0.5',
-                    'text-blue-400 dark:text-blue-500',
-                    'hover:bg-blue-200 dark:hover:bg-blue-800',
-                    'hover:text-blue-600 dark:hover:text-blue-300',
-                    'transition-colors duration-150'
-                  )}
-                  title={t('attachments.remove')}
-                >
-                  <X size={10} />
-                </button>
-              </div>
+                filename={att.filename}
+                mimeType={att.mimeType}
+                sizeBytes={att.sizeBytes}
+                onClick={() => setPreviewIndex(idx)}
+                onRemove={() => removeAttachment(att.id)}
+                removeTitle={t('attachments.remove')}
+              />
             ))}
           </div>
         )}

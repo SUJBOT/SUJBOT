@@ -12,3 +12,6 @@ PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 
 # PDF document storage directory
 PDF_BASE_DIR = PROJECT_ROOT / "data"
+
+# Attachment storage directory
+ATTACHMENTS_DIR = PDF_BASE_DIR / "attachments"

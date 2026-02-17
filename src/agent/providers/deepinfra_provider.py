@@ -15,6 +15,7 @@ from openai import OpenAI
 from langsmith.wrappers import wrap_openai
 
 from .base import BaseProvider, ProviderResponse
+from .openai_compat import STOP_REASON_MAP, convert_tools_to_openai
 from ...exceptions import APIKeyError
 
 logger = logging.getLogger(__name__)
@@ -85,23 +86,6 @@ class DeepInfraProvider(BaseProvider):
 
         logger.info(f"DeepInfraProvider initialized: {model}")
 
-    @staticmethod
-    def _convert_tools_to_openai(tools: Optional[List[Dict[str, Any]]]) -> Optional[List[Dict]]:
-        """Convert Anthropic tool definitions to OpenAI function calling format."""
-        if not tools:
-            return None
-        return [
-            {
-                "type": "function",
-                "function": {
-                    "name": tool["name"],
-                    "description": tool.get("description", ""),
-                    "parameters": tool.get("input_schema", {}),
-                },
-            }
-            for tool in tools
-        ]
-
     def create_message(
         self,
         messages: List[Dict[str, Any]],
@@ -126,7 +110,7 @@ class DeepInfraProvider(BaseProvider):
             ProviderResponse with content, usage, etc.
         """
         formatted_messages = self._format_messages(messages, system)
-        openai_tools = self._convert_tools_to_openai(tools)
+        openai_tools = convert_tools_to_openai(tools) if tools else None
 
         try:
             response = self.client.chat.completions.create(
@@ -167,7 +151,7 @@ class DeepInfraProvider(BaseProvider):
             Iterator of streaming response chunks
         """
         formatted_messages = self._format_messages(messages, system)
-        openai_tools = self._convert_tools_to_openai(tools)
+        openai_tools = convert_tools_to_openai(tools) if tools else None
 
         try:
             return self.client.chat.completions.create(
@@ -478,9 +462,6 @@ class DeepInfraProvider(BaseProvider):
                     }
                 )
 
-        # Map finish reason
-        stop_reason_map = {"stop": "end_turn", "tool_calls": "tool_use", "length": "max_tokens"}
-
         usage = {
             "input_tokens": getattr(response.usage, "prompt_tokens", 0) if response.usage else 0,
             "output_tokens": (
@@ -492,29 +473,15 @@ class DeepInfraProvider(BaseProvider):
 
         return ProviderResponse(
             content=content_blocks,
-            stop_reason=stop_reason_map.get(choice.finish_reason, "end_turn"),
+            stop_reason=STOP_REASON_MAP.get(choice.finish_reason, "end_turn"),
             usage=usage,
             model=self.model,
         )
 
     def supports_feature(self, feature: str) -> bool:
-        """
-        Check feature support.
-
-        Args:
-            feature: Feature name ("streaming", "tool_use", "prompt_caching", etc.)
-
-        Returns:
-            True if feature is supported
-        """
-        supported_features = {
-            "streaming": True,
-            "tool_use": True,
-            "prompt_caching": False,  # DeepInfra doesn't support Anthropic-style caching
-            "structured_system": False,
-            "vision": "VL" in self.model or "vl" in self.model.lower(),
-        }
-        return supported_features.get(feature, False)
+        if feature == "vision":
+            return "vl" in self.model.lower()
+        return feature in {"streaming", "tool_use"}
 
     def get_model_name(self) -> str:
         """Get current model name."""

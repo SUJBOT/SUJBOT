@@ -122,11 +122,13 @@ export function formatCitationShort(
  *
  * @param sectionPath - Section path/breadcrumb
  * @param sectionTitle - Section title
+ * @param fallback - Fallback text when no section info available (should be translated by caller)
  * @returns Formatted tooltip string
  */
 export function formatCitationTooltip(
   sectionPath: string | null,
-  sectionTitle: string | null
+  sectionTitle: string | null,
+  fallback: string = 'Click to view in PDF'
 ): string {
   if (sectionPath) {
     return sectionPath;
@@ -134,5 +136,5 @@ export function formatCitationTooltip(
   if (sectionTitle) {
     return sectionTitle;
   }
-  return 'Click to view in PDF';
+  return fallback;
 }

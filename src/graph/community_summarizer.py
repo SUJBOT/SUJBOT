@@ -7,11 +7,11 @@ using their names, types, descriptions, and relationships.
 
 import json
 import logging
-import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 from ..exceptions import ConfigurationError
+from ..utils.text_helpers import strip_code_fences
 
 if TYPE_CHECKING:
     from ..agent.providers.base import BaseProvider
@@ -86,10 +86,7 @@ class CommunitySummarizer:
             logger.warning("Empty response from community summarizer LLM")
             return None
 
-        text = text.strip()
-        # Strip markdown code fences
-        text = re.sub(r"^```(?:json)?\s*\n?", "", text)
-        text = re.sub(r"\n?```\s*$", "", text)
+        text = strip_code_fences(text.strip())
 
         try:
             data = json.loads(text)

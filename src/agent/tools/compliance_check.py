@@ -87,13 +87,9 @@ class ComplianceCheckTool(BaseTool):
         max_requirements: int = 20,
     ) -> ToolResult:
         # 1. Check graph_storage availability
-        graph_storage = getattr(self.config, "graph_storage", None)
-        if not graph_storage:
-            return ToolResult(
-                success=False,
-                data=None,
-                error="Knowledge graph not available (graph_storage not configured)",
-            )
+        graph_storage, err = self._get_graph_storage()
+        if err:
+            return err
 
         # 2. Search communities
         try:

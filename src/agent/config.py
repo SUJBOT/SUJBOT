@@ -24,7 +24,7 @@ def _load_agent_base_prompt() -> str:
     Task-specific prompts (chat, benchmark) should be appended separately.
     """
     try:
-        # Use centralized prompt loader from multi_agent module
+        # Load prompt from prompts/ directory
         from pathlib import Path
         prompt_file = Path(__file__).parent.parent.parent / "prompts" / "base_agent_prompt.txt"
         if prompt_file.exists():

@@ -19,10 +19,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Card, CardContent, Typography, Box, Grid, CircularProgress, Divider } from '@mui/material';
 import { Users, UserCheck, Shield, MessageSquare, Activity, Wallet } from 'lucide-react';
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL !== undefined
-  ? import.meta.env.VITE_API_BASE_URL
-  : 'http://localhost:8000';
+import { API_BASE_URL } from '../../config';
 
 interface Stats {
   total_users: number;

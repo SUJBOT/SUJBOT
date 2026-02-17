@@ -6,7 +6,6 @@ All endpoints require JWT authentication and verify conversation ownership.
 """
 
 from datetime import datetime
-import pathlib
 from typing import Dict, List, Optional
 import shutil
 import uuid
@@ -15,13 +14,13 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
 from pydantic import BaseModel, Field
 
+from backend.config import ATTACHMENTS_DIR
 from backend.middleware.auth import get_current_user
+from backend.deps import get_postgres_adapter
 from src.storage.postgres_adapter import PostgreSQLStorageAdapter
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 logger = logging.getLogger(__name__)
-
-ATTACHMENTS_DIR = pathlib.Path("data/attachments")
 
 # ============================================================================
 # Pydantic Models
@@ -58,23 +57,6 @@ class MessageCreate(BaseModel):
 class TitleUpdate(BaseModel):
     """Request model for updating conversation title."""
     title: str = Field(..., min_length=1, max_length=500)
-
-# ============================================================================
-# Dependency Injection
-# ============================================================================
-
-_postgres_adapter: Optional[PostgreSQLStorageAdapter] = None
-
-def set_postgres_adapter(adapter: PostgreSQLStorageAdapter):
-    """Set the global PostgreSQL adapter instance (called from main.py)."""
-    global _postgres_adapter
-    _postgres_adapter = adapter
-
-def get_postgres_adapter() -> PostgreSQLStorageAdapter:
-    """Dependency for getting PostgreSQL adapter."""
-    if _postgres_adapter is None:
-        raise RuntimeError("PostgreSQLStorageAdapter not initialized")
-    return _postgres_adapter
 
 # ============================================================================
 # Endpoints
@@ -401,29 +383,29 @@ async def truncate_messages_after(
                 detail="You do not have access to this conversation"
             )
 
-        # Delete messages after keep_count
-        # Use ROW_NUMBER() to get message order by creation time
+        # Delete messages after keep_count (atomic: both or neither)
         async with adapter.pool.acquire() as conn:
-            result = await conn.execute(
-                """
-                DELETE FROM auth.messages
-                WHERE id IN (
-                    SELECT id FROM (
-                        SELECT id, ROW_NUMBER() OVER (ORDER BY created_at ASC) as row_num
-                        FROM auth.messages
-                        WHERE conversation_id = $1
-                    ) AS numbered
-                    WHERE row_num > $2
+            async with conn.transaction():
+                result = await conn.execute(
+                    """
+                    DELETE FROM auth.messages
+                    WHERE id IN (
+                        SELECT id FROM (
+                            SELECT id, ROW_NUMBER() OVER (ORDER BY created_at ASC) as row_num
+                            FROM auth.messages
+                            WHERE conversation_id = $1
+                        ) AS numbered
+                        WHERE row_num > $2
+                    )
+                    """,
+                    conversation_id, keep_count
                 )
-                """,
-                conversation_id, keep_count
-            )
 
-            # Update conversation timestamp
-            await conn.execute(
-                "UPDATE auth.conversations SET updated_at = NOW() WHERE id = $1",
-                conversation_id
-            )
+                # Update conversation timestamp
+                await conn.execute(
+                    "UPDATE auth.conversations SET updated_at = NOW() WHERE id = $1",
+                    conversation_id
+                )
 
         deleted_count = int(result.split()[-1]) if result else 0
         logger.info(f"Truncated conversation {conversation_id}: kept {keep_count} messages, deleted {deleted_count}")

@@ -141,6 +141,15 @@
     "title": "Running in Degraded Mode",
     "description": "Some features are unavailable: {{components}}. Search quality may be reduced without reranking."
   },
+  "tools": {
+    "callingTool": "Calling tool...",
+    "input": "Input:",
+    "result": "Result:"
+  },
+  "errors": {
+    "somethingWentWrong": "Something went wrong",
+    "tryAgain": "Try Again"
+  },
   "common": {
     "loading": "Loading...",
     "error": "Error",

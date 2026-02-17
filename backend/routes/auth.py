@@ -15,11 +15,16 @@ from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, Dict
 import logging
-import os
 
 from backend.auth.manager import AuthManager
 from backend.database.auth_queries import AuthQueries
 from backend.middleware.auth import get_current_user, get_current_admin_user
+from backend.deps import (
+    get_auth_manager,
+    get_auth_queries,
+    set_auth_cookie,
+    authenticate_user,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,42 +73,6 @@ class AuthResponse(BaseModel):
 
 
 # =========================================================================
-# Global Dependencies (injected by main.py)
-# =========================================================================
-
-# These will be set by main.py during app initialization
-_auth_manager: Optional[AuthManager] = None
-_auth_queries: Optional[AuthQueries] = None
-
-
-def set_dependencies(auth_manager: AuthManager, auth_queries: AuthQueries):
-    """
-    Set global auth dependencies (called from main.py).
-
-    Args:
-        auth_manager: AuthManager instance
-        auth_queries: AuthQueries instance
-    """
-    global _auth_manager, _auth_queries
-    _auth_manager = auth_manager
-    _auth_queries = auth_queries
-
-
-def get_auth_manager() -> AuthManager:
-    """Dependency injection for AuthManager."""
-    if _auth_manager is None:
-        raise RuntimeError("AuthManager not initialized. Call set_dependencies() first.")
-    return _auth_manager
-
-
-def get_auth_queries() -> AuthQueries:
-    """Dependency injection for AuthQueries."""
-    if _auth_queries is None:
-        raise RuntimeError("AuthQueries not initialized. Call set_dependencies() first.")
-    return _auth_queries
-
-
-# =========================================================================
 # Authentication Endpoints
 # =========================================================================
 
@@ -117,89 +86,16 @@ async def login(
     """
     Authenticate user with email/password.
 
-    Flow:
-    1. Look up user by email
-    2. Verify password with Argon2
-    3. Generate JWT token
-    4. Set httpOnly cookie
-    5. Return user profile
-
-    Args:
-        credentials: Email and password
-        response: FastAPI response (for setting cookie)
-
-    Returns:
-        User profile and success message
-
-    Raises:
-        HTTPException 401: Invalid credentials
-        HTTPException 403: Account inactive
-
-    Example:
-        POST /auth/login
-        {
-            "email": "admin@sujbot.local",
-            "password": "ChangeThisPassword123!"
-        }
-
-        Response:
-        {
-            "user": {
-                "id": 1,
-                "email": "admin@sujbot.local",
-                "full_name": "System Administrator",
-                "is_active": true,
-                ...
-            },
-            "message": "Login successful"
-        }
-
-        + Set-Cookie: access_token=eyJhbGc...; HttpOnly; Secure; SameSite=Lax
+    Returns user profile and sets httpOnly JWT cookie.
     """
-    # Look up user by email
-    user = await auth_queries.get_user_by_email(credentials.email)
-
-    if not user:
-        logger.warning(f"Login attempt for non-existent user: {credentials.email}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password"
-        )
-
-    # Check if account is active
-    if not user["is_active"]:
-        logger.warning(f"Login attempt for inactive user: {credentials.email}")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account is inactive. Contact administrator."
-        )
-
-    # Verify password (Argon2)
-    if not auth_manager.verify_password(credentials.password, user["password_hash"]):
-        logger.warning(f"Failed login attempt for user: {credentials.email}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password"
-        )
-
-    # Generate JWT token (24h expiry)
-    token = auth_manager.create_token(user_id=user["id"], email=user["email"])
-
-    # Set httpOnly cookie (XSS protection)
-    # Secure flag: True for production (HTTPS), False for local development
-    is_production = os.getenv("BUILD_TARGET", "development") == "production"
-    response.set_cookie(
-        key="access_token",
-        value=token,
-        httponly=True,      # JavaScript cannot access (XSS protection)
-        secure=is_production,  # HTTPS only in production
-        samesite="lax",     # CSRF protection
-        max_age=86400,      # 24 hours (matches token expiry)
+    user = await authenticate_user(
+        credentials.email, credentials.password, auth_manager, auth_queries
     )
 
-    # Update last login timestamp
-    await auth_queries.update_last_login(user["id"])
+    token = auth_manager.create_token(user_id=user["id"], email=user["email"])
+    set_auth_cookie(response, token)
 
+    await auth_queries.update_last_login(user["id"])
     logger.info(f"User {user['id']} ({credentials.email}) logged in successfully")
 
     return {
@@ -217,33 +113,14 @@ async def login(
 
 
 @router.post("/logout")
-async def logout(response: Response):
+async def logout(response: Response, user: Dict = Depends(get_current_user)):
     """
     Log out user by clearing JWT cookie.
 
-    Note: JWT tokens are stateless, so we can't invalidate them server-side.
-    We just remove the cookie from the client.
-
-    For production: Consider implementing token blacklist in Redis.
-
-    Returns:
-        Success message
-
-    Example:
-        POST /auth/logout
-
-        Response:
-        {
-            "message": "Logged out successfully"
-        }
-
-        + Set-Cookie: access_token=; Max-Age=0 (deletes cookie)
+    Requires authentication to log the user ID for audit trail.
     """
-    # Delete cookie by setting max_age=0
     response.delete_cookie(key="access_token")
-
-    logger.info("User logged out")
-
+    logger.info(f"User {user['id']} logged out")
     return {"message": "Logged out successfully"}
 
 

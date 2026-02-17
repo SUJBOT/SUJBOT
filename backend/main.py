@@ -58,26 +58,21 @@ from .models import ChatRequest, HealthResponse, ClarificationRequest
 # Import new authentication system (Argon2 + PostgreSQL)
 from backend.auth.manager import AuthManager
 from backend.database.auth_queries import AuthQueries
-from backend.middleware.auth import AuthMiddleware, get_current_user, set_auth_instances
+from backend.middleware.auth import get_current_user, set_auth_instances
 from backend.middleware.rate_limit import RateLimitMiddleware
 from backend.middleware.security_headers import SecurityHeadersMiddleware
-from backend.routes.auth import router as auth_router, set_dependencies
-from backend.routes.conversations import (
-    router as conversations_router,
+from backend.routes.auth import router as auth_router
+from backend.routes.conversations import router as conversations_router
+from backend.routes.feedback import router as feedback_router
+from backend.routes.citations import router as citations_router
+from backend.routes.documents import router as documents_router
+from backend.routes.settings import router as settings_router
+from backend.routes.admin import router as admin_router, set_admin_dependencies
+from backend.deps import (
+    set_auth_dependencies,
     set_postgres_adapter,
     get_postgres_adapter,
-)
-from backend.routes.feedback import (
-    router as feedback_router,
-    set_postgres_adapter as set_feedback_postgres_adapter,
-)
-from backend.routes.citations import router as citations_router
-from backend.routes.documents import router as documents_router, set_vl_components
-from backend.routes.settings import router as settings_router
-from backend.routes.admin import (
-    router as admin_router,
-    set_admin_dependencies,
-    set_admin_vl_components,
+    set_vl_components,
 )
 
 # Import PostgreSQL adapter for user/conversation storage
@@ -91,6 +86,9 @@ from backend.services.title_generator import title_generator
 
 # Import exchange rate service for spending tracking
 from backend.services.exchange_rate import get_usd_to_czk_rate, usd_to_czk
+
+# Import security utilities
+from src.utils.security import sanitize_error
 
 # Configure logging
 logging.basicConfig(
@@ -162,9 +160,8 @@ async def lifespan(app: FastAPI):
         await postgres_adapter.initialize()
         logger.info("✓ PostgreSQL connection pool initialized")
 
-        # Set PostgreSQL adapter for conversation and feedback routes
+        # Set PostgreSQL adapter (shared via deps module)
         set_postgres_adapter(postgres_adapter)
-        set_feedback_postgres_adapter(postgres_adapter)
 
         # =====================================================================
         # 3. Initialize Authentication System
@@ -174,8 +171,8 @@ async def lifespan(app: FastAPI):
         auth_manager = AuthManager(secret_key=auth_secret, token_expiry_hours=24)
         auth_queries = AuthQueries(postgres_adapter)
 
-        # Set dependencies for auth routes and middleware
-        set_dependencies(auth_manager, auth_queries)
+        # Set auth dependencies (shared via deps module + middleware)
+        set_auth_dependencies(auth_manager, auth_queries)
         set_auth_instances(auth_manager, auth_queries)
 
         # Set dependencies for admin routes
@@ -292,17 +289,6 @@ async def lifespan(app: FastAPI):
                         logger.error(f"Graph component initialization failed: {e}", exc_info=True)
 
                 set_vl_components(
-                    jina_client,
-                    page_store,
-                    vl_vector_store,
-                    summary_provider,
-                    entity_extractor=entity_extractor,
-                    graph_storage=graph_storage,
-                    community_detector=community_detector,
-                    community_summarizer=community_summarizer,
-                    graph_embedder=graph_embedder if graph_storage else None,
-                )
-                set_admin_vl_components(
                     jina_client,
                     page_store,
                     vl_vector_store,
@@ -679,16 +665,13 @@ async def _maybe_generate_title(
     Returns generated title if successful, fallback title if LLM fails, None if not first message.
     Only generates if this is the first message and no other worker is generating.
 
-    Fallback behavior: If LLM title generation fails, uses truncated user message as title.
-    This ensures conversations never remain with "New Conversation" after first message.
+    Uses a single DB connection for atomicity and a finally block to always release the lock.
     """
-    title = None
+    acquired_lock = False
 
     try:
         async with adapter.pool.acquire() as conn:
             # Atomically check conditions and set lock
-            # Only proceed if: is_title_generating=false AND message_count <= 1
-            # (message_count=1 because user message was just saved)
             result = await conn.fetchrow(
                 """
                 UPDATE auth.conversations
@@ -702,26 +685,27 @@ async def _maybe_generate_title(
             )
 
             if not result:
-                # Either already generating, or not first message
-                logger.debug(
-                    f"Skipping title generation for {conversation_id}: not first message or already generating"
-                )
                 return None
 
-        logger.debug(f"Acquired title generation lock for {conversation_id}")
+            acquired_lock = True
+            logger.debug(f"Acquired title generation lock for {conversation_id}")
 
-        # Generate title via LLM (outside the DB connection to avoid blocking)
-        title = await title_generator.generate_title(user_message)
+            try:
+                # Generate title via LLM
+                title = await title_generator.generate_title(user_message)
 
-        if not title:
-            # LLM failed - use fallback
-            title = _create_fallback_title(user_message)
-            logger.info(
-                f"LLM title generation failed for {conversation_id}, using fallback: {title}"
-            )
+                if not title:
+                    title = _create_fallback_title(user_message)
+                    logger.info(
+                        f"LLM title generation failed for {conversation_id}, using fallback: {title}"
+                    )
+            except Exception as e:
+                logger.error(
+                    f"Title generation error for {conversation_id}: {e}", exc_info=True
+                )
+                title = _create_fallback_title(user_message)
 
-        # Update title and release lock
-        async with adapter.pool.acquire() as conn:
+            # Update title and release lock (same connection)
             await conn.execute(
                 """
                 UPDATE auth.conversations
@@ -731,43 +715,40 @@ async def _maybe_generate_title(
                 title,
                 conversation_id,
             )
-        logger.info(f"Saved title for {conversation_id}: {title}")
-        return title
+            acquired_lock = False
+            logger.info(f"Saved title for {conversation_id}: {title}")
+            return title
 
-    except asyncio.TimeoutError as e:
-        logger.warning(f"Title generation timed out for {conversation_id}: {e}")
-    except ConnectionError as e:
-        logger.warning(f"Connection error during title generation for {conversation_id}: {e}")
     except Exception as e:
         logger.error(
             f"Unexpected error in title generation for {conversation_id}: {e}", exc_info=True
         )
 
-    # On any error, try to save fallback title and release lock
-    try:
-        fallback_title = _create_fallback_title(user_message)
-        async with adapter.pool.acquire() as conn:
-            await conn.execute(
-                """
-                UPDATE auth.conversations
-                SET title = $1, is_title_generating = false, updated_at = NOW()
-                WHERE id = $2
-                """,
-                fallback_title,
-                conversation_id,
-            )
-        logger.info(f"Saved fallback title after error for {conversation_id}: {fallback_title}")
-        return fallback_title
-    except Exception as lock_error:
-        # Log lock release failure - could leave orphaned lock
-        logger.error(
-            f"Failed to save fallback title and release lock for {conversation_id}: {lock_error}. "
-            "This conversation may have orphaned is_title_generating=true flag."
-        )
-    return title  # Return whatever we generated (may be None)
+    finally:
+        # Always release lock if we acquired it but didn't release above
+        if acquired_lock:
+            try:
+                async with adapter.pool.acquire() as conn:
+                    fallback = _create_fallback_title(user_message)
+                    await conn.execute(
+                        """
+                        UPDATE auth.conversations
+                        SET title = $1, is_title_generating = false, updated_at = NOW()
+                        WHERE id = $2
+                        """,
+                        fallback,
+                        conversation_id,
+                    )
+                    logger.info(f"Released orphaned lock for {conversation_id} with fallback title")
+            except Exception as lock_error:
+                logger.error(
+                    f"Failed to release lock for {conversation_id}: {lock_error}"
+                )
+
+    return None
 
 
-ATTACHMENTS_DIR = Path("data/attachments")
+from backend.config import ATTACHMENTS_DIR
 
 
 def _save_attachment_files(
@@ -1159,8 +1140,8 @@ async def chat_stream(
             yield {
                 "event": "error",
                 "data": json.dumps(
-                    {"error": str(e), "type": type(e).__name__}, ensure_ascii=True
-                ),  # Use ASCII for error messages (defensive)
+                    {"error": sanitize_error(e)}, ensure_ascii=True
+                ),
             }
 
     return EventSourceResponse(event_generator())
@@ -1240,17 +1221,12 @@ async def chat_clarify(request: ClarificationRequest, user: Dict = Depends(get_c
             logger.error(f"Error in clarification event generator: {e}", exc_info=True)
             yield {
                 "event": "error",
-                "data": json.dumps({"error": str(e), "type": type(e).__name__}, ensure_ascii=True),
+                "data": json.dumps(
+                    {"error": sanitize_error(e)}, ensure_ascii=True
+                ),
             }
 
     return EventSourceResponse(event_generator())
-
-
-@app.delete("/chat/{conversation_id}/messages/{message_id}")
-async def delete_message(conversation_id: str, message_id: str):
-    """Delete a message from conversation history (frontend-managed)."""
-    logger.info(f"Message delete requested: conversation={conversation_id}, message={message_id}")
-    return {"success": True}
 
 
 @app.get("/attachments/{conversation_id}/{attachment_id}")

@@ -75,10 +75,10 @@ async def get_usd_to_czk_rate() -> float:
                 _rate_cache.set(_CACHE_KEY, rate)
                 logger.info(f"Fetched USD/CZK rate from CNB: {rate:.4f}")
                 return rate
-    except httpx.HTTPError as e:
-        logger.error(f"HTTP error fetching CNB exchange rate: {e}")
     except httpx.TimeoutException as e:
         logger.error(f"Timeout fetching CNB exchange rate: {e}")
+    except httpx.HTTPError as e:
+        logger.error(f"HTTP error fetching CNB exchange rate: {e}")
     except ValueError as e:
         logger.error(f"Failed to parse CNB exchange rate response: {e}")
 

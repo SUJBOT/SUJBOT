@@ -20,10 +20,7 @@ import {
   Chip,
 } from '@mui/material';
 import { RefreshCw, CheckCircle, AlertTriangle, XCircle } from 'lucide-react';
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL !== undefined
-  ? import.meta.env.VITE_API_BASE_URL
-  : 'http://localhost:8000';
+import { API_BASE_URL } from '../../config';
 
 interface ServiceHealth {
   name: string;

@@ -27,7 +27,6 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 from sse_starlette.sse import EventSourceResponse
 import logging
-import os
 import asyncpg
 
 from src.utils.security import sanitize_error
@@ -35,6 +34,15 @@ from backend.auth.manager import AuthManager
 from backend.config import PDF_BASE_DIR
 from backend.database.auth_queries import AuthQueries
 from backend.database.admin_queries import AdminQueries
+from backend.deps import (
+    get_auth_manager,
+    get_auth_queries,
+    get_vl_components as get_vl_components_from_deps,
+    set_auth_cookie,
+    authenticate_user,
+    get_pdf_file_list,
+    invalidate_pdf_scan_cache,
+)
 from backend.middleware.auth import get_current_admin_user
 from backend.models import (
     AdminUserResponse,
@@ -65,71 +73,23 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 # Global Dependencies (injected by main.py)
 # =============================================================================
 
-_auth_manager: Optional[AuthManager] = None
-_auth_queries: Optional[AuthQueries] = None
 _admin_queries: Optional[AdminQueries] = None
-_vl_components: Dict[str, Any] = {}
 
 
 def set_admin_dependencies(auth_manager: AuthManager, auth_queries: AuthQueries, postgres_adapter):
-    """
-    Set global admin dependencies (called from main.py).
-
-    Args:
-        auth_manager: AuthManager instance
-        auth_queries: AuthQueries instance
-        postgres_adapter: PostgreSQLStorageAdapter instance
-    """
-    global _auth_manager, _auth_queries, _admin_queries
-    _auth_manager = auth_manager
-    _auth_queries = auth_queries
+    """Set global admin dependencies (called from main.py)."""
+    global _admin_queries
     _admin_queries = AdminQueries(postgres_adapter)
-
-
-def set_admin_vl_components(
-    jina_client: Any,
-    page_store: Any,
-    vector_store: Any,
-    summary_provider: Any = None,
-    entity_extractor: Any = None,
-    graph_storage: Any = None,
-    community_detector: Any = None,
-    community_summarizer: Any = None,
-    graph_embedder: Any = None,
-) -> None:
-    """Set VL components for document management endpoints (called from main.py lifespan)."""
-    _vl_components["jina_client"] = jina_client
-    _vl_components["page_store"] = page_store
-    _vl_components["vector_store"] = vector_store
-    _vl_components["summary_provider"] = summary_provider
-    _vl_components["entity_extractor"] = entity_extractor
-    _vl_components["graph_storage"] = graph_storage
-    _vl_components["community_detector"] = community_detector
-    _vl_components["community_summarizer"] = community_summarizer
-    _vl_components["graph_embedder"] = graph_embedder
 
 
 def get_vl_components() -> Dict[str, Any]:
     """Dependency that ensures VL components are initialized."""
-    if not _vl_components:
+    vl = get_vl_components_from_deps()
+    if not vl:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="VL pipeline not initialized"
         )
-    return _vl_components
-
-
-def get_auth_manager() -> AuthManager:
-    """Dependency injection for AuthManager."""
-    if _auth_manager is None:
-        raise RuntimeError("AuthManager not initialized. Call set_admin_dependencies() first.")
-    return _auth_manager
-
-
-def get_auth_queries() -> AuthQueries:
-    """Dependency injection for AuthQueries."""
-    if _auth_queries is None:
-        raise RuntimeError("AuthQueries not initialized. Call set_admin_dependencies() first.")
-    return _auth_queries
+    return vl
 
 
 def get_admin_queries() -> AdminQueries:
@@ -178,63 +138,16 @@ async def admin_login(
     auth_queries: AuthQueries = Depends(get_auth_queries),
 ):
     """
-    Admin-only login.
-
-    Same flow as /auth/login but validates is_admin after password verification.
-
-    Returns:
-        User profile and success message
-
-    Raises:
-        HTTPException 401: Invalid credentials
-        HTTPException 403: Not an admin or inactive
+    Admin-only login. Same flow as /auth/login but validates is_admin.
     """
-    # Look up user by email
-    user = await auth_queries.get_user_by_email(credentials.email)
-
-    if not user:
-        logger.warning(f"Admin login attempt for non-existent user: {credentials.email}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
-        )
-
-    # Verify password FIRST (prevent timing attacks on is_admin check)
-    if not auth_manager.verify_password(credentials.password, user["password_hash"]):
-        logger.warning(f"Failed admin login attempt for user: {credentials.email}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
-        )
-
-    # Check if account is active
-    if not user["is_active"]:
-        logger.warning(f"Admin login attempt for inactive user: {credentials.email}")
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is inactive")
-
-    # Check admin privileges
-    if not user.get("is_admin", False):
-        logger.warning(f"Non-admin login attempt on /admin/login: {credentials.email}")
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Admin privileges required"
-        )
-
-    # Generate JWT token
-    token = auth_manager.create_token(user_id=user["id"], email=user["email"])
-
-    # Set httpOnly cookie
-    is_production = os.getenv("BUILD_TARGET", "development") == "production"
-    response.set_cookie(
-        key="access_token",
-        value=token,
-        httponly=True,
-        secure=is_production,
-        samesite="lax",
-        max_age=86400,  # 24 hours
-        path="/",  # Cookie valid for all paths (needed for /auth/me check)
+    user = await authenticate_user(
+        credentials.email, credentials.password, auth_manager, auth_queries, require_admin=True
     )
 
-    # Update last login timestamp
-    await auth_queries.update_last_login(user["id"])
+    token = auth_manager.create_token(user_id=user["id"], email=user["email"])
+    set_auth_cookie(response, token)
 
+    await auth_queries.update_last_login(user["id"])
     logger.info(f"Admin {user['id']} ({credentials.email}) logged in successfully")
 
     return {
@@ -803,18 +716,17 @@ async def list_admin_documents(
 
     doc_meta = {row["document_id"]: row for row in rows}
 
-    # Scan filesystem for PDFs
+    # Scan filesystem for PDFs (cached 30s)
     documents = []
     try:
-        for pdf_path in PDF_BASE_DIR.glob("*.pdf"):
-            doc_id = pdf_path.stem
+        for doc_id, filename, size_bytes in get_pdf_file_list(PDF_BASE_DIR):
             meta = doc_meta.get(doc_id)
             documents.append(
                 {
                     "document_id": doc_id,
-                    "display_name": _format_display_name(pdf_path.name),
-                    "filename": pdf_path.name,
-                    "size_bytes": pdf_path.stat().st_size,
+                    "display_name": _format_display_name(filename),
+                    "filename": filename,
+                    "size_bytes": size_bytes,
                     "page_count": meta["page_count"] if meta else 0,
                     "created_at": (
                         meta["created_at"].isoformat() if meta and meta["created_at"] else None
@@ -901,6 +813,8 @@ async def delete_admin_document(
                 document_id,
             )
         logger.info(f"Admin {admin['id']} deleted document {document_id} ({deleted_count})")
+
+        invalidate_pdf_scan_cache()
 
         # Schedule debounced graph rebuild (communities reference deleted entities)
         _schedule_graph_rebuild(f"deleted:{document_id}")

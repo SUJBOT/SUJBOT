@@ -187,6 +187,21 @@ class BaseTool(ABC):
         self.total_time_ms = 0.0
         self.error_count = 0
 
+    def _get_graph_storage(self) -> tuple:
+        """Get graph_storage from config or return error result.
+
+        Returns:
+            (graph_storage, None) on success, or (None, ToolResult) on failure.
+        """
+        storage = getattr(self.config, "graph_storage", None)
+        if not storage:
+            return None, ToolResult(
+                success=False,
+                data=None,
+                error="Knowledge graph not available (graph_storage not configured)",
+            )
+        return storage, None
+
     @abstractmethod
     def execute_impl(self, **kwargs) -> ToolResult:
         """

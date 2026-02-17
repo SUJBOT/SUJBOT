@@ -296,7 +296,7 @@ class AuthManager:
             # Unexpected error (e.g., invalid payload structure)
             return None
 
-    def decode_token_unsafe(self, token: str) -> Optional[Dict]:
+    def _decode_token_unsafe(self, token: str) -> Optional[Dict]:
         """
         Decode token WITHOUT verification (for debugging only).
 
@@ -328,7 +328,7 @@ class AuthManager:
         Returns:
             Expiration datetime or None if invalid
         """
-        payload = self.decode_token_unsafe(token)
+        payload = self._decode_token_unsafe(token)
         if payload and "exp" in payload:
             return datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
         return None

@@ -23,6 +23,8 @@ import importlib
 
 from ._base import BaseTool, ToolInput, ToolResult
 from ._registry import ToolRegistry, get_registry
+from .models import ToolExecution, ToolUsageMetrics, ToolStats
+from .adapter import ToolAdapter, ToolErrorType
 
 logger = logging.getLogger(__name__)
 
@@ -78,4 +80,15 @@ if _failed_imports:
         f"Tool import failures ({len(_failed_imports)}): {', '.join(name for name, _ in _failed_imports)}"
     )
 
-__all__ = ["BaseTool", "ToolInput", "ToolResult", "ToolRegistry", "get_registry"]
+__all__ = [
+    "BaseTool",
+    "ToolInput",
+    "ToolResult",
+    "ToolRegistry",
+    "get_registry",
+    "ToolExecution",
+    "ToolUsageMetrics",
+    "ToolStats",
+    "ToolAdapter",
+    "ToolErrorType",
+]

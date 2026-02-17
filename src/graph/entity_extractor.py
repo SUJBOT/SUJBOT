@@ -7,11 +7,12 @@ containing entities and relationships.
 
 import json
 import logging
-import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List
 
 from ..exceptions import ConfigurationError
+from ..utils.text_helpers import strip_code_fences
+from .types import ENTITY_TYPES, RELATIONSHIP_TYPES
 
 if TYPE_CHECKING:
     from ..agent.providers.base import BaseProvider
@@ -22,45 +23,6 @@ logger = logging.getLogger(__name__)
 _PROMPT_PATH = (
     Path(__file__).resolve().parent.parent.parent / "prompts" / "graph_entity_extraction.txt"
 )
-
-# Valid entity and relationship types (for validation)
-ENTITY_TYPES = {
-    "REGULATION",
-    "STANDARD",
-    "SECTION",
-    "ORGANIZATION",
-    "PERSON",
-    "CONCEPT",
-    "REQUIREMENT",
-    "FACILITY",
-    "ROLE",
-    "DOCUMENT",
-    "OBLIGATION",
-    "PROHIBITION",
-    "PERMISSION",
-    "EVIDENCE",
-    "CONTROL",
-    "DEFINITION",
-    "SANCTION",
-    "DEADLINE",
-    "AMENDMENT",
-}
-RELATIONSHIP_TYPES = {
-    "DEFINES",
-    "REFERENCES",
-    "AMENDS",
-    "REQUIRES",
-    "REGULATES",
-    "PART_OF",
-    "APPLIES_TO",
-    "SUPERVISES",
-    "AUTHORED_BY",
-    "SUPERSEDES",
-    "DERIVED_FROM",
-    "HAS_SANCTION",
-    "HAS_DEADLINE",
-    "COMPLIES_WITH",
-}
 
 
 class EntityExtractor:
@@ -140,9 +102,7 @@ class EntityExtractor:
             return {"entities": [], "relationships": []}
 
         # Strip markdown code fences if present
-        text = text.strip()
-        text = re.sub(r"^```(?:json)?\s*\n?", "", text)
-        text = re.sub(r"\n?```\s*$", "", text)
+        text = strip_code_fences(text.strip())
 
         try:
             data = json.loads(text)

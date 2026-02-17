@@ -8,6 +8,7 @@ Handles tool schema translation and context caching.
 import logging
 import os
 from typing import Any, Dict, Iterator, List, Optional
+from uuid import uuid4
 
 import google.generativeai as genai
 from google.generativeai import types as genai_types
@@ -60,8 +61,45 @@ class GeminiProvider(BaseProvider):
         self._api_key = api_key
         self.model = model
         self._generative_model: Optional[genai.GenerativeModel] = None  # Lazy init
+        self._last_system_instruction: Optional[str] = None
         self._cache: Optional[Any] = None
         logger.info(f"Initialized Gemini provider: model={model}")
+
+    def _get_model(self, system_instruction: Optional[str]) -> genai.GenerativeModel:
+        """Get or create GenerativeModel, reusing cached instance when possible."""
+        if (
+            self._generative_model is None
+            or self._last_system_instruction != system_instruction
+        ):
+            self._generative_model = genai.GenerativeModel(
+                model_name=self.model,
+                system_instruction=system_instruction,
+            )
+            self._last_system_instruction = system_instruction
+        return self._generative_model
+
+    def _prepare_request(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]],
+        system: List[Dict[str, Any]] | str,
+        max_tokens: int,
+        temperature: float,
+    ) -> tuple:
+        """Prepare Gemini request parameters.
+
+        Returns:
+            (model, gemini_messages, generation_config, gemini_tools)
+        """
+        gemini_messages = self._convert_messages_to_gemini(messages)
+        gemini_tools = self._convert_tools_to_gemini(tools) if tools else None
+        system_instruction = self._extract_system_instruction(system) if system else None
+        generation_config = genai_types.GenerationConfig(
+            temperature=temperature,
+            max_output_tokens=max_tokens,
+        )
+        model = self._get_model(system_instruction)
+        return model, gemini_messages, generation_config, gemini_tools
 
     def create_message(
         self,
@@ -72,107 +110,37 @@ class GeminiProvider(BaseProvider):
         temperature: float,
         **kwargs,
     ) -> ProviderResponse:
-        """
-        Create message (non-streaming).
-
-        Args:
-            messages: Conversation history (Anthropic format)
-            tools: Tool definitions (Anthropic format)
-            system: System prompt (structured or string)
-            max_tokens: Maximum output tokens
-            temperature: Sampling temperature
-
-        Returns:
-            ProviderResponse with translated content
-        """
-        # Convert to Gemini format
-        gemini_messages = self._convert_messages_to_gemini(messages)
-        gemini_tools = self._convert_tools_to_gemini(tools) if tools else None
-
-        # Extract system instruction
-        system_instruction = self._extract_system_instruction(system) if system else None
-
-        # Build config
-        config_params = {
-            "temperature": temperature,
-            "max_output_tokens": max_tokens,
-        }
-
-        # Add system instruction if provided (CRITICAL for tool calling)
-        if system_instruction:
-            config_params["system_instruction"] = system_instruction
-
-        # Add tools if provided
-        if gemini_tools:
-            config_params["tools"] = gemini_tools
-
-        # Context caching (for new SDK - currently disabled)
-        # if self._cache:
-        #     config_params["cached_content"] = self._cache.name
-        #     logger.debug(f"Using cached content: {self._cache.name}")
-
-        # Build generation config for legacy SDK
-        generation_config = genai_types.GenerationConfig(
-            temperature=temperature,
-            max_output_tokens=max_tokens,
+        model, gemini_messages, generation_config, gemini_tools = self._prepare_request(
+            messages, tools, system, max_tokens, temperature
         )
-
-        # Call Gemini API using legacy SDK pattern
         try:
-            # DEBUG: Log what we're sending
-            logger.debug(f"Sending to Gemini: {len(gemini_messages)} messages, tools={'yes' if gemini_tools else 'no'}, system={'yes' if system_instruction else 'no'}")
-
-            # Create model with system instruction
-            model = genai.GenerativeModel(
-                model_name=self.model,
-                system_instruction=system_instruction,
+            logger.debug(
+                "Sending to Gemini: %d messages, tools=%s",
+                len(gemini_messages),
+                "yes" if gemini_tools else "no",
             )
-
             response = model.generate_content(
                 contents=gemini_messages,
                 generation_config=generation_config,
                 tools=gemini_tools,
             )
-
-            # DEBUG: Log what we received
-            if response.candidates:
-                candidate = response.candidates[0]
-                parts_info = []
-                for part in candidate.content.parts:
-                    if part.text:
-                        parts_info.append(f"text({len(part.text)} chars)")
-                    elif part.function_call:
-                        parts_info.append(f"function_call({part.function_call.name})")
-                logger.debug(f"Gemini response: {len(response.candidates)} candidates, parts=[{', '.join(parts_info)}]")
-            else:
-                logger.warning("Gemini returned NO candidates!")
-
-            # Convert to Anthropic format
             return self._convert_response_to_anthropic(response)
 
         except google_exceptions.Unauthenticated as e:
             logger.error(f"Gemini API authentication failed: {e}")
             raise ValueError("Invalid Google API key. Please check GOOGLE_API_KEY in .env") from e
-
         except google_exceptions.NotFound as e:
             logger.error(f"Gemini model not found: {self.model}")
             raise ValueError(f"Model '{self.model}' not available. Check model name.") from e
-
         except google_exceptions.ResourceExhausted as e:
             logger.error(f"Gemini quota exceeded: {e}")
             raise ValueError("Gemini API quota exceeded. Try again later or upgrade plan.") from e
-
         except google_exceptions.InvalidArgument as e:
-            logger.error(f"Gemini rejected request (content policy?): {e}")
+            logger.error(f"Gemini rejected request: {e}")
             raise ValueError(f"Gemini rejected request: {e}") from e
-
         except (KeyError, TypeError, AttributeError) as e:
             logger.error(f"Failed to parse Gemini response: {e}", exc_info=True)
             raise RuntimeError(f"Unexpected Gemini response format: {e}") from e
-
-        except Exception as e:
-            logger.error(f"Unexpected Gemini API error: {e}", exc_info=True)
-            raise
 
     def stream_message(
         self,
@@ -183,89 +151,31 @@ class GeminiProvider(BaseProvider):
         temperature: float,
         **kwargs,
     ) -> Iterator[Any]:
-        """
-        Create message with streaming.
-
-        PRAGMATIC NOTE: Returns Gemini stream object directly.
-        AgentCore handles provider-specific streaming.
-
-        Args:
-            messages: Conversation history (Anthropic format)
-            tools: Tool definitions (Anthropic format)
-            system: System prompt
-            max_tokens: Maximum output tokens
-            temperature: Sampling temperature
-
-        Yields:
-            Gemini stream chunks
-        """
-        # Convert to Gemini format
-        gemini_messages = self._convert_messages_to_gemini(messages)
-        gemini_tools = self._convert_tools_to_gemini(tools) if tools else None
-
-        # Extract system instruction
-        system_instruction = self._extract_system_instruction(system) if system else None
-
-        # Build config
-        config_params = {
-            "temperature": temperature,
-            "max_output_tokens": max_tokens,
-        }
-
-        # Add system instruction if provided (CRITICAL for tool calling)
-        if system_instruction:
-            config_params["system_instruction"] = system_instruction
-
-        # Add tools if provided
-        if gemini_tools:
-            config_params["tools"] = gemini_tools
-
-        # Build generation config for legacy SDK
-        generation_config = genai_types.GenerationConfig(
-            temperature=temperature,
-            max_output_tokens=max_tokens,
+        model, gemini_messages, generation_config, gemini_tools = self._prepare_request(
+            messages, tools, system, max_tokens, temperature
         )
-
-        # Stream from Gemini API using legacy SDK pattern
         try:
-            # Create model with system instruction
-            model = genai.GenerativeModel(
-                model_name=self.model,
-                system_instruction=system_instruction,
-            )
-
-            stream = model.generate_content(
+            return model.generate_content(
                 contents=gemini_messages,
                 generation_config=generation_config,
                 tools=gemini_tools,
                 stream=True,
             )
-
-            return stream
-
         except google_exceptions.Unauthenticated as e:
             logger.error(f"Gemini API authentication failed: {e}")
             raise ValueError("Invalid Google API key. Please check GOOGLE_API_KEY in .env") from e
-
         except google_exceptions.NotFound as e:
             logger.error(f"Gemini model not found: {self.model}")
             raise ValueError(f"Model '{self.model}' not available. Check model name.") from e
-
         except google_exceptions.ResourceExhausted as e:
             logger.error(f"Gemini quota exceeded: {e}")
             raise ValueError("Gemini API quota exceeded. Try again later or upgrade plan.") from e
-
         except google_exceptions.InvalidArgument as e:
-            logger.error(f"Gemini rejected request (content policy?): {e}")
+            logger.error(f"Gemini rejected request: {e}")
             raise ValueError(f"Gemini rejected request: {e}") from e
-
         except google_exceptions.DeadlineExceeded as e:
             logger.error(f"Gemini streaming timeout: {e}")
             raise TimeoutError("Gemini stream timed out. Try a shorter query.") from e
-
-        except Exception as e:
-            logger.error(f"Unexpected Gemini streaming error: {e}", exc_info=True)
-            raise
 
     def supports_feature(self, feature: str) -> bool:
         """
@@ -296,14 +206,8 @@ class GeminiProvider(BaseProvider):
         return self.model
 
     def set_model(self, model: str) -> None:
-        """
-        Change model.
-
-        Args:
-            model: New Gemini model name
-        """
         self.model = model
-        # Clear cache when switching models
+        self._generative_model = None  # Force re-creation
         self._cache = None
         logger.info(f"Switched to model: {model}")
 
@@ -495,7 +399,7 @@ class GeminiProvider(BaseProvider):
                     # Tool use block
                     content_blocks.append({
                         "type": "tool_use",
-                        "id": f"toolu_{part.function_call.name}",  # Generate ID
+                        "id": f"toolu_{part.function_call.name}_{uuid4().hex[:8]}",
                         "name": part.function_call.name,
                         "input": dict(part.function_call.args),
                     })

@@ -60,7 +60,7 @@ class SingleAgentRunner:
             await self._initialize_tools()
 
             # 3. Initialize tool adapter (bridge to tool schemas + execution)
-            from ..multi_agent.tools.adapter import ToolAdapter
+            from ..agent.tools.adapter import ToolAdapter
 
             self.tool_adapter = ToolAdapter()
 
@@ -84,7 +84,7 @@ class SingleAgentRunner:
         if not langsmith_config.get("enabled", False):
             return
         try:
-            from ..multi_agent.observability import setup_langsmith
+            from ..agent.observability import setup_langsmith
 
             self.langsmith = setup_langsmith(langsmith_config)
             logger.info("LangSmith tracing enabled")
