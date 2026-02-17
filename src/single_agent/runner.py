@@ -173,6 +173,9 @@ class SingleAgentRunner:
             min_samples_for_adaptive=adaptive_raw.get("min_samples_for_adaptive", 3),
         )
 
+        # Web search config
+        web_search_config = agent_tools_config.get("web_search", {})
+
         # Tool config
         tool_config = ToolConfig(
             graph_storage=graph_storage,
@@ -180,6 +183,8 @@ class SingleAgentRunner:
             adaptive_retrieval=adaptive_config,
             max_document_compare=agent_tools_config.get("max_document_compare", 3),
             compliance_threshold=agent_tools_config.get("compliance_threshold", 0.7),
+            web_search_enabled=web_search_config.get("enabled", True),
+            web_search_model=web_search_config.get("model", "gemini-2.0-flash"),
         )
 
         # VL components

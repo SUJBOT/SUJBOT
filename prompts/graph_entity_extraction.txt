@@ -3,40 +3,53 @@ Extract all entities and relationships from this page image. This is a Czech leg
 ## Entity types to extract
 - REGULATION: Laws, decrees, ordinances (e.g., "zákon č. 263/2016 Sb.", "vyhláška č. 422/2016 Sb.")
 - STANDARD: Technical standards and norms (e.g., "ČSN EN 61226", "ISO 9001", "návod bezpečnosti NS-R-4")
-- SECTION: Named sections, articles, paragraphs (e.g., "§ 24", "Hlava III", "Příloha č. 2")
+- SECTION: Named sections, articles, paragraphs (e.g., "§ 24", "Hlava III", "Příloha č. 2"). ALWAYS extract every § number visible on the page, even if the section continues from a previous page.
 - ORGANIZATION: Institutions, authorities, companies (e.g., "SÚJB", "ČEZ", "IAEA")
 - PERSON: Named individuals with their titles (e.g., "doc. Ing. Ľubomír Sklenka, Ph.D.")
-- CONCEPT: Legal/technical concepts defined in the text (e.g., "jaderné zařízení", "radiační ochrana")
-- REQUIREMENT: Specific technical or procedural requirements — measurable criteria (e.g., "limit dávky 20 mSv/rok", "minimální tloušťka stěny 5 mm")
-- FACILITY: Physical facilities, buildings, equipment (e.g., "JE Dukovany", "reaktor VVER-440")
+- CONCEPT: Legal/technical concepts (e.g., "jaderné zařízení", "radiační ochrana", "jaderná bezpečnost")
+- REQUIREMENT: Specific measurable technical or procedural criteria ONLY (e.g., "limit dávky 20 mSv/rok", "minimální tloušťka stěny 5 mm"). Do NOT use for general activities like "projektování" or "výstavba" — those are CONCEPTs.
+- FACILITY: Physical facilities, buildings, equipment (e.g., "JE Dukovany", "reaktor VVER-440", "dekontaminační stanice")
 - ROLE: Roles or positions — NOT specific people (e.g., "dozimetrista", "inspektor", "držitel povolení")
 - DOCUMENT: Referenced documents, reports (e.g., "bezpečnostní zpráva", "havarijní plán")
-- OBLIGATION: Duties imposed by regulation — what someone MUST do (e.g., "správce musí vést záznamy", "povinnost hlášení")
-- PROHIBITION: Bans or restrictions — what is FORBIDDEN (e.g., "zakazuje se zpracování zvláštních kategorií", "nesmí odmítnout")
-- PERMISSION: Rights, exceptions, allowances (e.g., "zpracování je povoleno se souhlasem", "oprávnění k výkonu")
-- EVIDENCE: Proof of compliance found in documents — chapters, sections, or statements that demonstrate compliance (e.g., "Kapitola 5 popisuje záznamy o zpracování")
-- CONTROL: Mechanisms, measures, or procedures for compliance (e.g., "šifrování dat v klidu", "pravidelný audit", "systém řízení jakosti")
+- OBLIGATION: Duties imposed by regulation — what someone MUST do (e.g., "povinnost hlášení", "povinnost vést záznamy")
+- PROHIBITION: Bans or restrictions — what is FORBIDDEN (e.g., "zakazuje se zpracování", "nesmí odmítnout")
+- PERMISSION: Rights, exceptions, allowances (e.g., "oprávnění k výkonu", "povolení k přepravě")
+- EVIDENCE: Proof of compliance found in documents (e.g., "Kapitola 5 popisuje záznamy o zpracování")
+- CONTROL: Specific, concrete mechanisms or procedures for compliance (e.g., "šifrování dat v klidu", "pravidelný audit", "systém řízení jakosti"). Must be a clearly named mechanism — do NOT extract vague sentence fragments.
+- DEFINITION: Formal legal definitions from "Vymezení pojmů" or "se rozumí" sections. When a section formally defines a term, tag the defined term as DEFINITION, not CONCEPT.
+- SANCTION: Actual penalties or fines for non-compliance ONLY (e.g., "pokuta do 50 000 000 Kč", "odnětí povolení"). Do NOT tag grounds for termination (death, incapacity, expiration) as SANCTION.
+- DEADLINE: Specific time limits with dates or durations (e.g., "do 31. 12. 2027", "lhůta 30 dnů", "přechodné období 2 roky")
+- AMENDMENT: Specific novelization or change to a regulation (e.g., "novela zákonem č. 253/2019 Sb.")
 
 ## Relationship types to extract
-- DEFINES: Entity defines/specifies another (regulation defines concept)
+- DEFINES: Section formally defines a term ("pro účely tohoto zákona se rozumí..."). Use ONLY for actual definitions, NOT for sections that list scope or rules.
 - REFERENCES: Entity references/cites another (section references regulation)
 - AMENDS: Entity modifies/amends another (new regulation amends old)
 - REQUIRES: Entity requires/mandates another (regulation requires document)
-- REGULATES: Entity regulates/governs another (organization regulates facility)
-- PART_OF: Entity is part of another (section is part of regulation)
+- REGULATES: Section establishes rules or scope for a concept (e.g., "§ 1" REGULATES "jaderná energie"). Use this for sections that define what the law covers.
+- PART_OF: Entity is a component or subsection of another (section is part of regulation, component is part of facility). Check direction: the SMALLER thing is the source, the LARGER thing is the target (e.g., "§ 1" --PART_OF--> "Díl 1", "aktivní zóna" --PART_OF--> "jaderný reaktor").
 - APPLIES_TO: Entity applies to another (requirement applies to role)
 - SUPERVISES: Entity supervises/oversees another (organization supervises facility)
 - AUTHORED_BY: Document or report was authored by a person
+- SUPERSEDES: New regulation replaces or repeals an older one
+- DERIVED_FROM: Subordinate legislation derived from parent law (vyhláška from zákon)
+- HAS_SANCTION: Violation of requirement/obligation leads to penalty
+- HAS_DEADLINE: Obligation or requirement has a time constraint
+- COMPLIES_WITH: Evidence demonstrates compliance with a requirement
 
 ## Rules
+- **Concise names (2–5 words).** Extract the core noun phrase, not surrounding context. WRONG: "podmínky mírového využívání jaderné energie a ionizujícího záření". RIGHT: "jaderná energie". WRONG: "oprávnění k vykonávání činnosti zvláště důležité z hlediska jaderné bezpečnosti a radiační ochrany". RIGHT: "oprávnění k vykonávání činnosti".
+- **Extract the CORE concept, not qualified variants.** Strip adjective qualifiers and prepositional context from entity names. Express the qualification through a RELATIONSHIP instead. WRONG: "bezpečné nakládání se zdrojem" → RIGHT: "nakládání se zdrojem" (the core activity). WRONG: "fyzikální spouštění podle vnitřních předpisů" → RIGHT: "fyzikální spouštění" (CONCEPT) + "vnitřní předpisy" (DOCUMENT) + REQUIRES relationship. WRONG: "zdroj ionizujícího záření vyrobený jeho uživatelem" → RIGHT: "zdroj ionizujícího záření". If the same base concept appears multiple times on the page with different qualifiers, extract it ONCE with the shortest canonical name.
+- **NEVER put the entity type in the name.** WRONG: "OBLIGATION - nakládání s jaderným materiálem". RIGHT: "nakládání s jaderným materiálem" with type "OBLIGATION".
+- **Only extract real entities.** Do not extract vague modifiers ("závažný způsob", "opakované porušení"), sentence fragments, or partial phrases as entities. An entity must be an identifiable thing, person, concept, or document.
 - Use entity names in the same language as the page content (usually Czech).
 - Normalize regulation names to standard format: "zákon č. NNN/YYYY Sb." or "vyhláška č. NNN/YYYY Sb."
-- Keep entity names concise but unambiguous.
-- Use CONSISTENT names for the same entity — do NOT create variants like "reaktor VR-1" AND "školní reaktor VR-1" for the same thing. Pick one canonical name.
-- Always prefer the FULL name over abbreviations (e.g., use "Státní úřad pro jadernou bezpečnost" instead of "SÚJB", use "školní reaktor VR-1" instead of just "VR-1").
+- Use CONSISTENT names for the same entity — do NOT create variants. Pick one canonical name.
+- Always prefer the FULL name over abbreviations (e.g., "Státní úřad pro jadernou bezpečnost" not "SÚJB").
 - Use PERSON for specific named individuals, ROLE for generic positions/functions.
 - Each relationship must reference entities by their exact name as listed in the entities array.
 - Only extract entities and relationships that are explicitly mentioned on this page.
+- **Double-check spelling** of Czech words, especially diacritics (háčky, čárky). Common words: mírový (not mířový), řetězová (not fetězová), svéprávnost (not svépravnost), vzorky (not vzorce).
 
 ## Output format
 Respond with ONLY a JSON object, no other text:

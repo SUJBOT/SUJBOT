@@ -58,6 +58,10 @@
     "context_window": 2,
     "lazy_load_reranker": false,
     "cache_embeddings": true,
+    "web_search": {
+      "enabled": true,
+      "model": "gemini-2.0-flash"
+    },
     "adaptive_retrieval": {
       "enabled": true,
       "method": "otsu",

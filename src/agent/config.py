@@ -54,6 +54,10 @@ class ToolConfig:
     max_document_compare: int = 3
     compliance_threshold: float = 0.7
 
+    # Web search (Gemini grounding)
+    web_search_enabled: bool = True
+    web_search_model: str = "gemini-2.0-flash"
+
     def __post_init__(self):
         """Validate configuration values."""
         if self.default_k <= 0:

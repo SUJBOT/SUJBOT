@@ -25,7 +25,8 @@ class GraphSearchInput(ToolInput):
         description=(
             "Filter by entity type: REGULATION, STANDARD, ORGANIZATION, PERSON, "
             "CONCEPT, FACILITY, ROLE, DOCUMENT, SECTION, REQUIREMENT, "
-            "OBLIGATION, PROHIBITION, PERMISSION, EVIDENCE, CONTROL"
+            "OBLIGATION, PROHIBITION, PERMISSION, EVIDENCE, CONTROL, "
+            "DEFINITION, SANCTION, DEADLINE, AMENDMENT"
         ),
     )
     limit: int = Field(10, description="Maximum results", ge=1, le=50)
@@ -39,7 +40,8 @@ class GraphSearchTool(BaseTool):
     description = (
         "Search knowledge graph for entities (regulations, standards, organizations, persons, "
         "concepts, facilities, roles, documents, sections, requirements, "
-        "obligations, prohibitions, permissions, evidence, controls). "
+        "obligations, prohibitions, permissions, evidence, controls, "
+        "definitions, sanctions, deadlines, amendments). "
         "Returns matching entities with their relationships."
     )
     input_schema = GraphSearchInput

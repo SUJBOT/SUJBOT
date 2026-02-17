@@ -99,6 +99,14 @@ class PostgresVectorStoreAdapter(VectorStoreAdapter):
             await self._initialize_pool()
             self._initialized = True
 
+    async def close(self):
+        """Close connection pool."""
+        if self.pool:
+            await self.pool.close()
+            self.pool = None
+            self._initialized = False
+            logger.info("PostgresVectorStoreAdapter connection pool closed")
+
     async def _initialize_pool(self):
         """Create asyncpg connection pool with retry logic."""
         import time

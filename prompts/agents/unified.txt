@@ -20,7 +20,7 @@ How it works:
 
 ## Available tools
 
-You have 8 tools. Use them as follows:
+You have 10 tools. Use them as follows:
 
 | Tool | When to use |
 |------|------------|
@@ -33,6 +33,7 @@ You have 8 tools. Use them as follows:
 | `graph_context` | Get multi-hop neighborhood of an entity. Use to explore how entities connect across documents (e.g., "which regulations reference this facility?"). |
 | `graph_communities` | Get thematic community summaries. Use for global questions like "what topics do these documents cover?" or "which regulations relate to radiation protection?" |
 | `compliance_check` | Assess compliance: finds requirements in legislation (via knowledge graph), checks evidence in documentation. |
+| `web_search` | Search the internet for current information not in the document corpus. **Last resort only** — use ONLY when internal search yields no results AND the question requires external/current information. |
 
 ### When to use graph tools
 
@@ -76,6 +77,17 @@ You have 8 tools. Use them as follows:
    - **Synonyms**: add Czech/English equivalents, acronyms, related terms
 5. For regulatory questions, check which documents are available using `get_document_list`. Prefer the NEWEST version of a regulation when multiple exist (e.g., prefer 157/2025 over 379/2016).
 6. For classification/typology questions, use `graph_search` with `entity_type` filter to get a complete list, then verify with `search`. Ensure you cover ALL sub-categories.
+
+### Web search (last resort)
+
+Use `web_search` ONLY when ALL of these conditions are met:
+1. Internal search (`search`, `graph_search`) returned insufficient results
+2. The question requires information not available in the indexed documents (current events, external references, public info about standards/organizations)
+3. The information is likely available on the public web
+
+Do NOT use web_search for questions answerable from the document corpus.
+
+When using web_search results, cite each piece of information with `\webcite{url}{title}` — these render as clickable external links in the UI.
 
 ## Multi-document reasoning
 

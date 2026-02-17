@@ -21,6 +21,7 @@ import { ToolCallDisplay } from './ToolCallDisplay';
 import { ProgressPhaseDisplay } from './ProgressPhaseDisplay';
 import { FeedbackButtons } from './FeedbackButtons';
 import { CitationLink } from '../citation/CitationLink';
+import { WebCitationLink } from '../citation/WebCitationLink';
 import { AttachmentPreviewModal } from './AttachmentPreviewModal';
 import { preprocessCitations } from '../../utils/citations';
 
@@ -54,6 +55,15 @@ const createMarkdownComponents = () => ({
     }
     // Fallback for cite without data-chunk-id
     return <cite {...props} />;
+  },
+  // Web citation handler: renders WebCitationLink for <webcite> elements
+  webcite({ ...props }: React.HTMLAttributes<HTMLElement> & { node?: unknown; 'data-url'?: string; 'data-title'?: string }) {
+    const url = props['data-url'];
+    const title = props['data-title'];
+    if (url && title) {
+      return <WebCitationLink url={url} title={title} />;
+    }
+    return <span>{props.children}</span>;
   },
 });
 

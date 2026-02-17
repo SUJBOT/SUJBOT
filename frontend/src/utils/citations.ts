@@ -64,9 +64,34 @@ export function hasCitations(content: string): boolean {
  * // Returns: 'Safety margin is 5mm <cite data-chunk-id="BZ_VR1_L3_c5">[BZ_VR1_L3_c5]</cite>.'
  */
 export function preprocessCitations(content: string): string {
-  return content.replace(
+  // First process web citations (\webcite{url}{title}), then document citations (\cite{id})
+  const withWebCites = preprocessWebCitations(content);
+  return withWebCites.replace(
     CITATION_REGEX,
     '<cite data-chunk-id="$1">[$1]</cite>'
+  );
+}
+
+/**
+ * Web citation regex pattern.
+ * Matches: \webcite{url}{title}
+ */
+export const WEB_CITATION_REGEX = /\\webcite\{([^}]+)\}\{([^}]+)\}/g;
+
+/**
+ * Preprocess content by replacing \webcite{url}{title} with HTML <webcite> tags.
+ *
+ * @param content - Raw message content with \webcite{} markers
+ * @returns Preprocessed content with <webcite> HTML tags
+ *
+ * @example
+ * preprocessWebCitations("Info \\webcite{https://example.com}{Example Site}.")
+ * // Returns: 'Info <webcite data-url="https://example.com" data-title="Example Site">[Example Site]</webcite>.'
+ */
+export function preprocessWebCitations(content: string): string {
+  return content.replace(
+    WEB_CITATION_REGEX,
+    '<webcite data-url="$1" data-title="$2">[$2]</webcite>'
   );
 }
 

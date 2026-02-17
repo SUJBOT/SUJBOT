@@ -115,7 +115,7 @@ docker network connect sujbot_sujbot_db_net sujbot_backend
 
 ```
 User Query → SingleAgentRunner (autonomous tool loop)
-  → RAG Tools (search, expand_context, get_document_info, compliance_check, etc.)
+  → RAG Tools (search, expand_context, get_document_info, compliance_check, web_search, etc.)
   → VL Retrieval: Jina v4 cosine → page images → multimodal LLM
   → Storage (PostgreSQL: vectors + checkpoints)
 ```
@@ -140,6 +140,17 @@ User Query → SingleAgentRunner (autonomous tool loop)
 - `backend/constants.py:get_variant_model()` - Variant→model mapping (falls back for unknown names)
 - `src/graph/embedder.py:GraphEmbedder` - multilingual-e5-small (384-dim) for graph semantic search
 - `src/graph/storage.py:GraphStorageAdapter` - Graph CRUD + embedding/FTS search
+
+### Graph RAG Gotchas
+
+- `GraphStorageAdapter(connection_string=db_url)` — MUST use keyword arg. First positional param is `pool`, not connection string.
+- `graph.entity_aliases` table stores alternate names for merged entities (created Feb 2026).
+- Graph schema tables: `graph.entities`, `graph.relationships`, `graph.communities`, `graph.entity_aliases`.
+- Entity types (19): REGULATION, STANDARD, SECTION, ORGANIZATION, PERSON, CONCEPT, REQUIREMENT, FACILITY, ROLE, DOCUMENT, OBLIGATION, PROHIBITION, PERMISSION, EVIDENCE, CONTROL, DEFINITION, SANCTION, DEADLINE, AMENDMENT.
+- Relationship types (14): DEFINES, REFERENCES, AMENDS, REQUIRES, REGULATES, PART_OF, APPLIES_TO, SUPERVISES, AUTHORED_BY, SUPERSEDES, DERIVED_FROM, HAS_SANCTION, HAS_DEADLINE, COMPLIES_WITH.
+- Legislation-specific types (Feb 2026): DEFINITION/SANCTION/DEADLINE/AMENDMENT entities + SUPERSEDES/DERIVED_FROM/HAS_SANCTION/HAS_DEADLINE/COMPLIES_WITH relationships for legislation navigation and compliance mapping.
+- Entity dedup scripts: `scripts/graph_normalize_dedup.py` (normalization + trigram/LLM), `scripts/graph_rebuild_communities.py` (re-embed + detect + summarize).
+- When merging entities with unique constraint `(name, entity_type, document_id)`: DELETE duplicates BEFORE UPDATE canonical to avoid constraint violation.
 
 ### VL (Vision-Language) Architecture
 
@@ -166,6 +177,8 @@ VL flow: Query → Jina v4 embed_query() → PostgreSQL exact cosine (vectors.vl
 
 **Graph search** uses `intfloat/multilingual-e5-small` (384-dim) for cross-language semantic search on entities/communities. Falls back to PostgreSQL FTS when embedder not configured.
 
+**Web search** uses Gemini's native Google Search grounding (`web_search` tool). Last-resort tool for questions requiring current/external info not in the corpus. Requires `GOOGLE_API_KEY` in `.env`. Config: `config.json` → `agent_tools.web_search` (enabled/model). Citations: `\webcite{url}{title}` renders as clickable external link badges in the UI.
+
 ## Critical Constraints (DO NOT CHANGE)
 
 Research-backed decisions. **DO NOT modify** without explicit approval.
@@ -183,6 +196,7 @@ Agents MUST be LLM-driven. LLM decides tool calling sequence via `BaseAgent.run_
 ### 3. PostgreSQL Vector Schema
 
 Vectors in `vectors` schema (NOT `public`). Tables: `vl_pages`, `documents`.
+Graph data in `graph` schema. Tables: `entities`, `relationships`, `communities`, `entity_aliases`.
 
 - Embeddings: 2048-dim (Jina v4) in `vectors.vl_pages`
 - Cosine similarity: `1 - (embedding <=> query_vector)`
