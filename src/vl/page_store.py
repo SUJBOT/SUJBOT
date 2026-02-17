@@ -11,9 +11,8 @@ Stores images at: data/vl_pages/{document_id}/page_{NNN}.png
 
 import base64
 import logging
-from functools import lru_cache
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from ..exceptions import PageRenderError
 
@@ -44,6 +43,7 @@ class PageStore:
         self.dpi = dpi
         self.image_format = image_format
         self.store_dir.mkdir(parents=True, exist_ok=True)
+        self._b64_cache: Dict[str, str] = {}
 
     @staticmethod
     def page_id_to_components(page_id: str) -> Tuple[str, int]:
@@ -84,22 +84,27 @@ class PageStore:
 
         return str(path)
 
-    @lru_cache(maxsize=200)
     def get_image_base64(self, page_id: str) -> str:
         """
         Get base64-encoded image data for Anthropic multimodal API.
 
-        Results are cached via LRU cache for repeated access.
+        Results are cached in an instance-level dict for repeated access.
         """
+        if page_id in self._b64_cache:
+            return self._b64_cache[page_id]
+
         path = self.get_image_path(page_id)
         try:
             with open(path, "rb") as f:
-                return base64.b64encode(f.read()).decode("utf-8")
+                result = base64.b64encode(f.read()).decode("utf-8")
         except FileNotFoundError:
             raise PageRenderError(
                 f"Page image not found: {path}",
                 details={"page_id": page_id, "path": str(path)},
             )
+
+        self._b64_cache[page_id] = result
+        return result
 
     def get_image_bytes(self, page_id: str) -> bytes:
         """Get raw image bytes for a page."""
@@ -181,7 +186,9 @@ class PageStore:
     def _lazy_render_page(self, document_id: str, page_number: int) -> None:
         """Render a single page on demand from source PDF."""
         # Search for source PDF in source_pdf_dir
-        pdf_candidates = list(self.source_pdf_dir.glob(f"{document_id}*.pdf"))
+        pdf_candidates = list(self.source_pdf_dir.glob(f"{document_id}.pdf"))
+        if not pdf_candidates:
+            pdf_candidates = list(self.source_pdf_dir.glob(f"{document_id}_*.pdf"))
         if not pdf_candidates:
             raise PageRenderError(
                 f"Source PDF not found for document '{document_id}' in {self.source_pdf_dir}",

@@ -10,12 +10,7 @@
 
 import type { HealthStatus, SSEEvent, Conversation, Message, AgentCostBreakdown, DocumentInfo } from '../types';
 import { parseSSEStream } from './sseParser';
-
-// Use environment variable for API base URL
-// Empty string = relative URLs (same-origin, through Nginx proxy)
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL !== undefined
-  ? import.meta.env.VITE_API_BASE_URL
-  : 'http://localhost:8000';
+import { API_BASE_URL } from '../config';
 
 // Authentication types
 export interface UserProfile {
@@ -390,6 +385,7 @@ export class ApiService {
       response = await fetch(`${API_BASE_URL}/chat/clarify`, {
         method: 'POST',
         headers: this.getHeaders(),
+        credentials: 'include',
         body: JSON.stringify({
           thread_id: threadId,
           response: userResponse,
@@ -446,6 +442,7 @@ export class ApiService {
       {
         method: 'DELETE',
         headers: this.getHeaders(),
+        credentials: 'include',
       }
     );
 
@@ -738,6 +735,38 @@ export class ApiService {
   }
 
   /**
+   * Get current agent variant for the user
+   */
+  async getAgentVariant(): Promise<AgentVariantInfo> {
+    const response = await fetch(`${API_BASE_URL}/settings/agent-variant`, {
+      method: 'GET',
+      credentials: 'include',
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to get agent variant: ${response.status}`);
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Set agent variant for the user
+   */
+  async setAgentVariant(variant: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/settings/agent-variant`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      credentials: 'include',
+      body: JSON.stringify({ variant }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to set agent variant: ${response.status}`);
+    }
+  }
+
+  /**
    * Get existing feedback for a message (if any)
    * Used to restore feedback state on page refresh
    */
@@ -754,6 +783,13 @@ export class ApiService {
 
     return response.json();
   }
+}
+
+// Agent variant types
+export interface AgentVariantInfo {
+  variant: string;
+  display_name: string;
+  model: string;
 }
 
 // Feedback response types

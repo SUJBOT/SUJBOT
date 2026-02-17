@@ -13,6 +13,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { Document, Page, pdfjs } from 'react-pdf';
 import type { TextItem } from 'pdfjs-dist/types/src/display/api';
 import 'react-pdf/dist/Page/TextLayer.css';
@@ -36,8 +37,7 @@ import type { TextSelection } from '../../types';
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
-// API base URL from environment
-const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+import { API_BASE_URL } from '../../config';
 
 // Minimum selection length to trigger context capture
 const MIN_SELECTION_LENGTH = 10;
@@ -99,6 +99,7 @@ export function PDFSidePanel({
   onTextSelected,
 }: PDFSidePanelProps) {
   const { t } = useTranslation();
+  const isMobile = useMediaQuery('(max-width: 767px)');
   const [numPages, setNumPages] = useState<number | null>(null);
   const [scale, setScale] = useState(1.0);
   const [error, setError] = useState<string | null>(null);
@@ -622,9 +623,6 @@ export function PDFSidePanel({
   }, [debouncedQuery, searchResults, loadedPages]);
 
   if (!isOpen) return null;
-
-  // Mobile fullscreen overlay
-  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
 
   return (
     <div

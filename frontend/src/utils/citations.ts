@@ -64,9 +64,39 @@ export function hasCitations(content: string): boolean {
  * // Returns: 'Safety margin is 5mm <cite data-chunk-id="BZ_VR1_L3_c5">[BZ_VR1_L3_c5]</cite>.'
  */
 export function preprocessCitations(content: string): string {
-  return content.replace(
+  // First process web citations (\webcite{url}{title}), then document citations (\cite{id})
+  const withWebCites = preprocessWebCitations(content);
+  return withWebCites.replace(
     CITATION_REGEX,
     '<cite data-chunk-id="$1">[$1]</cite>'
+  );
+}
+
+/**
+ * Web citation regex pattern.
+ * Matches: \webcite{url}{title}
+ */
+export const WEB_CITATION_REGEX = /\\webcite\{([^}]+)\}\{([^}]+)\}/g;
+
+/**
+ * Preprocess content by replacing \webcite{url}{title} with HTML <webcite> tags.
+ *
+ * @param content - Raw message content with \webcite{} markers
+ * @returns Preprocessed content with <webcite> HTML tags
+ *
+ * @example
+ * preprocessWebCitations("Info \\webcite{https://example.com}{Example Site}.")
+ * // Returns: 'Info <webcite data-url="https://example.com" data-title="Example Site">[Example Site]</webcite>.'
+ */
+export function preprocessWebCitations(content: string): string {
+  return content.replace(
+    WEB_CITATION_REGEX,
+    (_match: string, url: string, title: string) => {
+      // Escape quotes to prevent HTML attribute injection
+      const safeUrl = url.replace(/"/g, '&quot;');
+      const safeTitle = title.replace(/"/g, '&quot;');
+      return `<webcite data-url="${safeUrl}" data-title="${safeTitle}">[${title}]</webcite>`;
+    }
   );
 }
 
@@ -92,11 +122,13 @@ export function formatCitationShort(
  *
  * @param sectionPath - Section path/breadcrumb
  * @param sectionTitle - Section title
+ * @param fallback - Fallback text when no section info available (should be translated by caller)
  * @returns Formatted tooltip string
  */
 export function formatCitationTooltip(
   sectionPath: string | null,
-  sectionTitle: string | null
+  sectionTitle: string | null,
+  fallback: string = 'Click to view in PDF'
 ): string {
   if (sectionPath) {
     return sectionPath;
@@ -104,5 +136,5 @@ export function formatCitationTooltip(
   if (sectionTitle) {
     return sectionTitle;
   }
-  return 'Click to view in PDF';
+  return fallback;
 }

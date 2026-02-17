@@ -142,6 +142,15 @@
     "title": "Běžím v omezeném režimu",
     "description": "Některé funkce nejsou dostupné: {{components}}. Kvalita vyhledávání může být snížena bez rerankingu. Funkce znalostního grafu jsou vypnuty."
   },
+  "tools": {
+    "callingTool": "Volání nástroje...",
+    "input": "Vstup:",
+    "result": "Výsledek:"
+  },
+  "errors": {
+    "somethingWentWrong": "Něco se pokazilo",
+    "tryAgain": "Zkusit znovu"
+  },
   "common": {
     "loading": "Načítám...",
     "error": "Chyba",

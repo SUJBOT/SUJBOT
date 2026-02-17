@@ -11,7 +11,8 @@ import logging
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from ..exceptions import GraphStoreError, ProviderError
-from .storage import GraphStorageAdapter, _vec_to_pg
+from ..utils.async_helpers import vec_to_pgvector
+from .storage import GraphStorageAdapter
 
 if TYPE_CHECKING:
     from .community_detector import CommunityDetector
@@ -264,7 +265,7 @@ async def _embed_rows(
         batch_ids = row_ids[i : i + batch_size]
         batch_vecs = embeddings[i : i + batch_size]
 
-        records = [(rid, _vec_to_pg(vec)) for rid, vec in zip(batch_ids, batch_vecs)]
+        records = [(rid, vec_to_pgvector(vec)) for rid, vec in zip(batch_ids, batch_vecs)]
 
         async with graph_storage.pool.acquire() as conn:
             await conn.executemany(update_sql, records)

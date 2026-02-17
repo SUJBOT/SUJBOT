@@ -39,10 +39,7 @@ import {
   Typography,
 } from '@mui/material';
 import { RefreshCw, Trash2, RotateCcw, Upload } from 'lucide-react';
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL !== undefined
-  ? import.meta.env.VITE_API_BASE_URL
-  : 'http://localhost:8000';
+import { API_BASE_URL } from '../../config';
 
 type DocumentCategory = 'documentation' | 'legislation';
 

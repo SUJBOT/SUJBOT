@@ -183,32 +183,3 @@ class ModelConfig:
             raise ValueError(f"Unsupported embedding provider: {self.embedding_provider}")
 
 
-# Import ModelRegistry for centralized model management
-from src.utils.model_registry import ModelRegistry
-
-
-def resolve_model_alias(model_name: str) -> str:
-    """
-    Resolve model alias to full model name using centralized ModelRegistry.
-
-    This function is kept for backward compatibility. All model aliases are now
-    managed in utils.model_registry.ModelRegistry.
-
-    Args:
-        model_name: Model name or alias (e.g., "haiku", "sonnet", "gpt-4o-mini")
-
-    Returns:
-        Full model name (e.g., "claude-haiku-4-5-20251001")
-    """
-    # Try LLM models first
-    if model_name in ModelRegistry.LLM_MODELS:
-        return ModelRegistry.resolve_llm(model_name)
-    # Then try embedding models
-    elif model_name in ModelRegistry.EMBEDDING_MODELS:
-        return ModelRegistry.resolve_embedding(model_name)
-    # Fallback: return as-is
-    else:
-        return model_name
-
-
-

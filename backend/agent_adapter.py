@@ -204,7 +204,7 @@ class AgentAdapter:
 
         if user_id:
             try:
-                from backend.routes.auth import get_auth_queries
+                from backend.deps import get_auth_queries
 
                 queries = get_auth_queries()
                 variant = await queries.get_agent_variant(user_id)
@@ -345,47 +345,22 @@ class AgentAdapter:
             }
 
         except Exception as e:
-            context = {
-                "query": query[:200] if query else "N/A",
-                "conversation_id": conversation_id,
-                "variant": variant,
-                "model": model,
-                "error_phase": "single_agent_execution",
-            }
-
             logger.error(
                 f"Error during query execution: {type(e).__name__}: {e}",
                 exc_info=True,
-                extra=context,
+                extra={
+                    "query": query[:200] if query else "N/A",
+                    "conversation_id": conversation_id,
+                    "variant": variant,
+                    "model": model,
+                    "error_phase": "single_agent_execution",
+                },
             )
 
             yield {
                 "event": "error",
-                "data": {"error": str(e), "type": type(e).__name__, "context": context},
+                "data": {"error": sanitize_error(e)},
             }
-
-    def get_available_models(self) -> list[Dict[str, Any]]:
-        """Get list of available models."""
-        return [
-            {
-                "id": "claude-haiku-4-5-20251001",
-                "name": "Claude Haiku 4.5",
-                "provider": "anthropic",
-                "description": "Fast & cost-effective",
-            },
-            {
-                "id": "claude-sonnet-4-5-20250929",
-                "name": "Claude Sonnet 4.5",
-                "provider": "anthropic",
-                "description": "Balanced performance",
-            },
-            {
-                "id": "Qwen/Qwen3-VL-235B-A22B-Instruct",
-                "name": "Qwen3 VL 235B",
-                "provider": "deepinfra",
-                "description": "Open-source VL model",
-            },
-        ]
 
     def switch_model(self, model: str) -> None:
         """Switch default model."""

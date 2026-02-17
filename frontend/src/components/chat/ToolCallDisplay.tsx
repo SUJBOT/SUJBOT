@@ -4,6 +4,7 @@
 
 import { useState } from 'react';
 import { ChevronDown, ChevronRight, Loader2, CheckCircle2, XCircle } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { cn } from '../../design-system/utils/cn';
 import { useHover } from '../../design-system/animations/hooks/useHover';
 import type { ToolCall } from '../../types';
@@ -13,6 +14,7 @@ interface ToolCallDisplayProps {
 }
 
 export function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
+  const { t } = useTranslation();
   const [isExpanded, setIsExpanded] = useState(false);
   const headerHover = useHover({ lift: true, shadow: true });
 
@@ -50,7 +52,7 @@ export function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
               'text-xs italic',
               'text-accent-500 dark:text-accent-400'
             )}>
-              Calling tool...
+              {t('tools.callingTool')}
             </span>
           )}
         </div>
@@ -77,7 +79,7 @@ export function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
               'text-xs font-medium mb-1',
               'text-accent-500 dark:text-accent-400'
             )}>
-              Input:
+              {t('tools.input')}
             </div>
             <div className={cn(
               'text-xs p-2 rounded overflow-x-auto',
@@ -114,7 +116,7 @@ export function ToolCallDisplay({ toolCall }: ToolCallDisplayProps) {
                 'text-xs font-medium mb-1',
                 'text-accent-500 dark:text-accent-400'
               )}>
-                Result:
+                {t('tools.result')}
               </div>
               <pre className={cn(
                 'text-xs p-2 rounded overflow-x-auto max-h-64',

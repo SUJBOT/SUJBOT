@@ -25,7 +25,8 @@ class GraphSearchInput(ToolInput):
         description=(
             "Filter by entity type: REGULATION, STANDARD, ORGANIZATION, PERSON, "
             "CONCEPT, FACILITY, ROLE, DOCUMENT, SECTION, REQUIREMENT, "
-            "OBLIGATION, PROHIBITION, PERMISSION, EVIDENCE, CONTROL"
+            "OBLIGATION, PROHIBITION, PERMISSION, EVIDENCE, CONTROL, "
+            "DEFINITION, SANCTION, DEADLINE, AMENDMENT"
         ),
     )
     limit: int = Field(10, description="Maximum results", ge=1, le=50)
@@ -39,7 +40,8 @@ class GraphSearchTool(BaseTool):
     description = (
         "Search knowledge graph for entities (regulations, standards, organizations, persons, "
         "concepts, facilities, roles, documents, sections, requirements, "
-        "obligations, prohibitions, permissions, evidence, controls). "
+        "obligations, prohibitions, permissions, evidence, controls, "
+        "definitions, sanctions, deadlines, amendments). "
         "Returns matching entities with their relationships."
     )
     input_schema = GraphSearchInput
@@ -50,13 +52,9 @@ class GraphSearchTool(BaseTool):
         entity_type: Optional[str] = None,
         limit: int = 10,
     ) -> ToolResult:
-        graph_storage = getattr(self.config, "graph_storage", None)
-        if not graph_storage:
-            return ToolResult(
-                success=False,
-                data=None,
-                error="Knowledge graph not available (graph_storage not configured)",
-            )
+        graph_storage, err = self._get_graph_storage()
+        if err:
+            return err
 
         # Determine fetch size: if adaptive-k is enabled and graph uses
         # embedding search, fetch a larger candidate pool for thresholding.

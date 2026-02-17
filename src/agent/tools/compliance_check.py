@@ -87,13 +87,9 @@ class ComplianceCheckTool(BaseTool):
         max_requirements: int = 20,
     ) -> ToolResult:
         # 1. Check graph_storage availability
-        graph_storage = getattr(self.config, "graph_storage", None)
-        if not graph_storage:
-            return ToolResult(
-                success=False,
-                data=None,
-                error="Knowledge graph not available (graph_storage not configured)",
-            )
+        graph_storage, err = self._get_graph_storage()
+        if err:
+            return err
 
         # 2. Search communities
         try:
@@ -279,7 +275,32 @@ class ComplianceCheckTool(BaseTool):
         else:
             finding["gap_description"] = None
 
+        # Enrich with related sanctions (HAS_SANCTION relationships)
+        graph_storage = getattr(self.config, "graph_storage", None)
+        if graph_storage and req_entity_id:
+            sanctions = self._get_related_sanctions(graph_storage, req_entity_id)
+            if sanctions:
+                finding["sanctions"] = sanctions
+
         return finding
+
+    def _get_related_sanctions(
+        self, graph_storage: Any, entity_id: int
+    ) -> List[Dict[str, str]]:
+        """Fetch SANCTION entities linked via HAS_SANCTION relationships."""
+        try:
+            result = graph_storage.get_entity_relationships(entity_id, depth=1)
+            sanctions = []
+            for rel in result.get("relationships", []):
+                if rel.get("relationship_type") == "HAS_SANCTION":
+                    target = rel.get("target_name") or rel.get("target", "")
+                    desc = rel.get("target_description") or rel.get("description", "")
+                    if target:
+                        sanctions.append({"name": target, "description": desc})
+            return sanctions
+        except Exception as e:
+            logger.warning(f"Failed to fetch sanctions for entity {entity_id}: {e}", exc_info=True)
+            return []
 
     def _search_evidence(self, query: str, document_id: Optional[str]) -> tuple:
         """Search page embeddings and load page images for multimodal LLM.

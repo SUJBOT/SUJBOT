@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Path
 from pydantic import BaseModel, Field, model_validator
 
 from backend.middleware.auth import get_current_user
+from backend.deps import get_postgres_adapter
 from src.storage.postgres_adapter import PostgreSQLStorageAdapter
 from src.exceptions import StorageError
 
@@ -78,23 +79,9 @@ class ExistingFeedbackResponse(BaseModel):
 # Dependency Injection
 # ============================================================================
 
-_postgres_adapter: Optional[PostgreSQLStorageAdapter] = None
 _langsmith_client = None
 _table_created = False
 _initialization_lock = asyncio.Lock()
-
-
-def set_postgres_adapter(adapter: PostgreSQLStorageAdapter):
-    """Set the global PostgreSQL adapter instance (called from main.py)."""
-    global _postgres_adapter
-    _postgres_adapter = adapter
-
-
-def get_postgres_adapter() -> PostgreSQLStorageAdapter:
-    """Dependency for getting PostgreSQL adapter."""
-    if _postgres_adapter is None:
-        raise RuntimeError("PostgreSQLStorageAdapter not initialized")
-    return _postgres_adapter
 
 
 def _get_langsmith_client():
@@ -323,11 +310,11 @@ async def submit_feedback(
             detail="Failed to save feedback",
         )
 
-    # Send to LangSmith (synchronous, may add latency)
+    # Send to LangSmith in a thread (blocking I/O)
     langsmith_synced = False
     if request.run_id:
-        langsmith_synced = _send_to_langsmith(
-            request.run_id, request.score, request.comment
+        langsmith_synced = await asyncio.to_thread(
+            _send_to_langsmith, request.run_id, request.score, request.comment
         )
 
         # Update sync status in database

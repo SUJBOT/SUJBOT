@@ -13,8 +13,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from backend.config import PDF_BASE_DIR
+from backend.deps import get_postgres_adapter
 from backend.middleware.auth import get_current_user
-from backend.routes.conversations import get_postgres_adapter
 from backend.routes.documents import _find_pdf_for_document
 from src.storage.postgres_adapter import PostgreSQLStorageAdapter
 
@@ -220,47 +220,73 @@ async def get_citations_batch(
     """
     Resolve multiple chunk_ids in one request.
 
-    This is more efficient than making multiple individual requests
-    when a message contains many citations.
-
-    Args:
-        request: BatchCitationRequest with list of chunk_ids (max 50)
-
-    Returns:
-        List of CitationMetadata for found chunks.
-        Chunks that don't exist are silently skipped (no error).
-
-    Note:
-        Order of results may not match order of input chunk_ids.
-        Frontend should match by chunk_id field.
+    Uses a single batch query instead of N individual queries.
+    Chunks that don't exist are silently skipped.
     """
+    # Filter valid chunk_ids
+    valid_ids = [cid for cid in request.chunk_ids if CHUNK_ID_PATTERN.match(cid)]
+    if not valid_ids:
+        return []
+
+    # Batch query: fetch all matching pages in one query
+    try:
+        async with adapter.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    page_id AS chunk_id,
+                    document_id,
+                    'Page ' || page_number AS section_title,
+                    NULL AS section_path,
+                    document_id || ' > Page ' || page_number AS hierarchical_path,
+                    page_number,
+                    NULL AS content
+                FROM vectors.vl_pages
+                WHERE page_id = ANY($1)
+                """,
+                valid_ids,
+            )
+
+            # Build lookup of found results
+            found = {row["chunk_id"]: dict(row) for row in rows}
+
+            # Try fuzzy matching for IDs not found in exact match
+            missing_ids = [cid for cid in valid_ids if cid not in found]
+            for cid in missing_ids:
+                fuzzy_row = await _try_fuzzy_page_match(conn, cid)
+                if fuzzy_row:
+                    found[cid] = fuzzy_row
+    except Exception as e:
+        logger.error(f"Batch citation query failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database temporarily unavailable. Please try again."
+        )
+
+    # Cache PDF availability per document_id within this batch
+    pdf_cache: Dict[str, bool] = {}
     results = []
 
-    for chunk_id in request.chunk_ids:
-        # Skip invalid chunk_ids silently
-        if not CHUNK_ID_PATTERN.match(chunk_id):
-            logger.warning(f"Skipping invalid chunk_id in batch: {chunk_id}")
+    for chunk_id in valid_ids:
+        row = found.get(chunk_id)
+        if not row:
             continue
 
-        row = await _fetch_chunk_metadata(adapter, chunk_id)
+        document_id = row["document_id"]
+        if document_id not in pdf_cache:
+            pdf_cache[document_id] = _check_pdf_available(document_id)
 
-        if row:
-            document_id = row["document_id"]
-            # Convert empty strings to None for optional fields
-            section_title = row.get("section_title") or None
-            section_path = row.get("section_path") or None
-            hierarchical_path = row.get("hierarchical_path") or None
-            results.append(CitationMetadata(
-                chunk_id=chunk_id,
-                document_id=document_id,
-                document_name=_format_document_name(document_id),
-                section_title=section_title,
-                section_path=section_path,
-                hierarchical_path=hierarchical_path,
-                page_number=row.get("page_number"),
-                pdf_available=_check_pdf_available(document_id),
-                content=row.get("content"),
-            ))
+        results.append(CitationMetadata(
+            chunk_id=chunk_id,
+            document_id=document_id,
+            document_name=_format_document_name(document_id),
+            section_title=row.get("section_title") or None,
+            section_path=row.get("section_path") or None,
+            hierarchical_path=row.get("hierarchical_path") or None,
+            page_number=row.get("page_number"),
+            pdf_available=pdf_cache[document_id],
+            content=row.get("content"),
+        ))
 
     logger.info(
         f"Batch citation lookup: {len(request.chunk_ids)} requested, {len(results)} found. "

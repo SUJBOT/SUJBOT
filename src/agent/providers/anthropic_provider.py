@@ -50,7 +50,7 @@ class AnthropicProvider(BaseProvider):
             raise ValueError("Invalid Anthropic API key format (should start with sk-ant-)")
 
         # Validate model name before creating client
-        if not any(pattern in model.lower() for pattern in ["claude", "haiku", "sonnet"]):
+        if not any(pattern in model.lower() for pattern in ["claude", "haiku", "sonnet", "opus"]):
             raise ValueError(f"Invalid Claude model: {model}")
 
         self._client = wrap_anthropic(anthropic.Anthropic(api_key=api_key))

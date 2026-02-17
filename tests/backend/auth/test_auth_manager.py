@@ -227,17 +227,17 @@ class TestSecurityConstraints:
         manager = AuthManager(secret_key=secret, token_expiry_hours=24)
         assert manager is not None
 
-    def test_decode_token_unsafe_returns_payload_without_verification(self, auth_manager):
-        """decode_token_unsafe works for debugging."""
+    def test__decode_token_unsafe_returns_payload_without_verification(self, auth_manager):
+        """_decode_token_unsafe works for debugging."""
         token = auth_manager.create_token(user_id=444, email="unsafe@example.com")
 
-        payload = auth_manager.decode_token_unsafe(token)
+        payload = auth_manager._decode_token_unsafe(token)
 
         assert payload is not None
         assert payload["user_id"] == 444
         assert payload["email"] == "unsafe@example.com"
 
-    def test_decode_token_unsafe_handles_expired_token(self, auth_manager):
+    def test__decode_token_unsafe_handles_expired_token(self, auth_manager):
         """Unsafe decode works even for expired tokens."""
         short_manager = AuthManager(
             secret_key="test_secret_key_minimum_32_characters",
@@ -253,6 +253,6 @@ class TestSecurityConstraints:
         assert short_manager.validate_token(token) is None
 
         # Unsafe decode should still work
-        payload = short_manager.decode_token_unsafe(token)
+        payload = short_manager._decode_token_unsafe(token)
         assert payload is not None
         assert payload["user_id"] == 555

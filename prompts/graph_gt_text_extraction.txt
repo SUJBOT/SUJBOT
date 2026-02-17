@@ -1,0 +1,53 @@
+Extract all entities and relationships from this legal text.
+
+## Entity types
+- REGULATION: Laws, decrees, ordinances (e.g., "zákon č. 263/2016 Sb.")
+- STANDARD: Technical standards and norms (e.g., "ČSN EN 61226", "ISO 9001")
+- SECTION: Sections, articles, paragraphs (e.g., "§ 24", "Hlava III"). Extract every § number in the text.
+- ORGANIZATION: Institutions, authorities, companies (e.g., "SÚJB", "ČEZ", "IAEA")
+- PERSON: Named individuals with their titles
+- CONCEPT: Legal/technical concepts (e.g., "jaderné zařízení", "radiační ochrana")
+- REQUIREMENT: Specific measurable criteria ONLY (e.g., "limit dávky 20 mSv/rok"). NOT general activities.
+- FACILITY: Physical facilities, equipment (e.g., "JE Dukovany", "reaktor VVER-440")
+- ROLE: Roles or positions (e.g., "dozimetrista", "držitel povolení")
+- DOCUMENT: Referenced documents, reports (e.g., "bezpečnostní zpráva")
+- OBLIGATION: Duties — what someone MUST do (e.g., "povinnost hlášení")
+- PROHIBITION: Bans — what is FORBIDDEN
+- PERMISSION: Rights, exceptions (e.g., "oprávnění k výkonu")
+- EVIDENCE: Proof of compliance
+- CONTROL: Specific, concrete compliance mechanisms (e.g., "pravidelný audit"). NOT vague fragments.
+- DEFINITION: Formal legal definitions from "Vymezení pojmů" or "se rozumí" sections
+- SANCTION: Actual penalties/fines ONLY (e.g., "pokuta do 50 000 000 Kč"). NOT grounds for termination.
+- DEADLINE: Specific time limits (e.g., "lhůta 30 dnů", "do 31. 12. 2027")
+- AMENDMENT: Novelization of a regulation
+
+## Relationship types
+- DEFINES: Section formally defines a term ("se rozumí..."). NOT for scope/rules — use REGULATES for that.
+- REFERENCES: Entity cites another
+- AMENDS: Entity modifies another
+- REQUIRES: Entity mandates another
+- REGULATES: Section establishes rules/scope for a concept
+- PART_OF: Smaller entity is part of larger (source=smaller, target=larger)
+- APPLIES_TO: Entity applies to another
+- SUPERVISES: Entity oversees another
+- SUPERSEDES: New regulation replaces old
+- DERIVED_FROM: Subordinate legislation from parent law
+- HAS_SANCTION: Violation leads to penalty
+- HAS_DEADLINE: Obligation has time constraint
+- COMPLIES_WITH: Evidence demonstrates compliance
+
+## Rules
+- **Concise names (2–5 words).** Extract core noun phrase, not full sentences. WRONG: "podmínky mírového využívání jaderné energie". RIGHT: "jaderná energie".
+- **Extract the CORE concept, not qualified variants.** Strip adjective qualifiers and prepositional context. WRONG: "bezpečné nakládání se zdrojem" → RIGHT: "nakládání se zdrojem". WRONG: "fyzikální spouštění podle vnitřních předpisů" → RIGHT: "fyzikální spouštění". Express qualifiers via RELATIONSHIPS. If the same concept appears with different qualifiers, extract it ONCE with the shortest canonical name.
+- **NEVER put entity type in the name.** WRONG: "OBLIGATION - nakládání". RIGHT: "nakládání" with type OBLIGATION.
+- **Only real entities.** No vague modifiers ("závažný způsob"), sentence fragments, or partial phrases.
+- Use entity names in the same language as the text (usually Czech).
+- Normalize regulation names: "zákon č. NNN/YYYY Sb." or "vyhláška č. NNN/YYYY Sb."
+- Prefer FULL names over abbreviations.
+- Use CONSISTENT names — one canonical name per entity.
+- Each relationship must reference entities by exact name from the entities array.
+- Only extract entities and relationships explicitly mentioned in the text.
+
+## Output
+Respond with ONLY a JSON object:
+{"entities": [{"name": "...", "type": "...", "description": "..."}], "relationships": [{"source": "...", "target": "...", "type": "...", "description": "..."}]}

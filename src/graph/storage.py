@@ -19,16 +19,13 @@ import asyncpg
 import numpy as np
 
 from ..exceptions import DatabaseConnectionError, GraphStoreError
+from ..utils.async_helpers import run_async_safe, vec_to_pgvector
+from ..utils.text_helpers import strip_code_fences
 
 logger = logging.getLogger(__name__)
 
 # Column lists reused across entity queries
 _ENTITY_COLS = "entity_id, name, entity_type, description, document_id, source_page_ids"
-
-
-def _vec_to_pg(vec: np.ndarray) -> str:
-    """Convert numpy array to pgvector string '[0.1,0.2,...]'."""
-    return "[" + ",".join(map(str, vec.flatten().tolist())) + "]"
 
 
 def _entity_from_row(row: asyncpg.Record) -> Dict[str, Any]:
@@ -50,6 +47,7 @@ def _community_from_row(row: asyncpg.Record) -> Dict[str, Any]:
         "level": row["level"],
         "title": row["title"],
         "summary": row["summary"],
+        "summary_model": row.get("summary_model"),
         "entity_ids": row["entity_ids"],
         "metadata": row["metadata"] or {},
     }
@@ -63,32 +61,6 @@ def _in_placeholders(values, start: int = 1) -> str:
     return ", ".join(f"${start + i}" for i in range(len(values)))
 
 
-def _run_async_safe(coro, timeout: float = 30.0, operation_name: str = "graph operation"):
-    """Safely run async coroutine from sync context (same pattern as postgres_adapter.py)."""
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-
-    try:
-        if loop is None:
-            return asyncio.run(asyncio.wait_for(coro, timeout=timeout))
-        else:
-            return loop.run_until_complete(asyncio.wait_for(coro, timeout=timeout))
-    except asyncio.CancelledError:
-        raise
-    except asyncio.TimeoutError as e:
-        logger.error(f"Timeout ({timeout}s) during {operation_name}")
-        raise TimeoutError(f"'{operation_name}' timed out after {timeout}s") from e
-    except RuntimeError as e:
-        if "This event loop is already running" in str(e):
-            raise RuntimeError(
-                f"Cannot run '{operation_name}' synchronously inside an async context. "
-                "Use the async method directly or apply nest_asyncio."
-            ) from e
-        raise
-
-
 def _parse_command_count(result: Optional[str]) -> int:
     """Parse row count from asyncpg command result (e.g. 'DELETE 5' → 5)."""
     try:
@@ -99,10 +71,7 @@ def _parse_command_count(result: Optional[str]) -> int:
 
 def _parse_dedup_verdict(text: str) -> bool:
     """Parse LLM dedup verdict from structured JSON, regex extraction, or plain text fallback."""
-    text = text.strip()
-    # Strip markdown code fences
-    text = re.sub(r"^```(?:json)?\s*\n?", "", text)
-    text = re.sub(r"\n?```\s*$", "", text)
+    text = strip_code_fences(text.strip())
 
     try:
         data = json.loads(text)
@@ -157,29 +126,34 @@ class GraphStorageAdapter:
         self._connection_string = connection_string
         self._owns_pool = pool is None
         self._embedder = embedder
+        self._init_lock = asyncio.Lock()
 
     async def initialize(self):
         """Create connection pool if not provided."""
         await self._ensure_pool()
 
     async def _ensure_pool(self):
-        """Lazily create connection pool on first use."""
+        """Lazily create connection pool on first use (thread-safe)."""
         if self.pool is None:
-            if not self._connection_string:
-                raise DatabaseConnectionError("Either pool or connection_string must be provided")
-            try:
-                self.pool = await asyncpg.create_pool(
-                    dsn=self._connection_string,
-                    min_size=2,
-                    max_size=10,
-                    command_timeout=30,
-                )
-                logger.info("Graph storage pool created")
-            except (asyncpg.PostgresError, OSError) as e:
-                raise DatabaseConnectionError(
-                    f"Failed to create graph storage pool: {e}",
-                    cause=e,
-                ) from e
+            async with self._init_lock:
+                if self.pool is None:
+                    if not self._connection_string:
+                        raise DatabaseConnectionError(
+                            "Either pool or connection_string must be provided"
+                        )
+                    try:
+                        self.pool = await asyncpg.create_pool(
+                            dsn=self._connection_string,
+                            min_size=2,
+                            max_size=10,
+                            command_timeout=30,
+                        )
+                        logger.info("Graph storage pool created")
+                    except (asyncpg.PostgresError, OSError) as e:
+                        raise DatabaseConnectionError(
+                            f"Failed to create graph storage pool: {e}",
+                            cause=e,
+                        ) from e
 
     async def close(self):
         """Close pool if we own it."""
@@ -194,7 +168,7 @@ class GraphStorageAdapter:
         self, entities: List[Dict], document_id: str, source_page_id: Optional[str] = None
     ) -> int:
         """Bulk upsert entities (sync). Returns count of records processed."""
-        return _run_async_safe(
+        return run_async_safe(
             self.async_add_entities(entities, document_id, source_page_id),
             operation_name="add_entities",
         )
@@ -248,7 +222,7 @@ class GraphStorageAdapter:
         self, relationships: List[Dict], document_id: str, source_page_id: Optional[str] = None
     ) -> int:
         """Bulk insert relationships (sync). Resolves entity names to IDs."""
-        return _run_async_safe(
+        return run_async_safe(
             self.async_add_relationships(relationships, document_id, source_page_id),
             operation_name="add_relationships",
         )
@@ -276,13 +250,43 @@ class GraphStorageAdapter:
             return 0
         await self._ensure_pool()
 
+        # Collect all unique entity names referenced in relationships
+        all_names = set()
+        for r in relationships:
+            all_names.add(r["source"])
+            all_names.add(r["target"])
+
         try:
             async with self.pool.acquire() as conn:
+                # Batch-fetch entity IDs: document-scoped first, then cross-document fallback
+                name_list = sorted(all_names)
+                placeholders = ", ".join(f"${i + 2}" for i in range(len(name_list)))
+                # Document-scoped lookup
+                rows = await conn.fetch(
+                    f"SELECT entity_id, name FROM graph.entities "
+                    f"WHERE name IN ({placeholders}) AND document_id = $1",
+                    document_id,
+                    *name_list,
+                )
+                name_to_id: Dict[str, int] = {row["name"]: row["entity_id"] for row in rows}
+
+                # Cross-document fallback for unresolved names
+                unresolved = [n for n in name_list if n not in name_to_id]
+                if unresolved:
+                    fb_ph = ", ".join(f"${i + 1}" for i in range(len(unresolved)))
+                    fb_rows = await conn.fetch(
+                        f"SELECT DISTINCT ON (name) entity_id, name FROM graph.entities "
+                        f"WHERE name IN ({fb_ph}) ORDER BY name, entity_id",
+                        *unresolved,
+                    )
+                    for row in fb_rows:
+                        name_to_id[row["name"]] = row["entity_id"]
+
                 inserted = 0
                 skipped = 0
                 for r in relationships:
-                    source_id = await self._resolve_entity_id(conn, r["source"], document_id)
-                    target_id = await self._resolve_entity_id(conn, r["target"], document_id)
+                    source_id = name_to_id.get(r["source"])
+                    target_id = name_to_id.get(r["target"])
 
                     if source_id is None or target_id is None:
                         logger.debug(
@@ -330,7 +334,7 @@ class GraphStorageAdapter:
         self, query: str, entity_type: Optional[str] = None, limit: int = 10
     ) -> List[Dict]:
         """Search entities by embedding similarity (or FTS fallback)."""
-        return _run_async_safe(
+        return run_async_safe(
             self.async_search_entities(query, entity_type, limit),
             operation_name="search_entities",
         )
@@ -349,7 +353,7 @@ class GraphStorageAdapter:
         self, query: str, entity_type: Optional[str], limit: int
     ) -> List[Dict]:
         vec = await asyncio.to_thread(self._embedder.encode_query, query)
-        query_vec = _vec_to_pg(vec)
+        query_vec = vec_to_pgvector(vec)
         params: list = [query_vec]
         param_idx = 1
 
@@ -438,7 +442,7 @@ class GraphStorageAdapter:
     def get_entity_relationships(self, entity_id: int, depth: int = 1) -> Dict:
         """Get N-hop neighborhood of an entity using recursive CTE."""
         depth = min(depth, 5)  # Cap depth to prevent runaway recursive CTEs
-        return _run_async_safe(
+        return run_async_safe(
             self.async_get_entity_relationships(entity_id, depth),
             operation_name="get_entity_relationships",
         )
@@ -545,7 +549,7 @@ class GraphStorageAdapter:
 
     def save_communities(self, communities: List[Dict]) -> int:
         """Store Leiden community detection results."""
-        return _run_async_safe(
+        return run_async_safe(
             self.async_save_communities(communities),
             operation_name="save_communities",
         )
@@ -587,7 +591,7 @@ class GraphStorageAdapter:
 
     def get_communities(self, level: int = 0) -> List[Dict]:
         """Get all communities at a given level."""
-        return _run_async_safe(
+        return run_async_safe(
             self.async_get_communities(level),
             operation_name="get_communities",
         )
@@ -614,7 +618,7 @@ class GraphStorageAdapter:
 
     def search_communities(self, query: str, level: int = 0, limit: int = 10) -> List[Dict]:
         """Search communities by embedding similarity (or FTS fallback)."""
-        return _run_async_safe(
+        return run_async_safe(
             self.async_search_communities(query, level, limit),
             operation_name="search_communities",
         )
@@ -631,7 +635,7 @@ class GraphStorageAdapter:
         self, query: str, level: int, limit: int
     ) -> List[Dict]:
         vec = await asyncio.to_thread(self._embedder.encode_query, query)
-        query_vec = _vec_to_pg(vec)
+        query_vec = vec_to_pgvector(vec)
         sql = """
             SELECT community_id, level, title, summary, summary_model, entity_ids, metadata,
                    1 - (search_embedding <=> $1::vector) AS score
@@ -672,7 +676,7 @@ class GraphStorageAdapter:
 
     def get_community_entities(self, community_id: int) -> List[Dict]:
         """Get entity details for a community."""
-        return _run_async_safe(
+        return run_async_safe(
             self.async_get_community_entities(community_id),
             operation_name="get_community_entities",
         )
@@ -707,7 +711,7 @@ class GraphStorageAdapter:
 
     def delete_document_graph(self, document_id: str) -> int:
         """Delete all graph data for a document. Returns deleted entity count."""
-        return _run_async_safe(
+        return run_async_safe(
             self.async_delete_document_graph(document_id),
             operation_name="delete_document_graph",
         )
@@ -721,12 +725,7 @@ class GraphStorageAdapter:
                     "DELETE FROM graph.entities WHERE document_id = $1",
                     document_id,
                 )
-                # asyncpg returns e.g. "DELETE 5" — parse defensively
-                try:
-                    count = int(result.split()[-1])
-                except (ValueError, IndexError):
-                    logger.warning(f"Unexpected DELETE result format: {result!r}")
-                    count = 0
+                count = _parse_command_count(result)
                 if count > 0:
                     logger.info(f"Deleted {count} entities for document {document_id}")
                 return count
@@ -741,7 +740,7 @@ class GraphStorageAdapter:
 
     def get_all_entities_and_relationships(self) -> tuple:
         """Get all entities and relationships for igraph construction."""
-        return _run_async_safe(
+        return run_async_safe(
             self.async_get_all(),
             operation_name="get_all_entities_and_relationships",
         )
@@ -782,7 +781,7 @@ class GraphStorageAdapter:
 
     def get_graph_stats(self) -> Dict[str, Any]:
         """Get knowledge graph statistics."""
-        return _run_async_safe(
+        return run_async_safe(
             self.async_get_graph_stats(),
             operation_name="get_graph_stats",
         )
@@ -907,7 +906,7 @@ class GraphStorageAdapter:
 
     def deduplicate_exact(self) -> Dict:
         """Merge entities with identical (case-insensitive name, entity_type) (sync)."""
-        return _run_async_safe(
+        return run_async_safe(
             self.async_deduplicate_exact(),
             timeout=120.0,
             operation_name="deduplicate_exact",
@@ -1000,7 +999,7 @@ class GraphStorageAdapter:
         self, similarity_threshold: float = 0.85, llm_provider: Optional[Any] = None
     ) -> Dict:
         """Merge semantically similar entities using embedding NN + LLM arbiter (sync)."""
-        return _run_async_safe(
+        return run_async_safe(
             self.async_deduplicate_semantic(similarity_threshold, llm_provider),
             timeout=300.0,
             operation_name="deduplicate_semantic",

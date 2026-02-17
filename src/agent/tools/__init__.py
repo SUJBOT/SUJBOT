@@ -1,7 +1,8 @@
 """
 RAG Tools
 
-9 tools for retrieval, analysis, knowledge graph queries, and compliance checking.
+10 tools for retrieval, analysis, knowledge graph queries, compliance checking,
+and web search.
 All tools are registered automatically via @register_tool decorator.
 
 Tools:
@@ -14,6 +15,7 @@ Tools:
 - graph_context: Multi-hop entity neighborhood
 - graph_communities: Thematic community summaries
 - compliance_check: Community-based compliance assessment
+- web_search: Internet search via Gemini Google Search grounding
 """
 
 import logging
@@ -21,6 +23,8 @@ import importlib
 
 from ._base import BaseTool, ToolInput, ToolResult
 from ._registry import ToolRegistry, get_registry
+from .models import ToolExecution, ToolUsageMetrics, ToolStats
+from .adapter import ToolAdapter, ToolErrorType
 
 logger = logging.getLogger(__name__)
 
@@ -67,10 +71,24 @@ _safe_import("graph_communities")
 # Compliance tools
 _safe_import("compliance_check")
 
+# Web search (Gemini grounding)
+_safe_import("web_search")
+
 # Report import failures
 if _failed_imports:
     logger.warning(
         f"Tool import failures ({len(_failed_imports)}): {', '.join(name for name, _ in _failed_imports)}"
     )
 
-__all__ = ["BaseTool", "ToolInput", "ToolResult", "ToolRegistry", "get_registry"]
+__all__ = [
+    "BaseTool",
+    "ToolInput",
+    "ToolResult",
+    "ToolRegistry",
+    "get_registry",
+    "ToolExecution",
+    "ToolUsageMetrics",
+    "ToolStats",
+    "ToolAdapter",
+    "ToolErrorType",
+]

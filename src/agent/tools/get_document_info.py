@@ -147,6 +147,7 @@ class GetDocumentInfoTool(BaseTool):
 
     def _get_document_pages(self, document_id: str):
         """Get all VL pages for a document, ordered by page_number."""
+        import json as _json
         from ...storage.postgres_adapter import _run_async_safe
 
         async def _fetch():
@@ -161,14 +162,21 @@ class GetDocumentInfoTool(BaseTool):
                     """,
                     document_id,
                 )
-                return [
-                    {
+                results = []
+                for row in rows:
+                    meta = row.get("metadata") or {}
+                    # asyncpg may return jsonb as string — parse if needed
+                    if isinstance(meta, str):
+                        try:
+                            meta = _json.loads(meta)
+                        except (ValueError, TypeError):
+                            meta = {}
+                    results.append({
                         "page_id": row["page_id"],
                         "document_id": row["document_id"],
                         "page_number": row["page_number"],
-                        "metadata": row.get("metadata") or {},
-                    }
-                    for row in rows
-                ]
+                        "metadata": meta,
+                    })
+                return results
 
         return _run_async_safe(_fetch(), operation_name="get_document_pages")

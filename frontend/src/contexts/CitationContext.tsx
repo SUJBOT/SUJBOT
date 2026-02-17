@@ -7,9 +7,7 @@
 
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 import type { CitationMetadata, CitationContextValue, TextSelection } from '../types';
-
-// API base URL from environment
-const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+import { API_BASE_URL } from '../config';
 
 const CitationContext = createContext<CitationContextValue | null>(null);
 

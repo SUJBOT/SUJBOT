@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.graph.storage import _vec_to_pg  # noqa: E402
+from src.utils.async_helpers import vec_to_pgvector as _vec_to_pg  # noqa: E402
 
 load_dotenv()
 

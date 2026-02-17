@@ -18,3 +18,10 @@ Rules:
 - Different amendments of the same regulation ARE duplicates if they refer to the same base regulation.
 - Entities with the same name but fundamentally different types are NOT duplicates.
 - General vs specific references to the same thing ARE duplicates (e.g., "bezpečnostní zpráva reaktoru VR-1" = "Bezpečnostní zpráva školního reaktoru VR-1").
+- Different sanctions for the same violation ARE duplicates (keep the more specific one).
+- Different sanction AMOUNTS are NOT duplicates (e.g., "pokuta do 1 000 000 Kč" ≠ "pokuta do 2 000 000 Kč").
+- An AMENDMENT entity and its source REGULATION are NOT duplicates — they are different entities.
+- DEFINITION entities with the same defined term from the same regulation ARE duplicates.
+- A core concept and its qualified variant ARE duplicates — keep the shorter, canonical name (e.g., "fyzikální spouštění" = "fyzikální spouštění podle vnitřních předpisů", "nakládání se zdrojem" = "bezpečné nakládání se zdrojem", "zdroj ionizujícího záření" = "zdroj ionizujícího záření vyrobený jeho uživatelem").
+- Compound activities and their constituents ARE duplicates if they refer to the same general activity (e.g., "údržba a opravy" = "údržba"). BUT legally distinct subtypes are NOT duplicates (e.g., "fyzická osoba" ≠ "podnikající fyzická osoba").
+- Czech morphological variants (different grammatical cases of the same word) ARE duplicates (e.g., "provoz jaderného zařízení" = "provoz v jaderném zařízení" — genitive vs locative of the same noun).

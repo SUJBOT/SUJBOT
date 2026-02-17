@@ -1,4 +1,56 @@
-# Changelog — 13.–16. února 2026
+# Changelog — 13.–17. února 2026
+
+## 20. Web Search Tool — Gemini Google Search grounding (17. února 2026)
+- **New `web_search` tool**: Internet search via Gemini's native Google Search grounding. Last-resort tool for questions requiring current/external information not in the document corpus.
+- **Backend**: `src/agent/tools/web_search.py` — `WebSearchTool` with `@register_tool`, Pydantic input validation, grounding metadata extraction (sources with URLs + titles)
+- **Config**: `ToolConfig.web_search_enabled` / `web_search_model` fields, wired from `config.json` → `agent_tools.web_search`
+- **System prompt** (`prompts/agents/unified.txt`): Tool added to table + "Web search (last resort)" guidance section
+- **Frontend citations**: `\webcite{url}{title}` syntax → `<webcite>` HTML tags → `WebCitationLink` component (blue badge with `ExternalLink` icon, opens URL in new tab)
+- **Dependency**: `google-genai>=1.0` added to `pyproject.toml` (coexists with `google-generativeai`)
+- **Tests**: `tests/agent/test_web_search.py` — 12 tests covering input validation, disabled state, missing API key, successful search, no sources, API errors, citation format, config defaults
+
+## 19. KG extrakce & deduplikace — benchmark-driven vylepšení (17. února 2026)
+- **Manuální GT benchmark** (2×5 stran z atomového zákona): Claude jako anotátor vytvořil ground-truth KG z obrázků stránek, porovnání s pipeline výstupem
+- **7 systematických problémů** identifikováno v extrakci: překlepy, verbose názvy, typ v názvu, špatné entity typy, špatné relationship typy, chybějící entity, vágní CONTROL entity
+- **Extraction prompt** (`prompts/graph_entity_extraction.txt`) — 3 nová pravidla:
+  - "Extract the CORE concept, not qualified variants" — zabraňuje kontextuální přespecifikaci (e.g., "fyzikální spouštění" místo "fyzikální spouštění podle vnitřních předpisů")
+  - Příklady WRONG/RIGHT pro concise naming, relationship vyjádření kvalifikátorů
+  - Konzistentní s `prompts/graph_gt_text_extraction.txt`
+- **Benchmark výsledky:** OLD prompt: 53 issues → NEW prompt: 0 issues (100% eliminace na 2. vzorku)
+- **Dedup pipeline** (`scripts/graph_normalize_dedup.py`) — 2 nové fáze:
+  - **Phase 1b** (substring containment): merguje entity kde kratší název ⊂ delší název (same type+doc), s LLM potvrzením. Filtruje: min 2 slova, min 40% délky, skip SANCTION/DEADLINE/SECTION/REQUIREMENT
+  - **Phase 2** rozšířen o **word-overlap trigger**: kromě trigram sim > 0.75 také hledá páry s word Jaccard overlap > 0.6 (trigram sim 0.3–0.75), pokrývá případy kde trigram selhává kvůli rozdílu délek
+  - Phase 2 filtruje substring páry (handled v Phase 1b) aby neduplikoval práci
+- **Dedup LLM prompt** (`prompts/graph_entity_dedup.txt`) — 4 nová pravidla:
+  - Core concept vs qualified variant = duplicáty (keep shorter)
+  - Compound aktivity vs constituenty = duplicáty ("údržba a opravy" = "údržba")
+  - České morfologické varianty = duplicáty (genitiv vs lokativ)
+  - Různé částky sankcí ≠ duplicáty
+- GT data: `data/esbirka_benchmark/gt_manual.json` (v1, 5 stran), `gt_manual_v2.json` (v2, 5 různých stran)
+
+## 18. e-Sbírka benchmark — GT dataset & KG pipeline evaluace (17. února 2026)
+- Nový skript `scripts/esbirka_gt_dataset.py` — stahuje strukturovaná data z e-Sbírka REST API (`www.e-sbirka.cz/sbr-cache`), extrahuje GT entity a vztahy z metadat, fragmentů a souvislostí, stahuje PDF
+- Nový skript `scripts/esbirka_pipeline_extract.py` — spouští existující VL+KG pipeline na benchmark PDF (PageStore rendering + EntityExtractor), in-memory dedup bez DB
+- Nový skript `scripts/esbirka_compare.py` — 4-fázový srovnávací skript (language-agnostic):
+  - Phase 1: Exact normalized match + citation number match (strukturální)
+  - Phase 2a: Semantic embedding match (multilingual-e5-small, same-type, threshold 0.75)
+  - Phase 2b: Cross-type semantic match (different types, threshold 0.85)
+  - Phase 3: LLM judge pro borderline případy (optional `--llm-judge`)
+  - Relationship matching: semantic embedding na celých triplech (source → type → target)
+- Benchmark dokumenty: zákon č. 263/2016 Sb. (atomový zákon) + vyhláška č. 422/2016 Sb. (radiační ochrana) — sdílené entity (SÚJB, jaderné zařízení) pro test deduplikace
+- GT dataset: 1 961 entit, 1 223 vztahů, 42 očekávaných dedup skupin
+- Pipeline výsledky (Haiku 4.5, 165 stran): 2 444 entit, 1 973 vztahů
+- **Výsledky srovnání:** Entity F1=71.2% (R=98.3%, P=55.8%), Relationship F1=58.3% (R=97.3%, P=41.7%), Dedup rate=52.4%
+- Data v `data/esbirka_benchmark/` (GT JSON, pipeline JSON, PDF, page images)
+
+## 17. Knowledge Graph — legislativní ontologie (16. února 2026)
+- 4 nové entity typy: DEFINITION (formální právní definice), SANCTION (sankce za porušení), DEADLINE (lhůty a přechodná období), AMENDMENT (novelizace předpisu)
+- 5 nových relationship typů: SUPERSEDES (zrušení předpisu), DERIVED_FROM (prováděcí předpis z nadřazeného), HAS_SANCTION (vazba povinnost→sankce), HAS_DEADLINE (vazba povinnost→lhůta), COMPLIES_WITH (důkaz→požadavek)
+- Rozšířený extraction prompt s popisy nových typů a příklady
+- Rozšířený dedup prompt o pravidla pro SANCTION, AMENDMENT, DEFINITION entity
+- `graph_search` tool zobrazuje nové typy v entity_type filtru
+- `compliance_check` tool obohacuje findings o sankce přes HAS_SANCTION vztahy
+- Žádné změny DB schématu — entity_type a relationship_type jsou TEXT sloupce
 
 ## 15. PDF search — diakritika, zvýrazňování, scroll (PR #30, 16. února 2026)
 - Diacritics-insensitive full-text search v PDF preview: `normalizeText()` stripuje LaTeX spacing modifiers (ˇ˘˙˚˛˜˝ U+02C7–U+02DD) s okolním whitespace, poté NFD + combining marks
@@ -139,3 +191,4 @@
 - ~65 commitů
 - Net: cca -29 000 řádků (hlavně díky OCR removal)
 - Nové moduly: `src/graph/`, `rag_confidence/`, `src/retrieval/`, `src/vl/document_converter.py`, `benchmark_criteria/`
+- Nové skripty: `scripts/esbirka_gt_dataset.py`, `scripts/esbirka_pipeline_extract.py`, `scripts/esbirka_compare.py`

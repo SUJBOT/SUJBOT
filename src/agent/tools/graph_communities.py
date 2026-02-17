@@ -48,13 +48,9 @@ class GraphCommunitiesTool(BaseTool):
         query: Optional[str] = None,
         level: int = 0,
     ) -> ToolResult:
-        graph_storage = getattr(self.config, "graph_storage", None)
-        if not graph_storage:
-            return ToolResult(
-                success=False,
-                data=None,
-                error="Knowledge graph not available (graph_storage not configured)",
-            )
+        graph_storage, err = self._get_graph_storage()
+        if err:
+            return err
 
         try:
             if query:

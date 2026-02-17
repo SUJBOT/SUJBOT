@@ -9,10 +9,7 @@ import { useState, type FormEvent } from 'react';
 import { Mail, Lock, AlertCircle, Shield } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../design-system/utils/cn';
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL !== undefined
-  ? import.meta.env.VITE_API_BASE_URL
-  : 'http://localhost:8000';
+import { API_BASE_URL } from '../../config';
 
 export function AdminLoginPage() {
   const { t } = useTranslation();

@@ -24,7 +24,7 @@ def _load_agent_base_prompt() -> str:
     Task-specific prompts (chat, benchmark) should be appended separately.
     """
     try:
-        # Use centralized prompt loader from multi_agent module
+        # Load prompt from prompts/ directory
         from pathlib import Path
         prompt_file = Path(__file__).parent.parent.parent / "prompts" / "base_agent_prompt.txt"
         if prompt_file.exists():
@@ -53,6 +53,10 @@ class ToolConfig:
     # Analysis settings
     max_document_compare: int = 3
     compliance_threshold: float = 0.7
+
+    # Web search (Gemini grounding)
+    web_search_enabled: bool = True
+    web_search_model: str = "gemini-2.0-flash"
 
     def __post_init__(self):
         """Validate configuration values."""
