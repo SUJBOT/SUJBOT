@@ -112,7 +112,8 @@ def base_url() -> str:
 @pytest.fixture(scope="session")
 def http_client(base_url: str) -> Generator[httpx.Client, None, None]:
     """Create HTTP client for API requests (unauthenticated)."""
-    with httpx.Client(base_url=base_url, timeout=30.0) as client:
+    verify = not base_url.startswith("https://localhost")
+    with httpx.Client(base_url=base_url, timeout=30.0, verify=verify) as client:
         yield client
 
 
@@ -171,10 +172,12 @@ def auth_cookies(http_client: httpx.Client) -> dict:
 @pytest.fixture(scope="session")
 def auth_client(base_url: str, auth_cookies: dict) -> Generator[httpx.Client, None, None]:
     """Create authenticated HTTP client."""
+    verify = not base_url.startswith("https://localhost")
     with httpx.Client(
         base_url=base_url,
         timeout=30.0,
-        cookies=auth_cookies
+        cookies=auth_cookies,
+        verify=verify,
     ) as client:
         yield client
 

@@ -281,8 +281,11 @@ class TestAdminEndpoints:
         assert response.status_code in (401, 403)
 
     def test_admin_users_without_auth(self, http_client: httpx.Client):
-        """Admin users list without auth returns 401 or 403."""
-        response = http_client.get("/admin/users")
+        """Admin users list without auth returns 401/403 (or 200 HTML via nginx SPA fallback)."""
+        response = http_client.get(
+            "/admin/users",
+            headers={"Accept": "application/json"},
+        )
         assert response.status_code in (401, 403)
 
     def test_admin_stats_without_auth(self, http_client: httpx.Client):
