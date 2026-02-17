@@ -303,7 +303,7 @@ class ComplianceCheckTool(BaseTool):
                         sanctions.append({"name": target, "description": desc})
             return sanctions
         except Exception as e:
-            logger.debug(f"Failed to fetch sanctions for entity {entity_id}: {e}")
+            logger.warning(f"Failed to fetch sanctions for entity {entity_id}: {e}", exc_info=True)
             return []
 
     def _search_evidence(self, query: str, document_id: Optional[str]) -> tuple:

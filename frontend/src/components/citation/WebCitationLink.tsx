@@ -19,6 +19,18 @@ export function WebCitationLink({ url, title }: WebCitationLinkProps) {
   // Truncate long titles for display
   const displayTitle = title.length > 30 ? title.slice(0, 27) + '...' : title;
 
+  // Validate URL protocol to prevent XSS (e.g., javascript: URIs)
+  if (!/^https?:\/\//i.test(url)) {
+    return (
+      <span className={cn(
+        'inline-flex items-center gap-1 px-1.5 py-0.5 rounded',
+        'bg-gray-100 dark:bg-gray-800 text-gray-500 text-xs font-mono',
+      )}>
+        {displayTitle}
+      </span>
+    );
+  }
+
   return (
     <a
       href={url}

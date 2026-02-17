@@ -91,7 +91,12 @@ export const WEB_CITATION_REGEX = /\\webcite\{([^}]+)\}\{([^}]+)\}/g;
 export function preprocessWebCitations(content: string): string {
   return content.replace(
     WEB_CITATION_REGEX,
-    '<webcite data-url="$1" data-title="$2">[$2]</webcite>'
+    (_match: string, url: string, title: string) => {
+      // Escape quotes to prevent HTML attribute injection
+      const safeUrl = url.replace(/"/g, '&quot;');
+      const safeTitle = title.replace(/"/g, '&quot;');
+      return `<webcite data-url="${safeUrl}" data-title="${safeTitle}">[${title}]</webcite>`;
+    }
   );
 }
 

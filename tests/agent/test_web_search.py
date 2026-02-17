@@ -8,9 +8,12 @@ Covers:
 - Tool result format: check ToolResult structure with mocked Gemini response
 - Citation format: verify sources list format
 - Redirect URL resolution: resolve Gemini redirect URLs to actual page URLs
+- Source deduplication: duplicate resolved URLs collapsed
+- Edge cases: no candidates, no grounding metadata, URL-encoded paths
 """
 
 import pytest
+from pydantic import ValidationError
 from unittest.mock import MagicMock, patch
 
 from src.agent.tools.web_search import WebSearchTool, WebSearchInput
@@ -67,6 +70,26 @@ def _make_grounding_response(text="Answer text", sources=None):
     return response
 
 
+def _make_response_no_candidates(text="Answer text"):
+    """Create a mock Gemini response with no candidates."""
+    response = MagicMock()
+    response.text = text
+    response.candidates = []
+    return response
+
+
+def _make_response_no_grounding(text="Answer text"):
+    """Create a mock Gemini response where candidates have no grounding_metadata."""
+    candidate = MagicMock(spec=[])  # spec=[] means no attributes by default
+    candidate.grounding_metadata = None
+
+    response = MagicMock()
+    response.text = text
+    response.candidates = [candidate]
+
+    return response
+
+
 def _passthrough_resolve(raw_sources):
     """Identity function — returns raw sources unchanged (skip redirect resolution)."""
     return raw_sources
@@ -83,11 +106,11 @@ class TestWebSearchInput:
         assert inp.query == "What is IAEA?"
 
     def test_empty_query_rejected(self):
-        with pytest.raises(Exception):  # Pydantic ValidationError
+        with pytest.raises(ValidationError):
             WebSearchInput(query="")
 
     def test_long_query_rejected(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             WebSearchInput(query="x" * 501)
 
     def test_max_length_query_accepted(self):
@@ -189,6 +212,69 @@ class TestWebSearchExecution:
         assert not result.success
         assert "API quota exceeded" in result.error
 
+    @patch.dict("os.environ", {"GOOGLE_API_KEY": "test-key-1234567890123456789012345678901234"})
+    @patch.object(WebSearchTool, "_resolve_redirect_urls", side_effect=_passthrough_resolve)
+    @patch("src.agent.tools.web_search.genai")
+    def test_search_no_candidates(self, mock_genai, _mock_resolve):
+        """Test handling of response with no candidates."""
+        mock_response = _make_response_no_candidates(text="Answer without grounding")
+
+        mock_client = MagicMock()
+        mock_genai.Client.return_value = mock_client
+        mock_client.models.generate_content.return_value = mock_response
+
+        tool = _make_tool()
+        result = tool.execute_impl(query="test")
+
+        assert result.success
+        assert result.data["sources"] == []
+        assert result.metadata["source_count"] == 0
+
+    @patch.dict("os.environ", {"GOOGLE_API_KEY": "test-key-1234567890123456789012345678901234"})
+    @patch.object(WebSearchTool, "_resolve_redirect_urls", side_effect=_passthrough_resolve)
+    @patch("src.agent.tools.web_search.genai")
+    def test_search_no_grounding_metadata(self, mock_genai, _mock_resolve):
+        """Test handling of response with candidates but no grounding metadata."""
+        mock_response = _make_response_no_grounding(text="Plain answer")
+
+        mock_client = MagicMock()
+        mock_genai.Client.return_value = mock_client
+        mock_client.models.generate_content.return_value = mock_response
+
+        tool = _make_tool()
+        result = tool.execute_impl(query="test")
+
+        assert result.success
+        assert "Plain answer" in result.data["answer"]
+        assert result.data["sources"] == []
+
+    @patch.dict("os.environ", {"GOOGLE_API_KEY": "test-key-1234567890123456789012345678901234"})
+    @patch.object(WebSearchTool, "_resolve_redirect_urls", side_effect=_passthrough_resolve)
+    @patch("src.agent.tools.web_search.genai")
+    def test_source_deduplication(self, mock_genai, _mock_resolve):
+        """Test that duplicate URLs are deduplicated after redirect resolution."""
+        mock_response = _make_grounding_response(
+            text="Answer",
+            sources=[
+                {"uri": "https://example.com/page", "title": "Page A"},
+                {"uri": "https://example.com/page", "title": "Page B"},  # same URL
+                {"uri": "https://other.com/page", "title": "Other"},
+            ],
+        )
+
+        mock_client = MagicMock()
+        mock_genai.Client.return_value = mock_client
+        mock_client.models.generate_content.return_value = mock_response
+
+        tool = _make_tool()
+        result = tool.execute_impl(query="test")
+
+        assert result.success
+        assert len(result.data["sources"]) == 2  # 3 → 2 after dedup
+        assert result.data["sources"][0]["url"] == "https://example.com/page"
+        assert result.data["sources"][1]["url"] == "https://other.com/page"
+        assert result.data["sources"][1]["index"] == 2
+
 
 # ---------------------------------------------------------------------------
 # Citation format
@@ -276,9 +362,11 @@ class TestRedirectResolution:
         assert result[0]["title"] == "IAEA Safety Standards"  # kept because != domain
 
     @patch("src.agent.tools.web_search.requests")
-    def test_fallback_on_timeout(self, mock_requests):
-        """If redirect resolution fails, fall back to original URL."""
-        mock_requests.head.side_effect = Exception("Connection timeout")
+    def test_fallback_on_request_error(self, mock_requests):
+        """If redirect resolution fails with a network error, fall back to original URL."""
+        import requests as real_requests
+        mock_requests.head.side_effect = real_requests.ConnectionError("Connection refused")
+        mock_requests.RequestException = real_requests.RequestException
 
         raw = [{"url": "https://vertexaisearch.cloud.google.com/redirect/X", "title": "example.com"}]
         result = WebSearchTool._resolve_redirect_urls(raw)
@@ -313,6 +401,20 @@ class TestRedirectResolution:
 
         assert "safety report" in result[0]["title"]
         assert ".pdf" not in result[0]["title"]
+
+    @patch("src.agent.tools.web_search.requests")
+    def test_title_decodes_url_encoded_path(self, mock_requests):
+        """URL-encoded characters in path segments are decoded for titles."""
+        mock_resp = MagicMock()
+        mock_resp.url = "https://example.cz/cz/t%C3%A9ma/jadern%C3%A1-bezpe%C4%8Dnost"
+        mock_requests.head.return_value = mock_resp
+
+        raw = [{"url": "https://redirect.example.com/xyz", "title": "example.cz"}]
+        result = WebSearchTool._resolve_redirect_urls(raw)
+
+        # unquote should decode %C3%A1 → á, %C4%8D → č etc.
+        assert "example.cz" in result[0]["title"]
+        assert "jadern" in result[0]["title"]  # "jaderná" decoded
 
     @patch("src.agent.tools.web_search.requests")
     def test_multiple_sources_resolved_in_parallel(self, mock_requests):

@@ -10,7 +10,7 @@ import logging
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import requests
 from google import genai
@@ -70,9 +70,10 @@ class WebSearchTool(BaseTool):
 
         model_name = getattr(self.config, "web_search_model", "gemini-2.0-flash")
 
+        # Call Gemini API — catch API/network errors here;
+        # programming errors (KeyError, TypeError, etc.) propagate to BaseTool.execute()
         try:
             client = genai.Client(api_key=api_key)
-
             response = client.models.generate_content(
                 model=model_name,
                 contents=query,
@@ -80,81 +81,79 @@ class WebSearchTool(BaseTool):
                     tools=[types.Tool(google_search=types.GoogleSearch())]
                 ),
             )
-
-            # Extract grounded text
-            answer = response.text or ""
-
-            # Extract grounding metadata
-            sources: List[Dict[str, Any]] = []
-            search_queries: List[str] = []
-
-            candidate = response.candidates[0] if response.candidates else None
-            grounding_meta = getattr(candidate, "grounding_metadata", None) if candidate else None
-
-            if grounding_meta:
-                # Search queries used
-                search_queries = list(getattr(grounding_meta, "web_search_queries", []) or [])
-
-                # Grounding chunks → source URLs (Gemini returns redirect URLs)
-                chunks = getattr(grounding_meta, "grounding_chunks", []) or []
-                raw_sources: List[Dict[str, str]] = []
-                for chunk in chunks:
-                    web = getattr(chunk, "web", None)
-                    if web:
-                        url = getattr(web, "uri", "") or ""
-                        title = getattr(web, "title", "") or ""
-                        if url:
-                            raw_sources.append({"url": url, "title": title})
-
-                # Resolve redirect URLs to actual page URLs in parallel
-                resolved = self._resolve_redirect_urls(raw_sources)
-
-                # Deduplicate by resolved URL
-                seen_urls: set = set()
-                for src in resolved:
-                    url = src["url"]
-                    if url not in seen_urls:
-                        seen_urls.add(url)
-                        sources.append({
-                            "url": url,
-                            "title": src["title"],
-                            "index": len(sources) + 1,
-                        })
-                        logger.debug(f"Grounding source: {url} ({src['title']})")
-
-            # Build citation instruction for the agent
-            source_lines = []
-            for s in sources:
-                source_lines.append(f"[{s['index']}] {s['title']} - {s['url']}")
-
-            citation_note = ""
-            if source_lines:
-                citation_note = (
-                    "\n\nSources (cite with \\webcite{url}{title}):\n"
-                    + "\n".join(source_lines)
-                )
-
-            return ToolResult(
-                success=True,
-                data={
-                    "answer": answer + citation_note,
-                    "sources": sources,
-                },
-                metadata={
-                    "query": query,
-                    "model": model_name,
-                    "search_queries": search_queries,
-                    "source_count": len(sources),
-                },
-            )
-
-        except Exception as e:
-            logger.error(f"Web search failed: {e}", exc_info=True)
+        except (ValueError, RuntimeError, OSError, ConnectionError) as e:
+            logger.error(f"Gemini API call failed: {e}", exc_info=True)
             return ToolResult(
                 success=False,
                 data=None,
                 error=f"Web search failed: {type(e).__name__}: {e}",
             )
+
+        # Parse grounded response
+        answer = response.text or ""
+
+        sources: List[Dict[str, Any]] = []
+        search_queries: List[str] = []
+
+        candidate = response.candidates[0] if response.candidates else None
+        grounding_meta = getattr(candidate, "grounding_metadata", None) if candidate else None
+
+        if grounding_meta:
+            # Search queries used
+            search_queries = list(getattr(grounding_meta, "web_search_queries", []) or [])
+
+            # Grounding chunks → source URLs (Gemini returns redirect URLs)
+            chunks = getattr(grounding_meta, "grounding_chunks", []) or []
+            raw_sources: List[Dict[str, str]] = []
+            for chunk in chunks:
+                web = getattr(chunk, "web", None)
+                if web:
+                    url = getattr(web, "uri", "") or ""
+                    title = getattr(web, "title", "") or ""
+                    if url:
+                        raw_sources.append({"url": url, "title": title})
+
+            # Resolve redirect URLs to actual page URLs in parallel
+            resolved = self._resolve_redirect_urls(raw_sources)
+
+            # Deduplicate by resolved URL
+            seen_urls: set = set()
+            for src in resolved:
+                url = src["url"]
+                if url not in seen_urls:
+                    seen_urls.add(url)
+                    sources.append({
+                        "url": url,
+                        "title": src["title"],
+                        "index": len(sources) + 1,
+                    })
+                    logger.debug(f"Grounding source: {url} ({src['title']})")
+
+        # Build citation instruction for the agent
+        source_lines = []
+        for s in sources:
+            source_lines.append(f"[{s['index']}] {s['title']} - {s['url']}")
+
+        citation_note = ""
+        if source_lines:
+            citation_note = (
+                "\n\nSources (cite with \\webcite{url}{title}):\n"
+                + "\n".join(source_lines)
+            )
+
+        return ToolResult(
+            success=True,
+            data={
+                "answer": answer + citation_note,
+                "sources": sources,
+            },
+            metadata={
+                "query": query,
+                "model": model_name,
+                "search_queries": search_queries,
+                "source_count": len(sources),
+            },
+        )
 
     @staticmethod
     def _resolve_redirect_urls(
@@ -180,8 +179,8 @@ class WebSearchTool(BaseTool):
                     # Use last meaningful path segment as title hint
                     path_parts = [p for p in parsed.path.strip("/").split("/") if p]
                     if path_parts:
-                        last = path_parts[-1]
-                        # Clean up file extensions and URL encoding
+                        last = unquote(path_parts[-1])
+                        # Clean up file extensions
                         if "." in last:
                             last = last.rsplit(".", 1)[0]
                         last = last.replace("-", " ").replace("_", " ")
@@ -189,7 +188,7 @@ class WebSearchTool(BaseTool):
                     else:
                         title = parsed.netloc
                 return {"url": resolved_url, "title": title}
-            except Exception as e:
+            except requests.RequestException as e:
                 logger.debug(f"Failed to resolve redirect URL: {e}")
                 return src  # Fall back to original redirect URL
 
