@@ -30,12 +30,14 @@ class TestBackendHealth:
             f"Health response missing expected fields: {data}"
 
     def test_root_endpoint(self, http_client: httpx.Client):
-        """Backend / endpoint returns API info."""
+        """Root / endpoint returns 200 (SPA HTML via nginx or backend JSON)."""
         response = http_client.get("/")
         assert response.status_code == 200
-
-        data = response.json()
-        assert "name" in data or "status" in data
+        # Behind nginx: serves frontend SPA (HTML). Direct: backend JSON.
+        content_type = response.headers.get("content-type", "")
+        if "application/json" in content_type:
+            data = response.json()
+            assert "name" in data or "status" in data
 
     def test_docs_endpoint(self, http_client: httpx.Client):
         """Backend /docs endpoint is accessible."""

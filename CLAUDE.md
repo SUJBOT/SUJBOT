@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
-**SUJBOT**: Production RAG system for legal/technical documents with multi-agent orchestration.
+**SUJBOT**: Production RAG system for legal/technical documents with autonomous tool-loop agent.
 
 CRITICAL: See sudo password @sudo.txt
 
@@ -33,10 +33,11 @@ Other: `--limit 5` (quick test), `--upload-only`, `--judge-model openai:gpt-4o-m
 uv sync                                    # Install dependencies
 
 # Testing
-uv run pytest tests/ -v                                    # All tests
+uv run pytest tests/ -v --ignore=tests/production           # All tests (local)
 uv run pytest tests/agent/test_tool_registry.py::test_name -v  # Single test
 uv run pytest tests/ --cov=src --cov-report=html           # With coverage
 # NOTE: pytest-asyncio NOT installed. Use @pytest.mark.anyio + conftest anyio_backend="asyncio".
+# NOTE: pytest-timeout NOT installed. Do not use --timeout flag.
 
 # Production tests (requires running Docker stack)
 PROD_BASE_URL="http://localhost:8200" \
@@ -241,6 +242,8 @@ Graph data in `graph` schema. Tables: `entities`, `relationships`, `communities`
 
 Use typed exceptions from `src/exceptions.py`: `SujbotError` → `ExtractionError`, `ValidationError`, `ProviderError`, `ToolExecutionError`, `AgentError`, `StorageError`, `RetrievalError`, `ConversionError`. Each has `message`, `details` dict, optional `cause`. Use `exc_info=True` for unexpected errors.
 
+**API error responses:** Always use `sanitize_error(e)` from `src/utils/security` in user-facing error payloads (SSE, JSON responses). Never expose raw exception messages to clients.
+
 ### Internationalization (i18n)
 
 Frontend CZ/EN via react-i18next. When adding UI text, update BOTH `/frontend/src/i18n/locales/cs.json` and `en.json`. Use `t('key')` — no hardcoded strings.
@@ -248,6 +251,8 @@ Frontend CZ/EN via react-i18next. When adding UI text, update BOTH `/frontend/sr
 ### Adding New Backend API Routes
 
 New routes MUST be added to nginx regex in `docker/nginx/reverse-proxy.conf` ("Direct backend endpoints" section). Alternative: prefix with `/api/` (auto-proxied, no nginx changes needed). **Symptom if forgotten:** Frontend receives HTML instead of JSON.
+
+**Shared state:** Import auth, storage, and VL components from `backend/deps.py`. Do NOT define module-level globals for shared instances in route files.
 
 ### Adding New Models
 
