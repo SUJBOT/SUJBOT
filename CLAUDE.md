@@ -122,24 +122,32 @@ User Query → SingleAgentRunner (autonomous tool loop)
 
 **Key directories:**
 - `src/single_agent/` - Production runner (autonomous tool loop with unified prompt)
-- `src/agent/` - Agent CLI and tools (`tools/` has individual tool files)
+- `src/agent/` - Agent CLI, tools (`tools/`), providers (`providers/`), observability
 - `src/graph/` - Graph RAG (storage, embedder, entity extraction, communities)
-- `src/multi_agent/` - Legacy LangGraph-based multi-agent system
 - `src/vl/` - Vision-Language RAG module (Jina v4 embeddings, page store, VL retriever)
-- `backend/` - FastAPI web backend with auth, routes, middleware
+- `src/storage/` - PostgreSQL adapter + conversation mixin
+- `src/utils/` - Security, retry, model registry, async helpers, text helpers, caching
+- `backend/` - FastAPI web backend with auth, routes, middleware, deps (DI)
 - `frontend/` - React + Vite web UI
 - `rag_confidence/` - QPP-based retrieval confidence scoring (standalone, by veselm73)
 
 **Key SSOT modules (use these, don't duplicate):**
 - `src/exceptions.py` - Typed exception hierarchy
 - `src/utils/cache.py` - `LRUCache` + `TTLCache`
-- `src/multi_agent/core/agent_initializer.py` - Agent initialization
-- `src/multi_agent/prompts/loader.py` - Prompt loading from `prompts/`
+- `src/utils/async_helpers.py` - `run_async_safe()` (sync→async bridge) + `vec_to_pgvector()`
+- `src/utils/text_helpers.py` - `strip_code_fences()` shared by graph modules
+- `src/storage/conversation_mixin.py` - `ConversationStorageMixin` (conversation CRUD, used by both storage adapters)
 - `src/agent/providers/factory.py` - Provider creation + `detect_provider_from_model()`
-- `src/vl/__init__.py:create_vl_components()` - VL initialization factory (both runners use this)
-- `backend/constants.py:get_variant_model()` - Variant→model mapping (falls back for unknown names)
+- `src/agent/providers/openai_compat.py` - Shared Anthropic↔OpenAI format conversion helpers
+- `src/agent/tools/adapter.py` - `ToolAdapter` (tool lookup, validation, execution, metrics)
+- `src/agent/observability.py` - `setup_langsmith()` + `LangSmithIntegration`
+- `src/vl/__init__.py:create_vl_components()` - VL initialization factory
+- `src/graph/types.py` - `ENTITY_TYPES` + `RELATIONSHIP_TYPES` constants
 - `src/graph/embedder.py:GraphEmbedder` - multilingual-e5-small (384-dim) for graph semantic search
 - `src/graph/storage.py:GraphStorageAdapter` - Graph CRUD + embedding/FTS search
+- `backend/deps.py` - Centralized backend dependency injection (auth, storage, VL/graph, PDF cache)
+- `backend/constants.py:get_variant_model()` - Variant→model mapping (falls back for unknown names)
+- `frontend/src/config.ts` - Single `API_BASE_URL` source for all API calls
 
 ### Graph RAG Gotchas
 
@@ -260,7 +268,7 @@ LANGSMITH_PROJECT_NAME=sujbot-multi-agent
 LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com
 ```
 
-Common issues: `403` → wrong endpoint (EU vs US); `0 tokens` → token counting doesn't propagate in LangGraph chains.
+Common issues: `403` → wrong endpoint (EU vs US); `0 tokens` → check token counting in provider response conversion.
 
 ## Research Papers (DO NOT CONTRADICT)
 

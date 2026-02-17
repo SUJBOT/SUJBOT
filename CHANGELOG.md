@@ -1,5 +1,51 @@
 # Changelog — 13.–17. února 2026
 
+## 21. Codebase Audit — SSOT enforcement, dead code removal, PR review fixes (PR #33, 17. února 2026)
+
+### Dead code removal (~16 800 řádků smazáno)
+- **`src/multi_agent/`** celý adresář smazán (10 081 řádků) — legacy LangGraph multi-agent systém, nahrazen SingleAgentRunner
+- **`src/benchmark/`** celý adresář smazán (1 691 řádků) — nepoužívaný benchmark modul
+- **`src/utils/`** 5 mrtvých modulů: `api_clients.py`, `batch_api.py`, `metadata.py`, `persistence.py`, `statistics.py` (1 927 řádků)
+- **`src/agent/rag_confidence.py`** (549 řádků), `src/agent/providers/tool_translator.py` — nahrazeny sdílenými moduly
+- **`frontend/src/components/chat/AgentProgress.tsx`** — nepoužívaný komponent
+- Mrtvé testy: `tests/multi_agent/`, `tests/test_benchmark_*`, `tests/test_evaluation_infrastructure.py`, `tests/utils/test_persistence.py`, `tests/agent/test_rag_confidence.py`
+
+### SSOT konsolidace — nové sdílené moduly
+- **`backend/deps.py`** — centralizovaný dependency injection (auth, postgres adapter, VL/graph komponenty, token extraction, cookie helper, login logika, PDF cache). Všechny route moduly importují odtud.
+- **`src/agent/providers/openai_compat.py`** — sdílené Anthropic↔OpenAI konverzní helpery (`STOP_REASON_MAP`, `convert_tools_to_openai`, `convert_response_to_anthropic`, `convert_system_to_string`, `convert_assistant_blocks_to_openai`). Používá OpenAIProvider i DeepInfraProvider.
+- **`src/agent/tools/adapter.py`** — ToolAdapter extrahován z odstraněného `multi_agent/tools/adapter.py`
+- **`src/agent/tools/models.py`** — ToolExecution, ToolStats, ToolUsageMetrics extrahovány z `multi_agent/core/state.py`
+- **`src/agent/observability.py`** — `setup_langsmith()` + `LangSmithIntegration` extrahováno z `multi_agent/observability/`
+- **`src/utils/async_helpers.py`** — sdílený `run_async_safe()` (dříve duplikován v graph/storage.py a postgres_adapter.py) + `vec_to_pgvector()`
+- **`src/utils/text_helpers.py`** — sdílený `strip_code_fences()` (dříve duplikován ve 3 graph modulech)
+- **`src/storage/conversation_mixin.py`** — `ConversationStorageMixin` deduplikuje 170 řádků conversation CRUD (6 metod)
+- **`src/graph/types.py`** — ENTITY_TYPES a RELATIONSHIP_TYPES konstanty (SSOT pro validaci)
+- **`frontend/src/config.ts`** — jediný zdroj `API_BASE_URL` (nahrazuje 8+ inline definic)
+- **`frontend/src/components/chat/AttachmentChip.tsx`** — sdílený attachment chip komponent
+
+### Bug fixy a vylepšení
+- **OpenAI provider**: Kritický fix `STOP_REASON_MAP` — `"tool_calls"` → `"tool_use"` (agent nedostával tool results)
+- **OpenAI provider**: Fix `_is_o_series()` — regex s word boundaries místo substring match (false-positive prevence)
+- **OpenAI compat**: Malformované tool calls se zachovávají s `{}` inputem místo tichého zahazování (agent může retryovat)
+- **Gemini provider**: Unikátní tool call IDs (UUID), model caching přes `_get_model()`, extrahovaný `_prepare_request()`
+- **Backend main.py**: Smazán neautentizovaný DELETE endpoint, `sanitize_error()` v SSE, title lock fix, DB transakce
+- **Backend middleware**: `AuthMiddleware` odstraněn, `middleware/auth.py` deleguje na `deps.py` (SSOT)
+- **Exchange rate**: Fix exception hierarchy (`TimeoutException` před `HTTPError`)
+- **Jina client**: Persistentní `httpx.Client` s `close()` metodou (connection pooling)
+- **VL page store**: Instance dict cache místo `lru_cache` na instančních metodách
+- **Graph storage**: `asyncio.Lock` v `_ensure_pool()` (thread-safe double-check locking), batch entity ID resolution
+- **Adapter**: `get_tool_schema()` — zúžený exception catch na `(AttributeError, TypeError, KeyError)`
+
+### Frontend
+- **VITE_API_URL → VITE_API_BASE_URL**: Fix tichého nesouladu v PDFSidePanel a CitationContext
+- **ErrorBoundary, ToolCallDisplay**: i18n překlady (cs.json + en.json)
+- **API service**: `credentials:'include'` na deleteMessage/streamClarification, nové getAgentVariant/setAgentVariant metody
+
+### Verifikace
+- 403 testů pass, 0 failures
+- Frontend TypeScript: čistý build, žádné chyby
+- PR review (4 agenti): code-reviewer, silent-failure-hunter, test-analyzer, comment-analyzer — všechny kritické nálezy opraveny
+
 ## 20. Web Search Tool — Gemini Google Search grounding (17. února 2026)
 - **New `web_search` tool**: Internet search via Gemini's native Google Search grounding. Last-resort tool for questions requiring current/external information not in the document corpus.
 - **Backend**: `src/agent/tools/web_search.py` — `WebSearchTool` with `@register_tool`, Pydantic input validation, grounding metadata extraction (sources with URLs + titles)
