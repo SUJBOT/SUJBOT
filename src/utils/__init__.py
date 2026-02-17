@@ -1,7 +1,8 @@
 """
 Utility modules for SUJBOT pipeline.
 
-Shared utilities for security, retry logic, and model registry.
+Shared utilities for security, retry logic, model registry, async helpers,
+text processing, and caching.
 """
 
 # Security utilities (CRITICAL - use everywhere)

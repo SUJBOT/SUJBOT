@@ -170,9 +170,10 @@ class OpenAIProvider(BaseProvider):
         return feature in {"tool_use", "streaming"}
 
     def _is_o_series(self) -> bool:
-        """Check if current model is an O-series reasoning model."""
-        model_lower = self.model.lower()
-        return any(pattern in model_lower for pattern in ["o1", "o3", "o4"])
+        """Check if current model is an O-series reasoning model (o1, o3, o4)."""
+        import re
+
+        return bool(re.search(r"(?:^|[-/])o[134](?:$|[-])", self.model.lower()))
 
     def get_model_name(self) -> str:
         return self.model

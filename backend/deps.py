@@ -8,7 +8,9 @@ Dependencies:
 - AuthManager: JWT token operations
 - AuthQueries: User database queries
 - PostgreSQLStorageAdapter: Conversation/message storage
-- VL components: Vision-Language pipeline for document upload
+- VL + Graph components: Vision-Language pipeline and knowledge graph services
+- Auth helpers: Cookie setting, login logic, token extraction
+- PDF scan cache: Cached filesystem listing for document endpoints
 """
 
 import logging

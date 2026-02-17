@@ -1,7 +1,7 @@
 """
 LangSmith observability setup.
 
-Extracted from multi_agent/observability/langsmith_integration.py.
+Originally part of the removed multi_agent package (see git history).
 """
 
 import logging

@@ -4,7 +4,7 @@ Conversation storage mixin — shared conversation CRUD methods.
 Both PostgresVectorStoreAdapter and PostgreSQLStorageAdapter use identical
 conversation management logic. This mixin provides the shared implementation.
 
-Requires the mixing class to have a `pool` attribute (asyncpg.Pool).
+Requires the consuming class to have a `pool` attribute (asyncpg.Pool).
 """
 
 import json

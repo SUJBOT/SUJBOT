@@ -1,19 +1,15 @@
 """
-Authentication Middleware - JWT Token Validation
+Authentication Dependencies - JWT Token Validation
 
 Protects FastAPI routes by validating JWT tokens from httpOnly cookies or Authorization headers.
 
 Usage:
-    # In main.py
-    app.add_middleware(AuthMiddleware, auth_manager=auth_manager, auth_queries=auth_queries)
-
-    # In route handlers
     @app.get("/protected")
     async def protected_route(user: Dict = Depends(get_current_user)):
         return {"user_id": user["id"], "email": user["email"]}
 """
 
-from typing import Dict, Optional
+from typing import Dict
 from fastapi import Request, HTTPException, status
 import logging
 
@@ -21,25 +17,13 @@ logger = logging.getLogger(__name__)
 
 
 # =========================================================================
-# Dependency Injection for Route Handlers
+# Legacy bridge — delegates to backend.deps (SSOT)
 # =========================================================================
 
-# Global instances (set by main.py during startup)
-_auth_manager_instance: Optional['AuthManager'] = None
-_auth_queries_instance: Optional['AuthQueries'] = None
-
-
 def set_auth_instances(auth_manager, auth_queries):
-    """
-    Set global auth instances (called by main.py during startup).
-
-    Args:
-        auth_manager: AuthManager instance
-        auth_queries: AuthQueries instance
-    """
-    global _auth_manager_instance, _auth_queries_instance
-    _auth_manager_instance = auth_manager
-    _auth_queries_instance = auth_queries
+    """Set global auth instances — delegates to deps.py (SSOT)."""
+    from backend.deps import set_auth_dependencies
+    set_auth_dependencies(auth_manager, auth_queries)
 
 
 async def get_current_user(request: Request) -> Dict:
@@ -47,14 +31,12 @@ async def get_current_user(request: Request) -> Dict:
     FastAPI dependency for getting authenticated user.
 
     Validates JWT token from cookie or header, loads user from database.
+    Uses backend.deps as single source of truth for auth instances.
     """
-    if not _auth_manager_instance or not _auth_queries_instance:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Authentication system not initialized"
-        )
+    from backend.deps import get_auth_manager, get_auth_queries, extract_token_from_request
 
-    from backend.deps import extract_token_from_request
+    auth_manager = get_auth_manager()
+    auth_queries = get_auth_queries()
 
     token = extract_token_from_request(request)
 
@@ -65,7 +47,7 @@ async def get_current_user(request: Request) -> Dict:
         )
 
     # Validate token
-    payload = _auth_manager_instance.validate_token(token)
+    payload = auth_manager.validate_token(token)
     if not payload:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -73,7 +55,7 @@ async def get_current_user(request: Request) -> Dict:
         )
 
     # Load user from database
-    user = await _auth_queries_instance.get_active_user_by_id(payload.user_id)
+    user = await auth_queries.get_active_user_by_id(payload.user_id)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

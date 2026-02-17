@@ -60,32 +60,35 @@ def convert_response_to_anthropic(response: Any) -> List[Dict[str, Any]]:
 
     if message.tool_calls:
         for tool_call in message.tool_calls:
+            if not tool_call.function:
+                logger.warning(f"Tool call missing function field: {tool_call}")
+                continue
             try:
-                if not tool_call.function:
-                    logger.warning(f"Tool call missing function: {tool_call}")
-                    continue
                 parsed_args = json.loads(tool_call.function.arguments)
-                content.append(
-                    {
-                        "type": "tool_use",
-                        "id": tool_call.id,
-                        "name": tool_call.function.name,
-                        "input": parsed_args,
-                    }
-                )
             except json.JSONDecodeError as e:
                 logger.error(
-                    f"Failed to parse tool arguments: {e}. "
+                    f"Malformed tool arguments from LLM: {e}. "
                     f"Tool: {tool_call.function.name}, "
                     f"Args: {tool_call.function.arguments[:200]}"
                 )
-                continue
+                parsed_args = {}
+            content.append(
+                {
+                    "type": "tool_use",
+                    "id": tool_call.id,
+                    "name": tool_call.function.name,
+                    "input": parsed_args,
+                }
+            )
 
     return content
 
 
 def convert_system_to_string(system: List[Dict[str, Any]] | str) -> str:
     """Extract system prompt text from Anthropic structured or string format.
+
+    Multiple text blocks are joined with a single space (paragraph structure
+    is not preserved).
 
     Args:
         system: System prompt (structured list or plain string)

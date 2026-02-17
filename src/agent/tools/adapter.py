@@ -261,7 +261,7 @@ class ToolAdapter:
                         "required": [],
                     },
                 }
-        except Exception as e:
+        except (AttributeError, TypeError, KeyError) as e:
             logger.error(f"Failed to get schema for tool {tool_name}: {e}", exc_info=True)
             return None
 
