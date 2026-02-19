@@ -41,23 +41,33 @@ class DeepInfraProvider(BaseProvider):
         self,
         api_key: Optional[str] = None,
         model: str = "meta-llama/Llama-4-Scout-17B-16E-Instruct",
+        base_url: Optional[str] = None,
     ):
         """
         Initialize DeepInfra provider.
 
         Args:
-            api_key: DeepInfra API key (defaults to DEEPINFRA_API_KEY env var)
+            api_key: DeepInfra API key (defaults to DEEPINFRA_API_KEY env var).
+                     For local servers (base_url set), a dummy key is acceptable.
             model: Model identifier (default: meta-llama/Llama-4-Scout-17B-16E-Instruct)
+            base_url: Custom API base URL (e.g. local llama.cpp server).
+                      Defaults to DeepInfra cloud endpoint.
 
         Raises:
-            ValueError: If API key is missing
+            APIKeyError: If API key is missing (cloud mode only)
         """
-        self.api_key = api_key or os.getenv("DEEPINFRA_API_KEY")
-        if not self.api_key:
-            raise APIKeyError(
-                "DEEPINFRA_API_KEY required. Set in .env file or pass to constructor.",
-                details={"provider": "deepinfra"},
-            )
+        self._is_local = base_url is not None
+
+        if self._is_local:
+            # Local mode: API key not required (llama.cpp doesn't need one)
+            self.api_key = api_key or "local-no-key"
+        else:
+            self.api_key = api_key or os.getenv("DEEPINFRA_API_KEY")
+            if not self.api_key:
+                raise APIKeyError(
+                    "DEEPINFRA_API_KEY required. Set in .env file or pass to constructor.",
+                    details={"provider": "deepinfra"},
+                )
 
         # Model validation is handled by config.json (SSOT)
         # Log warning if model not in config, but don't reject (API will validate)
@@ -65,7 +75,7 @@ class DeepInfraProvider(BaseProvider):
             from ...utils.model_registry import ModelRegistry
 
             config = ModelRegistry.get_model_config(model, "llm")
-            if config.provider != "deepinfra":
+            if config.provider not in ("deepinfra", "local_llm"):
                 logger.warning(
                     f"Model {model} is configured with provider '{config.provider}', not 'deepinfra'"
                 )
@@ -74,17 +84,23 @@ class DeepInfraProvider(BaseProvider):
 
         self.model = model
 
-        # Initialize OpenAI client with DeepInfra base URL (wrapped for LangSmith tracing)
+        effective_base_url = base_url or "https://api.deepinfra.com/v1/openai"
+
+        # Initialize OpenAI client (wrapped for LangSmith tracing)
         self.client = wrap_openai(
             OpenAI(
                 api_key=self.api_key,
-                base_url="https://api.deepinfra.com/v1/openai",
-                timeout=60.0,
+                base_url=effective_base_url,
+                timeout=120.0 if self._is_local else 60.0,
                 max_retries=3,
             )
         )
 
-        logger.info(f"DeepInfraProvider initialized: {model}")
+        logger.info(
+            "DeepInfraProvider initialized: %s%s",
+            model,
+            f" (local: {effective_base_url})" if self._is_local else "",
+        )
 
     def create_message(
         self,
@@ -154,6 +170,11 @@ class DeepInfraProvider(BaseProvider):
         openai_tools = convert_tools_to_openai(tools) if tools else None
 
         try:
+            # For local vLLM, request usage stats in stream (final chunk includes token counts)
+            extra = {}
+            if self._is_local:
+                extra["stream_options"] = {"include_usage": True}
+
             return self.client.chat.completions.create(
                 model=self.model,
                 messages=formatted_messages,
@@ -161,6 +182,7 @@ class DeepInfraProvider(BaseProvider):
                 max_tokens=max_tokens,
                 temperature=temperature,
                 stream=True,
+                **extra,
                 **kwargs,
             )
         except Exception as e:
@@ -471,6 +493,14 @@ class DeepInfraProvider(BaseProvider):
             "cache_creation_tokens": 0,
         }
 
+        if not content_blocks:
+            logger.warning(
+                "DeepInfra response had no usable content after processing "
+                "(text stripped or all tool calls failed parsing). Raw: %s",
+                (message.content or "")[:200],
+            )
+            content_blocks = [{"type": "text", "text": ""}]
+
         return ProviderResponse(
             content=content_blocks,
             stop_reason=STOP_REASON_MAP.get(choice.finish_reason, "end_turn"),
@@ -514,4 +544,4 @@ class DeepInfraProvider(BaseProvider):
 
     def get_provider_name(self) -> str:
         """Get provider name."""
-        return "deepinfra"
+        return "local_llm" if self._is_local else "deepinfra"

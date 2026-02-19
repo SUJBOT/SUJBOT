@@ -37,8 +37,8 @@ _BUILTIN_VARIANT_CONFIG = {
         "model": "claude-sonnet-4-5-20250929",
     },
     "local": {
-        "display_name": "Local (Qwen3 VL 235B)",
-        "model": "Qwen/Qwen3-VL-235B-A22B-Instruct",
+        "display_name": "Local (Qwen3 VL 30B, vLLM on GB10)",
+        "model": "qwen3-vl-30b-local",
     },
 }
 

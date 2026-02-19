@@ -4,11 +4,11 @@
  * Features:
  * - Asymmetric bubble layout (user right, assistant left)
  * - Inline editing with smooth transitions
- * - Collapsible tool calls and metadata
+ * - Collapsible thinking/tool-activity stream
  * - Markdown rendering with syntax highlighting
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -17,7 +17,6 @@ import { Clock, DollarSign, Edit2, RotateCw, Check, X, FileText, Copy } from 'lu
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../design-system/utils/cn';
 import type { Message } from '../../types';
-import { ToolCallDisplay } from './ToolCallDisplay';
 import { ProgressPhaseDisplay } from './ProgressPhaseDisplay';
 import { FeedbackButtons } from './FeedbackButtons';
 import { CitationLink } from '../citation/CitationLink';
@@ -93,6 +92,14 @@ function ChatMessageInner({
   const [editedContent, setEditedContent] = useState(message.content);
   const [isCopied, setIsCopied] = useState(false);
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+  const thinkingRef = useRef<HTMLPreElement>(null);
+
+  // Auto-scroll thinking block as new content arrives
+  useEffect(() => {
+    if (thinkingRef.current && message.isThinking) {
+      thinkingRef.current.scrollTop = thinkingRef.current.scrollHeight;
+    }
+  }, [message.thinkingContent, message.isThinking]);
 
   const handleEdit = () => {
     setIsEditing(true);
@@ -249,8 +256,71 @@ function ChatMessageInner({
             </div>
           ) : (
             <>
-              {/* Agent progress for assistant messages - show while streaming or agent active */}
-              {!isUser && (message.agentProgress?.currentAgent || message.agentProgress?.isStreaming) && (
+              {/* Thinking block for local LLM — collapsible after thinking is done */}
+              {!isUser && message.thinkingContent && (
+                <div className={cn(
+                  'mb-4 rounded-lg overflow-hidden',
+                  'border border-purple-200 dark:border-purple-800/50',
+                  'bg-purple-50/50 dark:bg-purple-950/30'
+                )}>
+                  {message.isThinking ? (
+                    /* Active thinking: expanded, with pulse animation */
+                    <>
+                      <div className={cn(
+                        'flex items-center gap-2 px-3 py-1.5',
+                        'text-xs font-medium',
+                        'text-purple-600 dark:text-purple-400'
+                      )}>
+                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse" />
+                        <span>{t('chat.thinking')}</span>
+                      </div>
+                      <pre
+                        ref={thinkingRef}
+                        className={cn(
+                          'px-3 pb-2 text-xs leading-relaxed',
+                          'font-mono whitespace-pre-wrap break-words',
+                          'text-purple-700/70 dark:text-purple-300/60',
+                          'max-h-32 overflow-y-auto',
+                          'scrollbar-thin scrollbar-thumb-purple-300 dark:scrollbar-thumb-purple-700'
+                        )}
+                      >
+                        {message.thinkingContent}
+                      </pre>
+                    </>
+                  ) : (
+                    /* Finished thinking: collapsible details element */
+                    <details className="group">
+                      <summary className={cn(
+                        'flex items-center gap-2 px-3 py-1.5 cursor-pointer select-none',
+                        'text-xs font-medium',
+                        'text-purple-600 dark:text-purple-400',
+                        'hover:text-purple-700 dark:hover:text-purple-300',
+                        'list-none [&::-webkit-details-marker]:hidden',
+                        'transition-colors'
+                      )}>
+                        <span className={cn(
+                          'transition-transform duration-200',
+                          'group-open:rotate-90',
+                          'text-xs leading-none'
+                        )}>▸</span>
+                        <span>{t('chat.thinking')}</span>
+                      </summary>
+                      <pre className={cn(
+                        'px-3 pb-2 text-xs leading-relaxed',
+                        'font-mono whitespace-pre-wrap break-words',
+                        'text-purple-700/70 dark:text-purple-300/60',
+                        'max-h-48 overflow-y-auto',
+                        'scrollbar-thin scrollbar-thumb-purple-300 dark:scrollbar-thumb-purple-700'
+                      )}>
+                        {message.thinkingContent}
+                      </pre>
+                    </details>
+                  )}
+                </div>
+              )}
+
+              {/* Agent progress for assistant messages - hide when thinking is streaming */}
+              {!isUser && !message.isThinking && (message.agentProgress?.currentAgent || message.agentProgress?.isStreaming) && (
                 <div className="mb-4">
                   <ProgressPhaseDisplay progress={message.agentProgress} />
                 </div>
@@ -268,60 +338,18 @@ function ChatMessageInner({
                 )}
               >
                 {(() => {
-                  // Display strategy:
-                  // - If text contains [Using ...] markers → inline rendering (tools shown inline with text)
-                  // - If NO markers but toolCalls exist → fallback rendering (tools shown at top)
-                  // This prevents duplicate display (tools at top + inline)
+                  // Clean content: strip [Using ...] markers (legacy) and check for substance
+                  const cleanedContent = processedContent
+                    .replace(/\[Using [^\]]+\.\.\.\]\n*/g, '');
 
-                  const hasMarkers = /\[Using\s+[^\]]+\.\.\.\]/.test(message.content);
+                  const hasContent = cleanedContent.trim().replace(/\s+/g, '').length > 0;
                   const hasToolCalls = message.toolCalls && message.toolCalls.length > 0;
 
-                  // Fallback: Show tools at top if no markers (backward compatibility)
-                  if (!hasMarkers && hasToolCalls) {
-                    return (
-                      <>
-                        {/* Tool calls without inline markers - show at top */}
-                        <div className="space-y-2 mb-3">
-                          {message.toolCalls!.map((toolCall) => (
-                            <ToolCallDisplay key={toolCall.id} toolCall={toolCall} />
-                          ))}
-                        </div>
-                        {/* Regular markdown content with citation support */}
-                        <ReactMarkdown
-                          remarkPlugins={[remarkGfm]}
-                          rehypePlugins={[rehypeRaw, rehypeHighlight]}
-                          components={markdownComponents}
-                        >
-                          {processedContent}
-                        </ReactMarkdown>
-                      </>
-                    );
-                  }
-
-                  // Primary path: Inline rendering with markers
-                  // Inline tool call display with content parsing
-                  //
-                  // Edge case handling:
-                  // 1. Empty responses can occur when LLM uses only tools without explanation
-                  // 2. [Using ...] markers are UI placeholders during streaming, removed after
-                  // 3. Valid states:
-                  //    - Content only (no tools): Normal text response
-                  //    - Content + tools: Response with tool usage (most common)
-                  //    - Tools only: Tool-only response (valid, no error)
-                  //    - Neither: Error state (LLM bug or streaming failure)
-
-                  // Check if content has substance (after removing [Using ...] markers)
-                  // Remove markers and collapse all whitespace (including Unicode nbsp, zero-width)
-                  const contentWithoutMarkers = message.content
-                    .replace(/\[Using [^\]]+\.\.\.\]\n*/g, '')
-                    .trim()
-                    .replace(/\s+/g, '');  // Collapse all whitespace
-
-                  const hasContent = contentWithoutMarkers.length > 0;
-
-                  // Error: Neither content nor tools (shouldn't happen, but defensive)
-                  // Only show if NOT currently processing (no active agent)
-                  if (!isUser && !hasContent && !hasToolCalls && !message.agentProgress?.currentAgent) {
+                  // Empty response check — only when NOT currently processing
+                  const isStillStreaming = message.agentProgress?.isStreaming || message.agentProgress?.currentAgent;
+                  const hasActiveTools = message.agentProgress?.activeTools?.some(t => t.status === 'running');
+                  const hasThinkingActivity = !!message.thinkingContent;
+                  if (!isUser && !hasContent && !hasToolCalls && !isStillStreaming && !hasActiveTools && !hasThinkingActivity) {
                     return (
                       <div className={cn(
                         'px-3 py-2 rounded',
@@ -329,99 +357,21 @@ function ChatMessageInner({
                         'text-accent-700 dark:text-accent-300',
                         'text-sm italic'
                       )}>
-                        ⚠️ {t('chat.emptyResponse')}
+                        {t('chat.emptyResponse')}
                       </div>
                     );
                   }
 
-                  // Inline tool display parsing strategy
-                  //
-                  // Format: Assistant response contains "[Using tool_name...]" markers where tools were called
-                  // Goal: Split text around markers and insert actual ToolCallDisplay components inline
-                  //
-                  // Regex: /\[Using ([^\]]+)\.\.\.\]\n*/g
-                  //   - [Using ...] - Literal marker format
-                  //   - ([^\]]+) - Capture group: tool name (any chars except ])
-                  //   - \.\.\.\] - Literal "...]"
-                  //   - \n* - Optional trailing newlines (normalize whitespace)
-                  //
-                  // Matching strategy: Match markers by tool NAME (not ID) because:
-                  //   1. Markers are inserted during streaming before we have tool IDs
-                  //   2. Multiple calls to same tool must be matched in order (usedToolCallIndices tracking)
-                  //   3. If tool call missing for marker, we skip silently (defensive - shouldn't happen)
-                  const toolMarkerRegex = /\[Using ([^\]]+)\.\.\.\]\n*/g;
-                  const parts: React.JSX.Element[] = [];
-                  let lastIndex = 0;
-                  let match;
-
-                  // Track matched tool calls to handle duplicate tool names (e.g., search called twice)
-                  const usedToolCallIndices = new Set<number>();
-
-                  while ((match = toolMarkerRegex.exec(processedContent)) !== null) {
-                    // Add text before the marker
-                    if (match.index > lastIndex) {
-                      const textBefore = processedContent.substring(lastIndex, match.index);
-                      parts.push(
-                        <ReactMarkdown
-                          key={`text-${lastIndex}`}
-                          remarkPlugins={[remarkGfm]}
-                          rehypePlugins={[rehypeRaw, rehypeHighlight]}
-                          components={markdownComponents}
-                        >
-                          {textBefore}
-                        </ReactMarkdown>
-                      );
-                    }
-
-                    // Add tool call display - find first unused tool call with matching name
-                    const toolName = match[1];
-                    const toolCallIndex = message.toolCalls?.findIndex(
-                      (tc, idx) => tc.name === toolName && !usedToolCallIndices.has(idx)
-                    );
-
-                    if (toolCallIndex !== undefined && toolCallIndex >= 0 && message.toolCalls) {
-                      const toolCall = message.toolCalls[toolCallIndex];
-                      usedToolCallIndices.add(toolCallIndex);
-
-                      parts.push(
-                        <div key={`tool-${toolCall.id}`} className="my-3">
-                          <ToolCallDisplay toolCall={toolCall} />
-                        </div>
-                      );
-                    }
-
-                    lastIndex = match.index + match[0].length;
-                  }
-
-                  // Add remaining text after last marker
-                  if (lastIndex < processedContent.length) {
-                    const textAfter = processedContent.substring(lastIndex);
-                    parts.push(
-                      <ReactMarkdown
-                        key={`text-${lastIndex}`}
-                        remarkPlugins={[remarkGfm]}
-                        rehypePlugins={[rehypeRaw, rehypeHighlight]}
-                        components={markdownComponents}
-                      >
-                        {textAfter}
-                      </ReactMarkdown>
-                    );
-                  }
-
-                  // If no markers found, render with citation support
-                  if (parts.length === 0) {
-                    return (
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        rehypePlugins={[rehypeRaw, rehypeHighlight]}
-                        components={markdownComponents}
-                      >
-                        {processedContent}
-                      </ReactMarkdown>
-                    );
-                  }
-
-                  return <>{parts}</>;
+                  // Render clean markdown (tool calls shown in thinking stream, not here)
+                  return (
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      rehypePlugins={[rehypeRaw, rehypeHighlight]}
+                      components={markdownComponents}
+                    >
+                      {cleanedContent}
+                    </ReactMarkdown>
+                  );
                 })()}
               </div>
             </>

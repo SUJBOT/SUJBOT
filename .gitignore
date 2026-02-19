@@ -170,6 +170,7 @@ extraction_dataset/TODO.md
 # -----------------------------------------------------------------------------
 # NOTE: CLAUDE.md is INTENTIONALLY tracked - it contains project-specific instructions
 .claude/
+.mcp.json
 CODEX*
 .codex/
 

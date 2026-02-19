@@ -1,4 +1,61 @@
-# Changelog — 13.–17. února 2026
+# Changelog — 13.–19. února 2026
+
+## 24. Fix empty response with local_llm tool calling + 30B model restoration (19. února 2026)
+
+### Bug fix: "Model returned empty response" when agent uses tools (local variant)
+- **Root cause**: `ThinkTagStreamParser` emitted `text_delta: '\n\n'` between `</think>` and tool calls. This whitespace artifact prematurely cleared `agentProgress.currentAgent` in the frontend, triggering the "empty response" error display for the entire duration of tool execution (~2-3 minutes).
+- **Backend fix** (`runner.py`): Added `text_delta_pending` buffer in `_stream_llm_iteration()`. Leading whitespace after `</think>` is buffered and only emitted when substantive (non-whitespace) content arrives. Whitespace-only text before tool calls is silently discarded.
+- **Frontend fix** (`useChat.ts`, `ChatMessage.tsx`): `text_delta` handler no longer sets `isStreaming=false` — deferred to `done` event. Empty response check now also considers `agentProgress.isStreaming` and active tools.
+- **Missing event** (`agent_adapter.py`): Added `tool_calls_summary` SSE event (was documented but never implemented). Frontend `hasToolCalls` now correctly reflects tool usage.
+
+### 30B model restoration
+- gx10-eb6e was running francji1's 235B AWQ model (stuck at NCCL init, needed TP=2 across 2 nodes). Restored Qwen3-VL-30B-A3B-Thinking with optimized flags + `--enable-auto-tool-choice --tool-call-parser hermes` for Hermes-style tool calling.
+- Config reverted: `local` variant → `qwen3-vl-30b-local` (was briefly pointing to 235B).
+
+### Re-embedding with local Qwen3-VL-Embedding-8B
+- Completed full re-embedding of 517 VL pages with local embedder (4096-dim, gx10-fa34).
+- Embedding server fixes: correct model class (`AutoModelForImageTextToText`), system instruction, last-token pooling, BF16→float32 conversion.
+- Search quality verified: same-section 0.60-0.80, same-document 0.40-0.60, cross-document 0.25-0.45.
+
+## 23. vLLM Throughput Optimization — 55% decode speedup (19. února 2026)
+
+### Production vLLM (gx10-eb6e) flag changes
+- `--max-model-len`: 262144 → **131072** (doubles KV cache from ~256K to 512K tokens, concurrency 1.97x → 3.91x)
+- `--max-num-batched-tokens`: 2048 (default) → **8192** (fewer prefill chunks for long RAG prompts)
+- `--max-num-seqs`: 4 → **8** (more scheduling flexibility)
+- `--gpu-memory-utilization`: unchanged at 0.92 (0.95 exceeds free memory on unified arch)
+
+### Benchmark results (baseline → optimized)
+- **Decode throughput**: 14.0 → 21.7 tok/s (+55%)
+- **TTFT**: 0.25 → 0.21s (−14%)
+- **E2E (text_only)**: 52.4 → 26.6s (−49%)
+- **E2E (rag_5pages)**: 101.4 → 42.8s (−58%)
+- **Think ratio**: ~33% of tokens wasted on `<think>` blocks (unchanged, Qwen3 behavior)
+
+### New scripts
+- **`scripts/vllm_benchmark.py`**: Streaming benchmark measuring TTFT, decode throughput, e2e latency. 4 profiles (text_only, rag_5pages, rag_8pages, tool_call). Supports A/B comparison between endpoints.
+
+## 22. Local Models on GB10 (DGX Spark) — zero API cost inference (18. února 2026)
+
+### LLM Provider: local_llm
+- **`DeepInfraProvider`**: Added `base_url` parameter for custom OpenAI-compatible endpoints (llama.cpp, vLLM). API key not required in local mode.
+- **Provider factory**: New `local_llm` provider branch routes to `LOCAL_LLM_BASE_URL` env var (default: `http://localhost:18080/v1`).
+- **Model registry**: Added `local_llm` to `LLM_PROVIDERS` frozenset. New `qwen3-vl-235b-local` model entry with `provider: local_llm`.
+- **Config**: `"local"` variant now points to `qwen3-vl-235b-local` (GB10 llama.cpp server) instead of DeepInfra cloud.
+
+### Local Embedding: LocalVLEmbedder
+- **`src/vl/local_embedder.py`**: Drop-in replacement for `JinaClient`. Same interface (`embed_query`, `embed_image`, `embed_pages`, `close`). Calls local vLLM `/v1/embeddings` endpoint via httpx.
+- **`create_vl_components()`**: New `"embedder"` config key — `"jina"` (default) or `"local"`. Embedder selection via `_create_embedder()` factory.
+- **Config**: `vl.embedder = "local"`, `vl.local_embedding_url`, `vl.local_embedding_model` keys added.
+
+### Infrastructure (GB10 DGX Spark)
+- 2x NVIDIA GB10 (120 GB unified memory each, aarch64, CUDA 13.0)
+- Qwen3-VL-235B-A22B-Instruct Q4_K_M (~142 GB) split across 2 nodes via llama.cpp RPC
+- Qwen3-VL-Embedding-8B served via vLLM on second node
+- SSH tunnels: `localhost:18080` (LLM), `localhost:18888` (embedding)
+
+### Scripts
+- **`scripts/reembed_vl_pages.py`**: Re-embed all VL pages with local or Jina embedder. Supports `--doc-id`, `--limit`, `--dry-run`, `--embedder local|jina`.
 
 ## 21. Codebase Audit — SSOT enforcement, dead code removal, PR review fixes (PR #33, 17. února 2026)
 

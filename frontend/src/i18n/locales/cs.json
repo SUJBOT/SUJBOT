@@ -72,7 +72,8 @@
     "spendingLimitTitle": "Dosažen limit výdajů",
     "spendingUsed": "Utraceno",
     "copyResponse": "Kopírovat odpověď",
-    "copied": "Zkopírováno!"
+    "copied": "Zkopírováno!",
+    "thinking": "Přemýšlím..."
   },
   "progress": {
     "planning": "Plánování",

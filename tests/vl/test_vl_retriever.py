@@ -38,13 +38,13 @@ class TestVLPageResult:
         result = VLPageResult(page_id="DOC_p001", document_id="DOC", page_number=1, score=1.0)
         assert result.score == 1.0
 
-    def test_negative_score_raises(self):
-        with pytest.raises(ValueError, match="score must be in"):
-            VLPageResult(page_id="DOC_p001", document_id="DOC", page_number=1, score=-0.1)
+    def test_negative_score_clamped(self):
+        result = VLPageResult(page_id="DOC_p001", document_id="DOC", page_number=1, score=-0.1)
+        assert result.score == 0.0
 
-    def test_score_above_one_raises(self):
-        with pytest.raises(ValueError, match="score must be in"):
-            VLPageResult(page_id="DOC_p001", document_id="DOC", page_number=1, score=1.01)
+    def test_score_above_one_clamped(self):
+        result = VLPageResult(page_id="DOC_p001", document_id="DOC", page_number=1, score=1.01)
+        assert result.score == 1.0
 
     def test_page_number_zero_raises(self):
         with pytest.raises(ValueError, match="page_number must be >= 1"):

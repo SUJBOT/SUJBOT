@@ -71,7 +71,8 @@
     "spendingLimitTitle": "Spending Limit Reached",
     "spendingUsed": "Used",
     "copyResponse": "Copy response",
-    "copied": "Copied!"
+    "copied": "Copied!",
+    "thinking": "Thinking..."
   },
   "progress": {
     "planning": "Planning",

@@ -180,7 +180,10 @@ class AgentAdapter:
         - tool_health: Tool status before query
         - progress: Workflow stage updates
         - tool_call: Tool execution events
-        - text_delta: Final answer text chunks
+        - thinking_delta: Thinking content from local LLM
+        - thinking_done: Thinking phase finished
+        - text_delta: Answer text chunks (live-streamed or chunked from final)
+        - tool_calls_summary: Summary of tools used
         - cost_summary: Cost breakdown
         - done: Stream completed
         - error: Error occurred
@@ -190,6 +193,7 @@ class AgentAdapter:
             conversation_id: Optional conversation ID
             user_id: User ID for loading agent variant preference
             messages: Conversation history
+            attachment_blocks: Multimodal content blocks from user attachments
 
         Yields:
             Dict containing event type and data
@@ -260,7 +264,9 @@ class AgentAdapter:
                 conversation_history=messages or [],
                 attachment_blocks=attachment_blocks,
             ):
-                if event.get("type") == "tool_call":
+                event_type = event.get("type")
+
+                if event_type == "tool_call":
                     yield {
                         "event": "tool_call",
                         "data": {
@@ -270,7 +276,29 @@ class AgentAdapter:
                     }
                     await asyncio.sleep(0)
 
-                elif event.get("type") == "final":
+                elif event_type == "thinking_delta":
+                    yield {
+                        "event": "thinking_delta",
+                        "data": {"content": event.get("content", "")},
+                    }
+                    await asyncio.sleep(0)
+
+                elif event_type == "thinking_done":
+                    yield {
+                        "event": "thinking_done",
+                        "data": {},
+                    }
+                    await asyncio.sleep(0)
+
+                elif event_type == "text_delta":
+                    # Live-streamed text from local_llm
+                    yield {
+                        "event": "text_delta",
+                        "data": {"content": event.get("content", "")},
+                    }
+                    await asyncio.sleep(0)
+
+                elif event_type == "final":
                     result = event
                     break
 
@@ -290,15 +318,16 @@ class AgentAdapter:
                 }
                 return
 
-            # Stream final answer as text chunks
-            final_answer = result.get("final_answer") or "No answer generated"
-            paragraphs = final_answer.split("\n\n")
+            # Stream final answer as text chunks (skip if already streamed live)
+            if not result.get("text_already_streamed"):
+                final_answer = result.get("final_answer") or "No answer generated"
+                paragraphs = final_answer.split("\n\n")
 
-            for i, paragraph in enumerate(paragraphs):
-                if paragraph.strip():
-                    chunk = paragraph + ("\n\n" if i < len(paragraphs) - 1 else "")
-                    yield {"event": "text_delta", "data": {"content": chunk}}
-                    await asyncio.sleep(0.05)
+                for i, paragraph in enumerate(paragraphs):
+                    if paragraph.strip():
+                        chunk = paragraph + ("\n\n" if i < len(paragraphs) - 1 else "")
+                        yield {"event": "text_delta", "data": {"content": chunk}}
+                        await asyncio.sleep(0.05)
 
             # Cost summary
             tracker = get_global_tracker()
@@ -332,13 +361,28 @@ class AgentAdapter:
             }
             await asyncio.sleep(0)
 
+            # Tool calls summary (if any tools were used)
+            tools_used = result.get("tools_used", [])
+            if tools_used:
+                yield {
+                    "event": "tool_calls_summary",
+                    "data": {
+                        "tool_calls": [
+                            {"name": tool_name, "success": True}
+                            for tool_name in tools_used
+                        ],
+                        "count": len(tools_used),
+                    },
+                }
+                await asyncio.sleep(0)
+
             # Signal completion
             yield {
                 "event": "done",
                 "data": {
                     "model": result.get("model", model),
                     "variant": variant,
-                    "tools_used": result.get("tools_used", []),
+                    "tools_used": tools_used,
                     "tool_call_count": result.get("tool_call_count", 0),
                     "iterations": result.get("iterations", 0),
                 },

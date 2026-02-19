@@ -564,6 +564,7 @@ export function useChat() {
           }
           else if (event.event === 'tool_call') {
             // Tool call event (running/completed/failed)
+            // Show tool activity in thinking stream instead of inline ToolCallDisplay
             if (streamState.currentMessage && streamState.currentMessage.agentProgress) {
               const { tool, status, timestamp } = event.data;
 
@@ -574,6 +575,10 @@ export function useChat() {
                   status,
                   timestamp
                 });
+                // Log to thinking stream
+                streamState.currentMessage.thinkingContent =
+                  (streamState.currentMessage.thinkingContent || '') + `▶ ${tool}\n`;
+                streamState.currentMessage.isThinking = true;
               } else if (status === 'completed' || status === 'failed') {
                 // Update status of existing tool
                 const toolIndex = streamState.currentMessage.agentProgress.activeTools.findIndex(
@@ -582,7 +587,66 @@ export function useChat() {
                 if (toolIndex >= 0) {
                   streamState.currentMessage.agentProgress.activeTools[toolIndex].status = status;
                 }
+                // Log to thinking stream
+                const icon = status === 'completed' ? '✓' : '✗';
+                streamState.currentMessage.thinkingContent =
+                  (streamState.currentMessage.thinkingContent || '') + `${icon} ${tool}\n`;
               }
+
+              // Update UI
+              setConversations((prev) =>
+                prev.map((c) => {
+                  if (c.id !== updatedConversation.id) return c;
+
+                  const messages = [...c.messages];
+                  const lastMsg = messages[messages.length - 1];
+
+                  if (lastMsg?.role === 'assistant') {
+                    messages[messages.length - 1] = { ...streamState.currentMessage! };
+                  } else {
+                    messages.push({ ...streamState.currentMessage! });
+                  }
+
+                  return { ...c, messages };
+                })
+              );
+            }
+          }
+          else if (event.event === 'thinking_delta') {
+            // Append thinking content (live from local LLM)
+            if (!streamState.currentMessage) {
+              console.warn('thinking_delta received but no currentMessage exists');
+            } else if (streamState.currentMessage) {
+              streamState.currentMessage.thinkingContent =
+                (streamState.currentMessage.thinkingContent || '') + event.data.content;
+              streamState.currentMessage.isThinking = true;
+
+              // Update UI
+              setConversations((prev) =>
+                prev.map((c) => {
+                  if (c.id !== updatedConversation.id) return c;
+
+                  const messages = [...c.messages];
+                  const lastMsg = messages[messages.length - 1];
+
+                  if (lastMsg?.role === 'assistant') {
+                    messages[messages.length - 1] = { ...streamState.currentMessage! };
+                  } else {
+                    messages.push({ ...streamState.currentMessage! });
+                  }
+
+                  return { ...c, messages };
+                })
+              );
+            }
+          }
+          else if (event.event === 'thinking_done') {
+            // Thinking phase finished
+            if (!streamState.currentMessage) {
+              console.warn('thinking_done received but no currentMessage exists');
+            } else if (streamState.currentMessage) {
+              streamState.currentMessage.isThinking = false;
+              // Keep thinkingContent for now; clear on first text_delta
 
               // Update UI
               setConversations((prev) =>
@@ -606,14 +670,17 @@ export function useChat() {
           else if (event.event === 'text_delta') {
             // Append text delta
             if (streamState.currentMessage) {
-              // Transition to synthesizing phase when text starts arriving
-              if (streamState.currentMessage.agentProgress && streamState.currentMessage.agentProgress.currentAgent && streamState.currentMessage.agentProgress.currentAgent !== 'synthesizing') {
-                streamState.currentMessage.agentProgress.completedAgents.push(
-                  streamState.currentMessage.agentProgress.currentAgent
-                );
-                streamState.currentMessage.agentProgress.currentAgent = 'synthesizing';
-                streamState.currentMessage.agentProgress.currentMessage = null;
-                streamState.currentMessage.agentProgress.activeTools = [];
+              // Keep thinkingContent (shown as collapsible bar) but mark thinking as done
+              if (streamState.currentMessage.isThinking) {
+                streamState.currentMessage.isThinking = false;
+              }
+
+              // Hide progress indicator only when we have substantive text content
+              // (not just whitespace artifacts from think-tag transitions)
+              const hasSubstantiveContent = (streamState.currentMessage.content + event.data.content).trim().length > 0;
+              if (hasSubstantiveContent && streamState.currentMessage.agentProgress && streamState.currentMessage.agentProgress.currentAgent) {
+                streamState.currentMessage.agentProgress.currentAgent = null;
+                // Keep isStreaming=true — it's cleared by the 'done' event
               }
 
               streamState.currentMessage.content += event.data.content;
@@ -685,13 +752,13 @@ export function useChat() {
             // Tool calls summary from backend
             if (streamState.currentMessage && event.data.tool_calls) {
               // Convert backend tool calls to frontend format
-              streamState.currentMessage.toolCalls = event.data.tool_calls.map((tc: any) => ({
-                id: tc.id,
+              streamState.currentMessage.toolCalls = event.data.tool_calls.map((tc: any, idx: number) => ({
+                id: tc.id || `summary-${idx}`,
                 name: tc.name,
-                input: tc.input,
+                input: tc.input || {},
                 result: tc.result,
                 executionTimeMs: tc.executionTimeMs,
-                success: tc.success,
+                success: tc.success ?? true,
                 status: tc.success === false ? 'failed' as const : 'completed' as const,
                 explicitParams: tc.explicitParams,
               }));
@@ -773,6 +840,10 @@ export function useChat() {
             if (streamState.currentMessage?.agentProgress) {
               streamState.currentMessage.agentProgress.isStreaming = false;
               streamState.currentMessage.agentProgress.currentAgent = null;
+            }
+            // Keep thinkingContent for collapsible display, just ensure isThinking is false
+            if (streamState.currentMessage) {
+              streamState.currentMessage.isThinking = false;
             }
             // Capture run_id for feedback correlation (LangSmith trace ID)
             if (streamState.currentMessage && event.data?.run_id) {
