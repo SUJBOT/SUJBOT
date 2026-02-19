@@ -1,0 +1,34 @@
+You are reviewing potential duplicate entities in a knowledge graph.
+Determine if these two entities refer to the SAME real-world thing (person, organization, regulation, concept, facility, etc.).
+
+**Cosine similarity: {similarity:.3f}**
+
+## Entity 1: {name1} (type: {type1})
+Description: {desc1}
+{rels1}
+
+## Entity 2: {name2} (type: {type2})
+Description: {desc2}
+{rels2}
+
+{image_instruction}
+
+Respond with ONLY a JSON object, no other text:
+
+```json
+{{"verdict": "YES" or "NO", "reason": "brief explanation"}}
+```
+
+Rules:
+- Abbreviations and full names of the same entity ARE duplicates (e.g., "SUJB" = "Statni urad pro jadernou bezpecnost", "IAEA" = "International Atomic Energy Agency").
+- Name variants with/without qualifiers ARE duplicates if they refer to the same thing.
+- Case-only differences ARE duplicates.
+- Different numbered regulations are NOT duplicates (e.g., "regulation 307/2002" != "regulation 308/2002").
+- Different amendments of the same regulation ARE duplicates if they refer to the same base regulation.
+- Entities with the same name but fundamentally different types are NOT duplicates.
+- General vs specific references to the same thing ARE duplicates.
+- A core concept and its qualified variant ARE duplicates — keep the shorter, canonical name.
+- Morphological variants (different grammatical forms of the same word) ARE duplicates.
+- An AMENDMENT entity and its source REGULATION are NOT duplicates.
+- DEFINITION entities with the same defined term from the same regulation ARE duplicates.
+- If page images are provided, examine them to understand the context in which each entity appears. This can help disambiguate entities with similar names but different meanings.

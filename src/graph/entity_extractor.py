@@ -30,10 +30,12 @@ class EntityExtractor:
     Extracts entities and relationships from page images via multimodal LLM.
 
     Uses the same provider interface as VLIndexingPipeline summary generation.
+    Supports extra_llm_kwargs for provider-specific options (e.g. vLLM thinking).
     """
 
-    def __init__(self, provider: "BaseProvider"):
+    def __init__(self, provider: "BaseProvider", extra_llm_kwargs: Dict = None):
         self.provider = provider
+        self._extra_llm_kwargs = extra_llm_kwargs or {}
         if not _PROMPT_PATH.exists():
             raise ConfigurationError(
                 f"Entity extraction prompt not found: {_PROMPT_PATH}",
@@ -83,6 +85,7 @@ class EntityExtractor:
                 system="",
                 max_tokens=8000,
                 temperature=0.0,
+                **self._extra_llm_kwargs,
             )
         except (KeyboardInterrupt, SystemExit, MemoryError):
             raise

@@ -50,6 +50,18 @@ class WebSearchTool(BaseTool):
     input_schema = WebSearchInput
 
     def execute_impl(self, query: str) -> ToolResult:
+        # Check if web search is enabled in config
+        if self.config and not getattr(self.config, "web_search_enabled", True):
+            return ToolResult(
+                success=False,
+                data=None,
+                error=(
+                    "Web search is currently disabled. "
+                    "Tell the user you cannot search the internet right now. "
+                    "IMPORTANT: Respond in the SAME language as the user's query."
+                ),
+            )
+
         # Get API key
         api_key = os.getenv("GOOGLE_API_KEY", "")
         if not api_key:
@@ -77,7 +89,11 @@ class WebSearchTool(BaseTool):
             return ToolResult(
                 success=False,
                 data=None,
-                error=f"Web search failed: {type(e).__name__}: {e}",
+                error=(
+                    f"Web search failed: {type(e).__name__}: {e}. "
+                    "Tell the user you could not complete the web search. "
+                    "IMPORTANT: Respond in the SAME language as the user's query."
+                ),
             )
 
         # Parse grounded response

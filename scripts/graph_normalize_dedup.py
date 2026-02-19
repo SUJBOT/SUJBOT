@@ -10,6 +10,7 @@ Usage:
     uv run python scripts/graph_normalize_dedup.py
 """
 
+import argparse
 import asyncio
 import logging
 import os
@@ -611,7 +612,7 @@ async def phase2_trigram_llm_dedup(pool: asyncpg.Pool, provider) -> Dict:
     return stats
 
 
-async def main():
+async def async_main(args):
     db_url = os.getenv("DATABASE_URL")
     if not db_url:
         logger.error("DATABASE_URL not set")
@@ -626,7 +627,22 @@ async def main():
     logger.info(SEP)
     logger.info("Setting up LLM provider for Phases 1b and 2...")
     from src.agent.providers.factory import create_provider
-    provider = create_provider("claude-haiku-4-5-20251001")
+
+    if args.use_local:
+        from src.config import get_config
+        config = get_config()
+        vl_idx_cfg = config.vl_indexing
+        if not vl_idx_cfg:
+            logger.error("--use-local requires vl_indexing section in config.json")
+            sys.exit(1)
+        model = vl_idx_cfg.dedup.model
+    elif args.model:
+        model = args.model
+    else:
+        model = "claude-haiku-4-5-20251001"
+
+    logger.info(f"Using model: {model}")
+    provider = create_provider(model)
 
     # Phase 1b: Substring containment + LLM
     stats1b = await phase1b_substring_dedup(pool, provider)
@@ -658,5 +674,22 @@ async def main():
     await pool.close()
 
 
+def main():
+    parser = argparse.ArgumentParser(description="Entity deduplication (normalization + trigram + LLM)")
+    parser.add_argument(
+        "--use-local",
+        action="store_true",
+        help="Use local model from config.json vl_indexing.dedup section",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="Model to use for LLM arbitration (default: claude-haiku-4-5-20251001)",
+    )
+    args = parser.parse_args()
+    asyncio.run(async_main(args))
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

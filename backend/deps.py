@@ -91,6 +91,7 @@ def set_vl_components(
     community_detector: Any = None,
     community_summarizer: Any = None,
     graph_embedder: Any = None,
+    dedup_provider: Any = None,
 ) -> None:
     """Set VL components for document management (called from main.py lifespan)."""
     _vl_components["jina_client"] = jina_client
@@ -102,6 +103,7 @@ def set_vl_components(
     _vl_components["community_detector"] = community_detector
     _vl_components["community_summarizer"] = community_summarizer
     _vl_components["graph_embedder"] = graph_embedder
+    _vl_components["dedup_provider"] = dedup_provider
 
 
 def get_vl_components() -> Dict[str, Any]:

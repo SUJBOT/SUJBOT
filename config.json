@@ -55,7 +55,7 @@
     "compliance_threshold": 0.7,
     "web_search": {
       "enabled": true,
-      "model": "gemini-2.0-flash"
+      "model": "gemini-3-flash-preview"
     },
     "adaptive_retrieval": {
       "enabled": true,
@@ -420,6 +420,36 @@
       }
     },
     "default_variant": "remote"
+  },
+  "vl_indexing": {
+    "summarization": {
+      "model": "qwen3-vl-8b-local",
+      "max_tokens": 500,
+      "temperature": 0.0
+    },
+    "entity_extraction": {
+      "model": "qwen3-vl-8b-local",
+      "max_tokens": 8000,
+      "temperature": 0.0,
+      "enable_thinking": false,
+      "thinking_budget": 0
+    },
+    "community_summarization": {
+      "model": "qwen3-vl-8b-local",
+      "max_tokens": 300,
+      "temperature": 0.0
+    },
+    "dedup": {
+      "model": "qwen3-vl-8b-local",
+      "auto_merge_threshold": 0.95,
+      "llm_threshold": 0.75,
+      "use_page_images": true,
+      "max_images_per_entity": 2
+    },
+    "concurrency": {
+      "max_30b_indexing_slots": 2,
+      "max_8b_indexing_slots": 8
+    }
   },
   "security_monitoring": {
     "enabled": true,

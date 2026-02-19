@@ -5,7 +5,9 @@ Extracts entities and relationships from page images using multimodal LLM,
 then runs Leiden community detection and generates community summaries.
 
 Usage:
-    uv run python scripts/graph_rag_build.py                     # full build
+    uv run python scripts/graph_rag_build.py                     # full build (Haiku)
+    uv run python scripts/graph_rag_build.py --use-local         # full build with local models
+    uv run python scripts/graph_rag_build.py --use-local --dedup # local + two-threshold dedup
     uv run python scripts/graph_rag_build.py --limit 10          # test run (10 pages)
     uv run python scripts/graph_rag_build.py --doc-id BZ_VR1     # single document
     uv run python scripts/graph_rag_build.py --skip-extraction   # re-run community detection + summarization
@@ -36,8 +38,12 @@ from backend.constants import get_variant_model
 from src.agent.providers.factory import create_provider
 from src.config import get_config
 from src.graph import create_graph_components
+from src.graph.community_detector import CommunityDetector
+from src.graph.community_summarizer import CommunitySummarizer
 from src.graph.embedder import GraphEmbedder
+from src.graph.entity_extractor import EntityExtractor
 from src.graph.post_processor import rebuild_graph_communities
+from src.graph.storage import GraphStorageAdapter
 from src.storage.postgres_adapter import PostgresVectorStoreAdapter
 from src.vl.page_store import PageStore
 
@@ -206,16 +212,12 @@ async def async_main(args):
     """Main async entry point."""
     config = get_config()
     vl_config = config.vl
+    vl_idx_cfg = config.vl_indexing
 
     db_url = os.getenv("DATABASE_URL")
     if not db_url:
         logger.error("DATABASE_URL not set in .env")
         sys.exit(1)
-
-    # Create provider (--model overrides --variant)
-    model = args.model or get_variant_model(args.variant)
-    logger.info(f"Using model: {model}")
-    provider = create_provider(model)
 
     # Create vector store (to read pages)
     dimensions = vl_config.dimensions if vl_config else 2048
@@ -233,11 +235,52 @@ async def async_main(args):
         image_format=vl_config.page_image_format if vl_config else "png",
     )
 
-    # Create graph components (shares vector_store pool)
     graph_embedder = GraphEmbedder()
-    graph_storage, entity_extractor, community_detector, community_summarizer = (
-        create_graph_components(pool=vector_store.pool, provider=provider, embedder=graph_embedder)
-    )
+
+    if args.use_local and vl_idx_cfg:
+        # Local mode: separate providers per task from config.json vl_indexing
+        extraction_model = vl_idx_cfg.entity_extraction.model
+        community_model = vl_idx_cfg.community_summarization.model
+        dedup_model = vl_idx_cfg.dedup.model
+
+        logger.info(f"Local mode: extraction={extraction_model}, community={community_model}, dedup={dedup_model}")
+
+        extraction_provider = create_provider(extraction_model)
+        community_provider = create_provider(community_model)
+        dedup_provider = create_provider(dedup_model)
+
+        # Build thinking kwargs for entity extraction
+        extra_kwargs = {}
+        if vl_idx_cfg.entity_extraction.enable_thinking:
+            extra_kwargs["extra_body"] = {
+                "chat_template_kwargs": {"enable_thinking": True},
+                "thinking_budget_tokens": vl_idx_cfg.entity_extraction.thinking_budget,
+            }
+
+        # Create graph components manually (separate providers)
+        graph_storage = GraphStorageAdapter(pool=vector_store.pool, embedder=graph_embedder)
+        entity_extractor = EntityExtractor(extraction_provider, extra_llm_kwargs=extra_kwargs)
+        community_detector = CommunityDetector()
+        community_summarizer = CommunitySummarizer(community_provider)
+
+        # Resolve thresholds: CLI > config > defaults
+        auto_merge = args.auto_merge_threshold or vl_idx_cfg.dedup.auto_merge_threshold
+        llm_thresh = args.llm_threshold or vl_idx_cfg.dedup.llm_threshold
+    elif args.use_local and not vl_idx_cfg:
+        logger.error("--use-local requires vl_indexing section in config.json")
+        sys.exit(1)
+    else:
+        # Remote mode: single provider for all tasks
+        model = args.model or get_variant_model(args.variant)
+        logger.info(f"Using model: {model}")
+        provider = create_provider(model)
+
+        graph_storage, entity_extractor, community_detector, community_summarizer = (
+            create_graph_components(pool=vector_store.pool, provider=provider, embedder=graph_embedder)
+        )
+        dedup_provider = provider
+        auto_merge = args.auto_merge_threshold or 0.95
+        llm_thresh = args.llm_threshold or 0.75
 
     try:
         # Phase 1: Extract entities
@@ -252,9 +295,12 @@ async def async_main(args):
                 community_detector=community_detector,
                 community_summarizer=community_summarizer,
                 graph_embedder=graph_embedder,
-                llm_provider=provider,
+                llm_provider=dedup_provider,
+                dedup_provider=dedup_provider,
+                page_store=page_store,
                 enable_dedup=True,
-                semantic_threshold=args.dedup_threshold,
+                auto_merge_threshold=auto_merge,
+                llm_threshold=llm_thresh,
             )
             logger.info(f"Post-processor result: {stats}")
         elif not args.skip_communities and not args.dedup_only:
@@ -284,6 +330,11 @@ def main():
         help="Model to use (overrides --variant, default: claude-haiku-4-5-20251001)",
     )
     parser.add_argument(
+        "--use-local",
+        action="store_true",
+        help="Use local models from config.json vl_indexing section (30B extraction, 8B community/dedup)",
+    )
+    parser.add_argument(
         "--skip-extraction",
         action="store_true",
         help="Skip entity extraction (re-run communities only)",
@@ -299,6 +350,18 @@ def main():
         type=float,
         default=0.85,
         help="Cosine similarity threshold for semantic dedup (default: 0.85)",
+    )
+    parser.add_argument(
+        "--auto-merge-threshold",
+        type=float,
+        default=None,
+        help="Above this cosine similarity, auto-merge without LLM (default: from config or 0.95)",
+    )
+    parser.add_argument(
+        "--llm-threshold",
+        type=float,
+        default=None,
+        help="Below this cosine similarity, skip dedup entirely (default: from config or 0.75)",
     )
     parser.add_argument(
         "--dedup-only",

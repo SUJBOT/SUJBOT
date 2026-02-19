@@ -308,7 +308,7 @@ class AgentAdapter:
                 stream_progress=True,
                 conversation_history=messages or [],
                 attachment_blocks=attachment_blocks,
-                disabled_tools={"web_search"} if not web_search_enabled else None,
+                disabled_tools=None,
             ):
                 event_type = event.get("type")
 

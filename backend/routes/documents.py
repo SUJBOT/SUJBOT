@@ -121,6 +121,8 @@ def _schedule_graph_rebuild(document_id: str) -> None:
                 community_summarizer=_get_vl_components_from_deps().get("community_summarizer"),
                 graph_embedder=_get_vl_components_from_deps().get("graph_embedder"),
                 llm_provider=_get_vl_components_from_deps().get("summary_provider"),
+                dedup_provider=_get_vl_components_from_deps().get("dedup_provider"),
+                page_store=_get_vl_components_from_deps().get("page_store"),
                 document_id=document_id,
             )
         )
@@ -244,6 +246,8 @@ async def index_document_pipeline(
 
     async def summarize_task() -> tuple[dict, str | None]:
         """Summarize pages via LLM. Returns (summaries_dict, model_name)."""
+        from src.utils.indexing_semaphore import get_indexing_semaphore
+
         sums: dict = {}
         try:
             prompt_path = (
@@ -262,6 +266,8 @@ async def index_document_pipeline(
             )
             return sums, None
 
+        sem = get_indexing_semaphore()
+        provider_name = summary_provider.get_provider_name()
         max_consecutive_failures = 3
         consecutive_failures = 0
 
@@ -284,14 +290,15 @@ async def index_document_pipeline(
                         ],
                     }
                 ]
-                response = await asyncio.to_thread(
-                    summary_provider.create_message,
-                    messages=messages,
-                    tools=[],
-                    system="",
-                    max_tokens=500,
-                    temperature=0.0,
-                )
+                async with sem.for_provider(provider_name):
+                    response = await asyncio.to_thread(
+                        summary_provider.create_message,
+                        messages=messages,
+                        tools=[],
+                        system="",
+                        max_tokens=500,
+                        temperature=0.0,
+                    )
                 text = response.text.strip() if response.text else None
                 if text:
                     sums[page_id] = text
@@ -419,14 +426,19 @@ async def index_document_pipeline(
 
     # Entity extraction (sequential, after store — FK on vl_pages)
     if entity_extractor and graph_storage:
+        from src.utils.indexing_semaphore import get_indexing_semaphore
+
+        ext_sem = get_indexing_semaphore()
+        ext_provider_name = entity_extractor.provider.get_provider_name()
         max_consecutive_failures = 3
         consecutive_failures = 0
 
         for i, page_id in enumerate(page_ids):
             try:
-                result = await asyncio.to_thread(
-                    entity_extractor.extract_from_page, page_id, page_store
-                )
+                async with ext_sem.for_provider(ext_provider_name):
+                    result = await asyncio.to_thread(
+                        entity_extractor.extract_from_page, page_id, page_store
+                    )
                 entities = result.get("entities", [])
                 relationships = result.get("relationships", [])
 

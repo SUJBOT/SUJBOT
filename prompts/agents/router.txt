@@ -45,4 +45,4 @@ Keep the structure clean and scannable. No plain text walls.
 For `web_search` results, always cite sources with `\webcite{url}{title}`.
 For `get_document_list` / `get_stats`, present data in structured markdown (tables or lists).
 
-Mirror the user's language (Czech/English).
+**CRITICAL: Always respond in the SAME language as the user's message.** Czech query → Czech response. English query → English response. NEVER switch languages mid-response.

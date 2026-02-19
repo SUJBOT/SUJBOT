@@ -176,20 +176,27 @@ async def test_exact_dedup_handles_transaction_error():
 
 
 @pytest.mark.anyio
-async def test_semantic_dedup_no_provider():
-    """Without LLM provider, semantic dedup is skipped."""
+async def test_semantic_dedup_no_candidates():
+    """When no candidates found, returns zero stats."""
     adapter = _make_adapter_with_mock_pool()
 
+    conn_mock = AsyncMock()
+    conn_mock.fetch = AsyncMock(return_value=[])
+    acq = AsyncMock()
+    acq.__aenter__ = AsyncMock(return_value=conn_mock)
+    acq.__aexit__ = AsyncMock(return_value=False)
+    adapter.pool.acquire = MagicMock(return_value=acq)
+
     result = await adapter.async_deduplicate_semantic(
-        similarity_threshold=0.85,
         llm_provider=None,
     )
     assert result["candidates_found"] == 0
+    assert result["auto_merged"] == 0
 
 
 @pytest.mark.anyio
-async def test_semantic_dedup_no_candidates():
-    """When no candidates above threshold, returns zero stats."""
+async def test_semantic_dedup_no_candidates_with_provider():
+    """When no candidates above threshold with LLM provider, returns zero stats."""
     adapter = _make_adapter_with_mock_pool()
 
     conn_mock = AsyncMock()
@@ -201,7 +208,6 @@ async def test_semantic_dedup_no_candidates():
 
     provider = MagicMock()
     result = await adapter.async_deduplicate_semantic(
-        similarity_threshold=0.85,
         llm_provider=provider,
     )
     assert result["candidates_found"] == 0
@@ -269,7 +275,6 @@ async def test_semantic_dedup_llm_confirms():
 
     # The prompt file exists at prompts/graph_entity_dedup.txt in the project root
     result = await adapter.async_deduplicate_semantic(
-        similarity_threshold=0.85,
         llm_provider=provider,
     )
 
@@ -312,7 +317,6 @@ async def test_semantic_dedup_llm_rejects():
     provider.create_message = MagicMock(return_value=Response())
 
     result = await adapter.async_deduplicate_semantic(
-        similarity_threshold=0.85,
         llm_provider=provider,
     )
 
@@ -402,7 +406,6 @@ async def test_semantic_dedup_transitive_closure():
     provider.create_message = MagicMock(return_value=Response())
 
     result = await adapter.async_deduplicate_semantic(
-        similarity_threshold=0.85,
         llm_provider=provider,
     )
 

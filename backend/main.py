@@ -224,18 +224,43 @@ async def lifespan(app: FastAPI):
                     pool_size=5,
                     dimensions=vl_cfg.dimensions,
                 )
-                # Create summary provider for page summarization during upload
+                # Create per-task providers for indexing pipeline
+                # vl_indexing config selects local models ($0) or falls back to remote
                 summary_provider = None
+                extraction_provider = None
+                community_provider = None
+                dedup_provider = None
                 try:
                     from backend.constants import get_variant_model
                     from src.agent.providers.factory import create_provider
 
-                    summary_model = get_variant_model("remote")
-                    summary_provider = create_provider(summary_model)
-                    logger.info(f"✓ Summary provider initialized: {summary_model}")
+                    vl_idx_cfg = config.vl_indexing
+                    if vl_idx_cfg:
+                        summary_provider = create_provider(vl_idx_cfg.summarization.model)
+                        extraction_provider = create_provider(vl_idx_cfg.entity_extraction.model)
+                        community_provider = create_provider(
+                            vl_idx_cfg.community_summarization.model
+                        )
+                        dedup_provider = create_provider(vl_idx_cfg.dedup.model)
+                        logger.info(
+                            "✓ Per-task indexing providers: summary=%s, extraction=%s, "
+                            "community=%s, dedup=%s",
+                            vl_idx_cfg.summarization.model,
+                            vl_idx_cfg.entity_extraction.model,
+                            vl_idx_cfg.community_summarization.model,
+                            vl_idx_cfg.dedup.model,
+                        )
+                    else:
+                        # Fallback: single remote provider (backward compat)
+                        fallback_model = get_variant_model("remote")
+                        summary_provider = create_provider(fallback_model)
+                        extraction_provider = summary_provider
+                        community_provider = summary_provider
+                        dedup_provider = summary_provider
+                        logger.info(f"✓ Indexing providers (fallback): {fallback_model}")
                 except Exception as e:
                     logger.error(
-                        f"Summary provider init failed (summaries disabled): {e}", exc_info=True
+                        f"Indexing provider init failed (summaries disabled): {e}", exc_info=True
                     )
 
                 # Initialize VL vector store pool (needed before sharing with graph storage)
@@ -264,12 +289,23 @@ async def lifespan(app: FastAPI):
                         graph_storage = GraphStorageAdapter(
                             pool=vl_vector_store.pool, embedder=graph_embedder
                         )
-                        if summary_provider and EntityExtractor is not None:
-                            entity_extractor = EntityExtractor(summary_provider)
-                            logger.info("✓ Graph components initialized for entity extraction")
+                        ext_prov = extraction_provider or summary_provider
+                        if ext_prov and EntityExtractor is not None:
+                            # Build extra kwargs for thinking support
+                            extra_llm_kwargs = {}
+                            if vl_idx_cfg and vl_idx_cfg.entity_extraction.enable_thinking:
+                                extra_llm_kwargs["extra_body"] = {
+                                    "chat_template_kwargs": {"enable_thinking": True},
+                                    "thinking_budget_tokens": vl_idx_cfg.entity_extraction.thinking_budget,
+                                }
+                            entity_extractor = EntityExtractor(
+                                ext_prov, extra_llm_kwargs=extra_llm_kwargs
+                            )
+                            logger.info("✓ Graph entity extractor initialized (thinking=%s)",
+                                        bool(extra_llm_kwargs))
                         else:
                             logger.info(
-                                "Graph storage initialized (entity extractor requires summary provider)"
+                                "Graph storage initialized (entity extractor requires provider)"
                             )
 
                         # Create community detection + summarization components
@@ -277,8 +313,9 @@ async def lifespan(app: FastAPI):
                         from src.graph.community_summarizer import CommunitySummarizer
 
                         community_detector = CommunityDetector()
+                        comm_prov = community_provider or summary_provider
                         community_summarizer = (
-                            CommunitySummarizer(summary_provider) if summary_provider else None
+                            CommunitySummarizer(comm_prov) if comm_prov else None
                         )
                         logger.info(
                             "✓ Graph community components initialized "
@@ -287,6 +324,20 @@ async def lifespan(app: FastAPI):
                         )
                     except Exception as e:
                         logger.error(f"Graph component initialization failed: {e}", exc_info=True)
+
+                # Initialize indexing semaphore from config
+                from src.utils.indexing_semaphore import (
+                    IndexingSemaphore,
+                    set_indexing_semaphore,
+                )
+
+                if vl_idx_cfg:
+                    set_indexing_semaphore(
+                        IndexingSemaphore(
+                            max_30b=vl_idx_cfg.concurrency.max_30b_indexing_slots,
+                            max_8b=vl_idx_cfg.concurrency.max_8b_indexing_slots,
+                        )
+                    )
 
                 set_vl_components(
                     jina_client,
@@ -298,6 +349,7 @@ async def lifespan(app: FastAPI):
                     community_detector=community_detector,
                     community_summarizer=community_summarizer,
                     graph_embedder=graph_embedder if graph_storage else None,
+                    dedup_provider=dedup_provider,
                 )
                 logger.info("✓ VL components initialized for document upload")
             else:
@@ -871,6 +923,7 @@ async def chat_stream(
     # Save user message to database immediately (before streaming)
     # Skip if regenerating (message already exists in database)
     generated_title = None
+    user_metadata = None
     if request.conversation_id and not request.skip_save_user_message:
         try:
             # Build user message metadata (for selectedContext display after page refresh)
