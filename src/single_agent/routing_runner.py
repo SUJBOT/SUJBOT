@@ -100,6 +100,9 @@ class RoutingAgentRunner:
     Uses composition (wraps SingleAgentRunner) to reuse tool initialization.
     """
 
+    # Cache TTL for document context (seconds) — documents change rarely
+    _DOC_CONTEXT_TTL = 300  # 5 minutes
+
     def __init__(self, config: Dict[str, Any], inner_runner):
         from ..agent.providers.factory import create_provider
 
@@ -126,6 +129,10 @@ class RoutingAgentRunner:
 
         # Create provider once (reused across queries)
         self.router_provider = create_provider(self.router_model)
+
+        # Cached document context for the router system prompt
+        self._doc_context_cache: Optional[str] = None
+        self._doc_context_ts: float = 0.0
 
     async def _stream_router_response(
         self, provider, messages: List[Dict[str, Any]],
@@ -401,6 +408,44 @@ class RoutingAgentRunner:
     def __getattr__(self, name):
         return getattr(self.inner_runner, name)
 
+    async def _get_document_context(self) -> str:
+        """Fetch a compact document summary for the router system prompt (cached)."""
+        now = time.time()
+        if self._doc_context_cache and (now - self._doc_context_ts) < self._DOC_CONTEXT_TTL:
+            return self._doc_context_cache
+
+        vs = getattr(self.inner_runner, "vector_store", None)
+        if not vs:
+            return "No documents indexed."
+
+        try:
+            doc_ids = vs.get_document_list() or []
+            categories = vs.get_document_categories() if hasattr(vs, "get_document_categories") else {}
+
+            if not doc_ids:
+                self._doc_context_cache = "No documents indexed."
+                self._doc_context_ts = now
+                return self._doc_context_cache
+
+            legislation = sorted(d for d in doc_ids if categories.get(d) == "legislation")
+            documentation = sorted(d for d in doc_ids if categories.get(d) != "legislation")
+
+            lines = [f"{len(doc_ids)} documents indexed:"]
+            if legislation:
+                lines.append(f"Legislation ({len(legislation)}): " + ", ".join(legislation))
+            if documentation:
+                lines.append(f"Documentation ({len(documentation)}): " + ", ".join(documentation))
+
+            self._doc_context_cache = "\n".join(lines)
+            self._doc_context_ts = now
+            logger.debug("Document context refreshed: %d docs", len(doc_ids))
+        except Exception as e:
+            logger.warning("Failed to fetch document context: %s", e)
+            if not self._doc_context_cache:
+                self._doc_context_cache = "Document list unavailable."
+
+        return self._doc_context_cache
+
     def _get_effective_simple_tools(
         self, disabled_tools: Optional[Set[str]] = None
     ) -> List[str]:
@@ -437,9 +482,11 @@ class RoutingAgentRunner:
         return tools
 
     def _build_router_system_prompt(
-        self, disabled_tools: Optional[Set[str]] = None
+        self,
+        disabled_tools: Optional[Set[str]] = None,
+        document_context: str = "",
     ) -> str:
-        """Build system prompt with dynamic tool list based on what's actually available."""
+        """Build system prompt with dynamic tool list and document context."""
         active_tools = self._get_effective_simple_tools(disabled_tools)
 
         tool_descriptions = {
@@ -467,6 +514,9 @@ class RoutingAgentRunner:
 
         prompt = self.router_prompt.replace("{available_tools}", available_section)
         prompt = prompt.replace("{extra_rules}", "\n".join(extra_rules))
+        prompt = prompt.replace(
+            "{document_context}", document_context or "No documents indexed."
+        )
         return prompt
 
     @staticmethod
@@ -515,7 +565,8 @@ class RoutingAgentRunner:
         from ..cost_tracker import get_global_tracker
 
         router_tools = self._build_router_tools(disabled_tools)
-        router_system = self._build_router_system_prompt(disabled_tools)
+        doc_context = await self._get_document_context()
+        router_system = self._build_router_system_prompt(disabled_tools, doc_context)
 
         # Build messages with conversation history
         router_messages = []
