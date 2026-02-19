@@ -1,5 +1,17 @@
 # Changelog — 13.–19. února 2026
 
+## 30. Scope guardrails — refuse off-topic queries, restrict web_search (19. února 2026)
+
+### Prompts
+- **Scope section in both agent prompts** (`unified.txt`, `router.txt`) — obviously off-topic questions (weather, sports, entertainment) are declined directly without tool calls. Ambiguous questions are always searched first (never pre-judged as off-topic).
+- **Web search restricted** — `unified.txt` now limits web_search to supplementary regulatory lookups (e.g., zakonyprolidi.cz). No more general-purpose web search for weather/news.
+
+### Backend
+- **`web_search` removed from 8B router's simple tools** — `ROUTER_SIMPLE_TOOLS` in `routing_runner.py` and `router_simple_tools` in `config.json` no longer include `web_search`. The 8B router was bypassing prompt-level guardrails by calling web_search directly for weather queries. Now web_search is only available via the 30B expert agent.
+
+### Root cause
+Agent was hallucinating weather/politics answers via two paths: (1) 8B router calling `web_search` directly, (2) 30B expert answering from parametric knowledge. Fix: prompt-level scope restriction + tool-level access control.
+
 ## 29. Local model indexing pipeline + smart dedup + production priority (19. února 2026)
 
 ### Architecture
