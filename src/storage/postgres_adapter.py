@@ -298,45 +298,6 @@ class PostgresVectorStoreAdapter(ConversationStorageMixin, VectorStoreAdapter):
 
         return results
 
-    def get_all_vl_similarities(self, query_embedding: np.ndarray) -> np.ndarray:
-        """
-        Return cosine similarity scores between query and ALL vl_pages.
-
-        Used by QPP (Query Performance Prediction) confidence scoring, which
-        needs the full score distribution — not just top-k — to compute
-        statistical features like skewness, bimodal gap, and percentile spread.
-
-        Args:
-            query_embedding: Query embedding (2048-dim, L2-normalized)
-
-        Returns:
-            np.ndarray of shape (n_pages,) with cosine similarity scores,
-            sorted descending (highest first).
-        """
-        return run_async_safe(
-            self._async_get_all_vl_similarities(query_embedding),
-            operation_name="get_all_vl_similarities",
-        )
-
-    async def _async_get_all_vl_similarities(
-        self, query_embedding: np.ndarray
-    ) -> np.ndarray:
-        """Async implementation: fetch all cosine similarities."""
-        await self._ensure_pool()
-        query_vec = self._normalize_vector(query_embedding)
-        query_str = self._vector_to_pgvector_string(query_vec)
-
-        sql = """
-            SELECT 1 - (embedding <=> $1::vector) AS score
-            FROM vectors.vl_pages
-            ORDER BY score DESC
-        """
-
-        async with self.pool.acquire() as conn:
-            rows = await conn.fetch(sql, query_str)
-
-        return np.array([float(row["score"]) for row in rows], dtype=np.float32)
-
     def get_adjacent_vl_pages(
         self,
         document_id: str,

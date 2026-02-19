@@ -147,7 +147,7 @@ User Query → SingleAgentRunner (autonomous tool loop)
 - `src/utils/` - Security, retry, model registry, async helpers, text helpers, caching
 - `backend/` - FastAPI web backend with auth, routes, middleware, deps (DI)
 - `frontend/` - React + Vite web UI
-- `rag_confidence/` - QPP-based retrieval confidence scoring (standalone, by veselm73)
+- `rag_confidence/` - QPP-based retrieval confidence scoring (standalone, by veselm73, currently disabled)
 
 **Key SSOT modules (use these, don't duplicate):**
 - `src/exceptions.py` - Typed exception hierarchy
@@ -207,8 +207,6 @@ VL flow: Query → embedder embed_query() → PostgreSQL exact cosine (vectors.v
 **Chat attachments:** Users can attach images, PDFs, and documents (DOCX, TXT, Markdown, HTML, LaTeX) to messages (base64 in JSON body, 10MB/file, max 5). Images pass through as multimodal blocks. PDFs rendered to page images via PyMuPDF (max 10 pages). Text documents have text extracted via `DocumentConverter.extract_text()` (max 30K chars). Attachments passed to agent as multimodal content blocks, NOT indexed into vector store. Per-request context (`ToolRegistry.set_request_context()`) makes attachment images available to tools.
 
 **Multi-format upload:** Document upload accepts PDF, DOCX, TXT, Markdown, HTML, LaTeX. Non-PDF formats are converted to PDF first via `src/vl/document_converter.py`, then the unchanged VL pipeline processes the PDF. DOCX uses LibreOffice headless, LaTeX uses pdflatex, text/MD/HTML use PyMuPDF's `fitz.Story`.
-
-**Retrieval confidence (QPP):** Text searches include a QPP-based confidence score (0.0–1.0) from `rag_confidence.score_retrieval_general()`. The model uses 24 language-agnostic features from the full similarity distribution (all pages vs query). Bands: HIGH (≥0.90), MEDIUM (0.75–0.90), LOW (0.50–0.75), VERY_LOW (<0.50). Image searches skip QPP (no text query). The agent uses confidence to calibrate its answer and may retry with different terms on LOW/VERY_LOW.
 
 **Graph search** uses `intfloat/multilingual-e5-small` (384-dim) for cross-language semantic search on entities/communities. Falls back to PostgreSQL FTS when embedder not configured.
 

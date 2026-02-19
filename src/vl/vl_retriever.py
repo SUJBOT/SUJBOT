@@ -170,8 +170,7 @@ class VLRetriever:
         Search for relevant pages and return the query embedding.
 
         Identical to search() but also returns the query embedding,
-        allowing callers to reuse it (e.g., for QPP confidence scoring)
-        without a redundant embedder API call.
+        allowing callers to reuse it without a redundant embedder API call.
 
         Args:
             query: Natural language query text

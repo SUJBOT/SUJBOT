@@ -12,7 +12,7 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional, Set
 
 from dotenv import load_dotenv
 
@@ -300,6 +300,7 @@ class SingleAgentRunner:
         stream_progress: bool = False,
         conversation_history: Optional[List[Dict[str, str]]] = None,
         attachment_blocks: Optional[List[Dict[str, Any]]] = None,
+        disabled_tools: Optional[Set[str]] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Run query through single agent with autonomous tool loop.
@@ -361,11 +362,13 @@ class SingleAgentRunner:
         context_window = get_context_window(model_name)
         monitor = ContextBudgetMonitor(context_window)
 
-        # Get all tool schemas
+        # Get tool schemas (exclude any per-request disabled tools)
+        _disabled = disabled_tools or set()
         tool_schemas = [
             schema
             for tool_name in self.tool_adapter.get_available_tools()
-            if (schema := self.tool_adapter.get_tool_schema(tool_name))
+            if tool_name not in _disabled
+            and (schema := self.tool_adapter.get_tool_schema(tool_name))
         ]
 
         logger.info(f"Running query with model={model_name}, tools={len(tool_schemas)}")

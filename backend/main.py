@@ -982,6 +982,7 @@ async def chat_stream(
                 user_id=user["id"],
                 messages=message_history,
                 attachment_blocks=attachment_blocks,
+                web_search_enabled=request.web_search_enabled,
             ):
                 # Format as SSE event
                 event_type = event["event"]

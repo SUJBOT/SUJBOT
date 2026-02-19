@@ -342,7 +342,7 @@ export function useChat() {
       documentName: string;
       pageStart: number;
       pageEnd: number;
-    } | null, attachments?: Attachment[] | null) => {
+    } | null, attachments?: Attachment[] | null, webSearchEnabled?: boolean) => {
       // Content validation (conversation-independent)
       if (!content.trim() && (!attachments || attachments.length === 0)) {
         return;
@@ -493,6 +493,7 @@ export function useChat() {
           streamState.abortController.signal,  // Allow cancellation on page refresh
           apiSelectedContext,  // Pass selected text from PDF for additional context
           apiAttachments,  // Pass file attachments for multimodal context
+          webSearchEnabled,  // Per-request web search toggle
         )) {
           // Handle tool health check (first event)
           if (event.event === 'tool_health') {
