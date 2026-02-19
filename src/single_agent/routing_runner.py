@@ -596,11 +596,9 @@ class RoutingAgentRunner:
         router_start = time.time()
 
         try:
-            # Stream classification — buffer text until we know if delegation follows.
-            # If router delegates, discard any pre-delegation text (invisible handoff).
-            # If router responds directly, flush buffered text as text_delta events.
+            # Stream classification — text deltas yield immediately, tool calls accumulated.
+            # Prompt instructs 8B to never produce text before delegation (SILENT DELEGATION).
             final_text = ""
-            buffered_text_events: List[Dict[str, Any]] = []
             tool_call = None
             usage_data = None
 
@@ -609,7 +607,8 @@ class RoutingAgentRunner:
             ):
                 if event["type"] == "text_delta":
                     final_text += event["content"]
-                    buffered_text_events.append(event)
+                    if stream_progress:
+                        yield event
                 elif event["type"] == "_tool_call":
                     tool_call = event  # Take the first tool call
                 elif event["type"] == "_usage":
@@ -669,9 +668,6 @@ class RoutingAgentRunner:
 
             if stream_progress:
                 yield {"type": "routing", "decision": "direct"}
-                # Flush buffered text as text_delta events (was buffered during classification)
-                for text_ev in buffered_text_events:
-                    yield text_ev
 
             yield {
                 "type": "final",
@@ -686,10 +682,10 @@ class RoutingAgentRunner:
             }
             return
 
-        # --- Has tool call: discard any pre-tool-call text (silent handoff) ---
+        # --- Has tool call: warn if router leaked text before delegation ---
         if final_text.strip():
-            logger.info(
-                "Discarding %d chars of router pre-delegation text: %s",
+            logger.warning(
+                "Router produced %d chars before tool call (prompt violation): %s",
                 len(final_text), final_text[:100],
             )
 
