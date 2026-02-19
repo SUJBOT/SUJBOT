@@ -24,6 +24,7 @@ export interface DocumentInfo {
   filename: string;
   size_bytes: number;
   category: 'documentation' | 'legislation';
+  access_level?: 'public' | 'secret';
 }
 
 export interface ToolHealth {

@@ -700,10 +700,11 @@ async def list_admin_documents(
                 SELECT vp.document_id,
                        COUNT(*) AS page_count,
                        MIN(vp.created_at) AS created_at,
-                       COALESCE(d.category, 'documentation') AS category
+                       COALESCE(d.category, 'documentation') AS category,
+                       COALESCE(d.access_level, 'public') AS access_level
                 FROM vectors.vl_pages vp
                 LEFT JOIN vectors.documents d ON d.document_id = vp.document_id
-                GROUP BY vp.document_id, d.category
+                GROUP BY vp.document_id, d.category, d.access_level
                 ORDER BY vp.document_id
                 """
             )
@@ -732,6 +733,7 @@ async def list_admin_documents(
                         meta["created_at"].isoformat() if meta and meta["created_at"] else None
                     ),
                     "category": meta["category"] if meta else "documentation",
+                    "access_level": meta["access_level"] if meta else "public",
                 }
             )
     except OSError as e:
@@ -843,11 +845,11 @@ async def update_document_category(
     vl: Dict = Depends(get_vl_components),
 ):
     """
-    Update document category (documentation or legislation).
+    Update document category and/or access level.
 
     Args:
         document_id: Document identifier
-        body: JSON with 'category' field
+        body: JSON with optional 'category' and/or 'access_level' fields
     """
     if not DIRECT_ID_PATTERN.match(document_id):
         raise HTTPException(
@@ -855,10 +857,22 @@ async def update_document_category(
         )
 
     category = body.get("category")
-    if category not in ("documentation", "legislation"):
+    access_level = body.get("access_level")
+
+    if category is not None and category not in ("documentation", "legislation"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Category must be 'documentation' or 'legislation'",
+        )
+    if access_level is not None and access_level not in ("public", "secret"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Access level must be 'public' or 'secret'",
+        )
+    if category is None and access_level is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one of 'category' or 'access_level' must be provided",
         )
 
     vector_store = vl["vector_store"]
@@ -873,24 +887,38 @@ async def update_document_category(
     try:
         await vector_store._ensure_pool()
         async with vector_store.pool.acquire() as conn:
-            result = await conn.execute(
+            # UPSERT: INSERT uses defaults for NULL fields, UPDATE preserves existing values
+            await conn.execute(
                 """
-                INSERT INTO vectors.documents (document_id, category)
-                VALUES ($1, $2)
-                ON CONFLICT (document_id) DO UPDATE SET category = $2
+                INSERT INTO vectors.documents (document_id, category, access_level)
+                VALUES ($1, COALESCE($2, 'documentation'), COALESCE($3, 'public'))
+                ON CONFLICT (document_id) DO UPDATE SET
+                    category = COALESCE($2, vectors.documents.category),
+                    access_level = COALESCE($3, vectors.documents.access_level)
                 """,
                 document_id,
                 category,
+                access_level,
             )
-        logger.info(f"Admin {admin['id']} set {document_id} category to {category}")
+        changes = []
+        if category:
+            changes.append(f"category={category}")
+        if access_level:
+            changes.append(f"access_level={access_level}")
+        logger.info(f"Admin {admin['id']} updated {document_id}: {', '.join(changes)}")
     except asyncpg.PostgresError as e:
-        logger.error(f"Database error updating category for {document_id}: {e}", exc_info=True)
+        logger.error(f"Database error updating document {document_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update document category",
+            detail="Failed to update document metadata",
         )
 
-    return {"document_id": document_id, "category": category}
+    result = {"document_id": document_id}
+    if category is not None:
+        result["category"] = category
+    if access_level is not None:
+        result["access_level"] = access_level
+    return result
 
 
 @router.post("/documents/{document_id}/reindex")

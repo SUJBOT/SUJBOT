@@ -61,6 +61,7 @@ class UploadState:
     user_id: int
     category: str
     pdf_path: Path
+    access_level: str = "public"
     file_ext: str = ".pdf"
     task: Optional[asyncio.Task] = None
     events: list = field(default_factory=list)
@@ -138,6 +139,7 @@ class DocumentInfo(BaseModel):
     filename: str
     size_bytes: int
     category: str = "documentation"
+    access_level: str = "public"
 
 
 async def index_document_pipeline(
@@ -528,27 +530,37 @@ async def list_documents(user: Dict = Depends(get_current_user)) -> List[Documen
     """
     documents = []
 
-    # Fetch categories from database if available
-    categories: Dict[str, str] = {}
+    # Fetch categories + access levels from database if available
+    doc_metadata: Dict[str, Dict[str, str]] = {}
     vector_store = _get_vl_components_from_deps().get("vector_store")
     if vector_store:
         try:
             await vector_store._ensure_pool()
             async with vector_store.pool.acquire() as conn:
-                rows = await conn.fetch("SELECT document_id, category FROM vectors.documents")
-                categories = {row["document_id"]: row["category"] for row in rows}
+                rows = await conn.fetch(
+                    "SELECT document_id, category, access_level FROM vectors.documents"
+                )
+                doc_metadata = {
+                    row["document_id"]: {
+                        "category": row["category"],
+                        "access_level": row["access_level"],
+                    }
+                    for row in rows
+                }
         except Exception as e:
-            logger.warning(f"Failed to fetch document categories: {e}", exc_info=True)
+            logger.warning(f"Failed to fetch document metadata: {e}", exc_info=True)
 
     try:
         for doc_id, filename, size_bytes in get_pdf_file_list(PDF_BASE_DIR):
+            meta = doc_metadata.get(doc_id, {})
             documents.append(
                 DocumentInfo(
                     document_id=doc_id,
                     display_name=_format_display_name(filename),
                     filename=filename,
                     size_bytes=size_bytes,
-                    category=categories.get(doc_id, "documentation"),
+                    category=meta.get("category", "documentation"),
+                    access_level=meta.get("access_level", "public"),
                 )
             )
     except Exception as e:
@@ -778,18 +790,20 @@ async def _run_pipeline_task(state: UploadState, content: bytes) -> None:
             }
         )
 
-        # 1b. Register document category
+        # 1b. Register document category and access level
         display_name = _format_display_name(state.pdf_path.name)
         await vector_store._ensure_pool()
         async with vector_store.pool.acquire() as conn:
             await conn.execute(
                 """
-                INSERT INTO vectors.documents (document_id, category, display_name)
-                VALUES ($1, $2, $3)
-                ON CONFLICT (document_id) DO UPDATE SET category = $2, display_name = $3
+                INSERT INTO vectors.documents (document_id, category, access_level, display_name)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (document_id) DO UPDATE
+                    SET category = $2, access_level = $3, display_name = $4
                 """,
                 document_id,
                 state.category,
+                state.access_level,
                 display_name,
             )
 
@@ -807,11 +821,12 @@ async def _run_pipeline_task(state: UploadState, content: bytes) -> None:
             state.events.append(event)
 
         logger.info(
-            "User %d uploaded and indexed %s (%s, category=%s)",
+            "User %d uploaded and indexed %s (%s, category=%s, access_level=%s)",
             state.user_id,
             state.filename,
             document_id,
             state.category,
+            state.access_level,
         )
 
         # Schedule debounced graph rebuild (communities + dedup)
@@ -901,6 +916,7 @@ async def upload_document(
     request: Request,
     file: UploadFile = File(...),
     category: str = Form("documentation"),
+    access_level: str = Form("public"),
     user: Dict = Depends(get_current_user),
 ):
     """
@@ -915,6 +931,12 @@ async def upload_document(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Category must be 'documentation' or 'legislation'",
+        )
+    # Validate access level
+    if access_level not in ("public", "secret"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Access level must be 'public' or 'secret'",
         )
     # Validate VL components are available
     if not _get_vl_components_from_deps():
@@ -970,6 +992,7 @@ async def upload_document(
         user_id=user_id,
         category=category,
         pdf_path=pdf_path,
+        access_level=access_level,
         file_ext=file_ext,
     )
     task = asyncio.create_task(_run_pipeline_task(state, content))

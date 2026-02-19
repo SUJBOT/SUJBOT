@@ -43,6 +43,7 @@ export class ApiService {
   private getHeaders(): HeadersInit {
     return {
       'Content-Type': 'application/json',
+      'Accept': 'application/json',
     };
   }
 
@@ -190,7 +191,8 @@ export class ApiService {
       filename: string;
       mime_type: string;
       base64_data: string;
-    }> | null
+    }> | null,
+    webSearchEnabled?: boolean
   ): AsyncGenerator<SSEEvent, void, unknown> {
     let response;
     try {
@@ -205,6 +207,7 @@ export class ApiService {
           messages: messageHistory,  // Conversation history for context
           selected_context: selectedContext || null,  // Selected text from PDF
           attachments: attachments || null,  // File attachments for multimodal context
+          web_search_enabled: webSearchEnabled ?? false,
         }),
         signal: abortSignal,  // Allow cancellation on page refresh/unmount
       });
@@ -319,16 +322,39 @@ export class ApiService {
   }
 
   /**
+   * Update document category and/or access level (admin-only)
+   */
+  async updateDocumentCategory(
+    documentId: string,
+    updates: { category?: string; access_level?: string }
+  ): Promise<void> {
+    const response = await fetch(
+      `${API_BASE_URL}/admin/documents/${encodeURIComponent(documentId)}/category`,
+      {
+        method: 'PATCH',
+        headers: this.getHeaders(),
+        credentials: 'include',
+        body: JSON.stringify(updates),
+      }
+    );
+    if (!response.ok) {
+      throw new Error(`Failed to update document: ${response.status}`);
+    }
+  }
+
+  /**
    * Upload a PDF document and stream indexing progress via SSE
    */
   async *uploadDocument(
     file: File,
     signal?: AbortSignal,
-    category?: string
+    category?: string,
+    accessLevel?: string
   ): AsyncGenerator<SSEEvent, void, unknown> {
     const formData = new FormData();
     formData.append('file', file);
     if (category) formData.append('category', category);
+    if (accessLevel) formData.append('access_level', accessLevel);
 
     let response;
     try {

@@ -25,7 +25,21 @@
     "reconnecting": "Reconnecting to upload...",
     "unsupportedFormat": "Unsupported format. Supported: PDF, DOCX, TXT, Markdown, HTML, LaTeX",
     "fileTooLarge": "File too large (max 100 MB)",
-    "alreadyExists": "Document already exists"
+    "alreadyExists": "Document already exists",
+    "accessLevel": "Document classification",
+    "secret": "Secret",
+    "public": "Publicly accessible",
+    "dropzone": "Drop file here",
+    "dropzoneOr": "or",
+    "dropzoneBrowse": "browse files",
+    "dropzoneFormats": "PDF, DOCX, TXT, Markdown, HTML, LaTeX (max 100 MB)",
+    "dropzoneFolderHint": "You can also drop a folder",
+    "browseFolder": "Browse folder",
+    "filesSelected": "{{count}} files selected",
+    "uploadProgress": "Uploading {{current}} of {{total}}",
+    "uploadAllComplete": "All {{count}} documents indexed successfully",
+    "someUploadsFailed": "{{success}} of {{total}} uploaded, {{failed}} failed",
+    "remove": "Remove"
   },
   "login": {
     "email": "Email",
@@ -72,7 +86,9 @@
     "spendingUsed": "Used",
     "copyResponse": "Copy response",
     "copied": "Copied!",
-    "thinking": "Thinking..."
+    "thinking": "Thinking...",
+    "webSearchOn": "Web search enabled",
+    "webSearchOff": "Web search disabled"
   },
   "progress": {
     "planning": "Planning",

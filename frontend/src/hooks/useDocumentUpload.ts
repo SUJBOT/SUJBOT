@@ -27,7 +27,7 @@ export function useDocumentUpload() {
   // Note: upload reconnect (surviving page refresh) is not yet supported
   // by the backend. For now, a refresh during upload loses progress.
 
-  const startUpload = useCallback(async (file: File, category?: string) => {
+  const startUpload = useCallback(async (file: File, category?: string, accessLevel?: string) => {
     setIsUploading(true);
     setProgress(null);
     setError(null);
@@ -36,7 +36,7 @@ export function useDocumentUpload() {
     abortRef.current = new AbortController();
 
     try {
-      for await (const event of apiService.uploadDocument(file, abortRef.current.signal, category)) {
+      for await (const event of apiService.uploadDocument(file, abortRef.current.signal, category, accessLevel)) {
         if (event.event === 'progress') {
           setProgress(event.data as UploadProgress);
         } else if (event.event === 'complete') {

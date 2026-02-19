@@ -7,6 +7,8 @@ CREATE TABLE IF NOT EXISTS vectors.documents (
     document_id TEXT PRIMARY KEY,
     category TEXT NOT NULL DEFAULT 'documentation'
         CHECK (category IN ('documentation', 'legislation')),
+    access_level TEXT NOT NULL DEFAULT 'public'
+        CHECK (access_level IN ('public', 'secret')),
     display_name TEXT,
     created_at TIMESTAMPTZ DEFAULT now()
 );
