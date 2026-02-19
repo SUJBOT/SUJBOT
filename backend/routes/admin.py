@@ -12,7 +12,7 @@ Endpoints:
 - GET /admin/stats - System statistics
 - GET /admin/documents - List all documents with metadata
 - DELETE /admin/documents/{document_id} - Delete document completely
-- PATCH /admin/documents/{document_id}/category - Update document category
+- PATCH /admin/documents/{document_id}/category - Update document category and/or access level
 - POST /admin/documents/{document_id}/reindex - Reindex document (SSE)
 
 All endpoints (except /admin/login) require admin JWT token.

@@ -922,7 +922,7 @@ async def upload_document(
     user: Dict = Depends(get_current_user),
 ):
     """
-    Upload a PDF and index it as a background task, streaming progress via SSE.
+    Upload a document and index it as a background task, streaming progress via SSE.
 
     The indexing pipeline runs independently of the SSE connection — a page
     refresh reconnects to the same in-progress upload via GET /upload-status.

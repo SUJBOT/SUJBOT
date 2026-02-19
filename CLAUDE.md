@@ -123,10 +123,11 @@ docker network connect bridge sujbot_backend
 Before backend can reach local models, SSH tunnels and socat bridges must be running:
 ```bash
 # socat bridges (forward Docker-reachable ports to SSH tunnel ports)
-socat TCP-LISTEN:18080,bind=0.0.0.0,reuseaddr,fork TCP:127.0.0.1:8080 &  # LLM
-socat TCP-LISTEN:18081,bind=0.0.0.0,reuseaddr,fork TCP:127.0.0.1:8081 &  # Embedding
+socat TCP-LISTEN:18080,bind=0.0.0.0,reuseaddr,fork TCP:127.0.0.1:8080 &  # LLM 30B (gx10-eb6e)
+socat TCP-LISTEN:18081,bind=0.0.0.0,reuseaddr,fork TCP:127.0.0.1:8081 &  # Embedding (gx10-fa34)
+socat TCP-LISTEN:18082,bind=0.0.0.0,reuseaddr,fork TCP:127.0.0.1:8082 &  # LLM 8B (gx10-fa34)
 ```
-UFW rules (one-time): `sudo ufw allow from 172.16.0.0/12 to any port 18080 proto tcp` (and 18081)
+UFW rules (one-time): `sudo ufw allow from 172.16.0.0/12 to any port 18080 proto tcp` (and 18081, 18082)
 
 ## Architecture Overview
 
@@ -192,8 +193,9 @@ VL flow: Query → embedder embed_query() → PostgreSQL exact cosine (vectors.v
 - `_create_embedder()` factory in `src/vl/__init__.py` handles embedder instantiation
 - No HNSW index — ~500 pages, exact cosine scan <50ms, 100% recall
 - `"local"` variant: Qwen3-VL-30B-A3B-Thinking via vLLM on GB10 (single DGX Spark, 131K ctx, ~21 tok/s SSE, KV cache 512K tokens/3.9x concurrency)
-- **vLLM production flags** (gx10-eb6e): `--max-model-len 131072 --max-num-batched-tokens 8192 --max-num-seqs 8 --gpu-memory-utilization 0.92 --enable-chunked-prefill --enable-prefix-caching --load-format fastsafetensors`
-- Benchmark script: `scripts/vllm_benchmark.py` — TTFT, decode throughput, e2e latency for RAG profiles
+- **vLLM production flags** (gx10-eb6e, 30B): `--max-model-len 131072 --max-num-batched-tokens 8192 --max-num-seqs 8 --gpu-memory-utilization 0.92 --enable-chunked-prefill --enable-prefix-caching --load-format fastsafetensors`
+- **8B helper model** (gx10-fa34): Qwen3-VL-8B-Instruct-FP8 via vLLM, coexists with embedding server. Container: `vllm-qwen3vl-8b`, port 8082/18082. Flags: `--max-model-len 32768 --max-num-batched-tokens 16384 --max-num-seqs 16 --gpu-memory-utilization 0.60 --enable-auto-tool-choice --tool-call-parser hermes`. Decode: ~20-23 tok/s, TTFT: 0.09-0.38s, KV cache: 405K tokens/12.35x concurrency. GPU: model 10.5 GiB + embedding 17 GiB = ~78 GiB / 119 GiB.
+- Benchmark script: `scripts/vllm_benchmark.py` — TTFT, decode throughput, e2e latency for RAG profiles. Supports `--model` and `--compare-model` for cross-model A/B comparison.
 - `"remote"` variant: Sonnet 4.5 (vision natively)
 - `local_llm` provider: reuses DeepInfraProvider with custom `base_url` (vLLM OpenAI-compatible API)
 - Dynamic max_tokens in runner: local_llm→32768 (thinking models emit large `<think>` blocks), Anthropic→4096 if configured > 16384 (SDK rejects high non-streaming values)

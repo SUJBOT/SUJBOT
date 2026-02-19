@@ -228,7 +228,7 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
           filename: entry.file.name,
           success: !!fileResult,
           result: fileResult,
-          error: fileError,
+          error: fileError ?? (!fileResult ? 'Upload ended without confirmation' : undefined),
         });
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') {
@@ -242,6 +242,14 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
           success: false,
           error: err instanceof Error ? err.message : 'Unexpected error',
         });
+      }
+    }
+
+    // Mark remaining files as not attempted (after cancel break)
+    const attemptedIds = new Set(results.map(r => r.id));
+    for (const entry of files) {
+      if (!attemptedIds.has(entry.id)) {
+        results.push({ id: entry.id, filename: entry.file.name, success: false, error: 'Cancelled' });
       }
     }
 
