@@ -6,6 +6,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect, type SetStateAction, type Dispatch } from 'react';
+import { useTranslation } from 'react-i18next';
 import { apiService } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import type { Message, Conversation, ToolCall, ClarificationData, Attachment } from '../types';
@@ -55,6 +56,7 @@ interface StreamingState {
 }
 
 export function useChat() {
+  const { t } = useTranslation();
   const { isAuthenticated } = useAuth();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   // Current conversation ID - initialized from URL query param for refresh persistence
@@ -502,8 +504,40 @@ export function useChat() {
           apiAttachments,  // Pass file attachments for multimodal context
           webSearchEnabled,  // Per-request web search toggle
         )) {
+          // Handle routing events (8B router → 30B worker classification)
+          if (event.event === 'routing') {
+            if (streamState.currentMessage?.agentProgress) {
+              const routingMessages: Record<string, string> = {
+                classifying: t('progress.routingClassifying'),
+                delegate: t('progress.routingDelegating'),
+                direct: t('progress.routingDirect'),
+                simple_tool: t('progress.routingDirect'),
+                fallback: t('progress.routingDelegating'),
+              };
+              const message = routingMessages[event.data.decision] ?? '';
+              if (message) {
+                streamState.currentMessage.agentProgress.currentMessage = message;
+                // Update UI
+                setConversations((prev) =>
+                  prev.map((c) => {
+                    if (c.id !== updatedConversation.id) return c;
+                    const messages = [...c.messages];
+                    const lastMsg = messages[messages.length - 1];
+                    if (lastMsg?.role === 'assistant') {
+                      messages[messages.length - 1] = { ...streamState.currentMessage! };
+                    } else {
+                      messages.push({ ...streamState.currentMessage! });
+                    }
+                    return { ...c, messages };
+                  })
+                );
+              }
+            } else {
+              console.warn('Received routing event but agentProgress is not initialized:', event.data);
+            }
+          }
           // Handle tool health check (first event)
-          if (event.event === 'tool_health') {
+          else if (event.event === 'tool_health') {
             // Log tool health status (visible in browser console)
             if (!event.data.healthy) {
               console.warn('Tool health warning:', event.data.summary);

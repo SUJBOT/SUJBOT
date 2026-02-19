@@ -263,60 +263,56 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled, refreshSpen
           />
 
           {/* Attach button */}
-          {!isStreaming && (
-            <button
-              type="button"
-              onClick={handleAttachClick}
-              disabled={disabled || attachments.length >= MAX_ATTACHMENTS}
-              className={cn(
-                'flex-shrink-0 self-center',
-                'w-10 h-10 rounded-xl',
-                'flex items-center justify-center',
-                'transition-all duration-200',
-                disabled || attachments.length >= MAX_ATTACHMENTS
-                  ? 'text-accent-300 dark:text-accent-700 cursor-not-allowed'
-                  : cn(
-                      'text-accent-500 dark:text-accent-400',
-                      'hover:text-accent-700 dark:hover:text-accent-200',
-                      'hover:bg-accent-100 dark:hover:bg-accent-800',
-                    )
-              )}
-              title={t('attachments.attach')}
-            >
-              <Paperclip size={18} />
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={handleAttachClick}
+            disabled={disabled || isStreaming || attachments.length >= MAX_ATTACHMENTS}
+            className={cn(
+              'flex-shrink-0 self-center',
+              'w-10 h-10 rounded-xl',
+              'flex items-center justify-center',
+              'transition-all duration-200',
+              disabled || isStreaming || attachments.length >= MAX_ATTACHMENTS
+                ? 'text-accent-300 dark:text-accent-700 cursor-not-allowed'
+                : cn(
+                    'text-accent-500 dark:text-accent-400',
+                    'hover:text-accent-700 dark:hover:text-accent-200',
+                    'hover:bg-accent-100 dark:hover:bg-accent-800',
+                  )
+            )}
+            title={t('attachments.attach')}
+          >
+            <Paperclip size={18} />
+          </button>
 
           {/* Web search toggle */}
-          {!isStreaming && (
-            <button
-              type="button"
-              onClick={onToggleWebSearch}
-              disabled={disabled}
-              className={cn(
-                'flex-shrink-0 self-center',
-                'w-10 h-10 rounded-xl',
-                'flex items-center justify-center',
-                'transition-all duration-200',
-                disabled
-                  ? 'text-accent-300 dark:text-accent-700 cursor-not-allowed'
-                  : webSearchEnabled
-                    ? cn(
-                        'text-blue-600 dark:text-blue-400',
-                        'bg-blue-50 dark:bg-blue-900/30',
-                        'hover:bg-blue-100 dark:hover:bg-blue-900/50',
-                      )
-                    : cn(
-                        'text-accent-400 dark:text-accent-600',
-                        'hover:text-accent-600 dark:hover:text-accent-300',
-                        'hover:bg-accent-100 dark:hover:bg-accent-800',
-                      )
-              )}
-              title={webSearchEnabled ? t('chat.webSearchOn') : t('chat.webSearchOff')}
-            >
-              <Globe size={18} />
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={onToggleWebSearch}
+            disabled={disabled || isStreaming}
+            className={cn(
+              'flex-shrink-0 self-center',
+              'w-10 h-10 rounded-xl',
+              'flex items-center justify-center',
+              'transition-all duration-200',
+              disabled || isStreaming
+                ? 'text-accent-300 dark:text-accent-700 cursor-not-allowed'
+                : webSearchEnabled
+                  ? cn(
+                      'text-blue-600 dark:text-blue-400',
+                      'bg-blue-50 dark:bg-blue-900/30',
+                      'hover:bg-blue-100 dark:hover:bg-blue-900/50',
+                    )
+                  : cn(
+                      'text-accent-400 dark:text-accent-600',
+                      'hover:text-accent-600 dark:hover:text-accent-300',
+                      'hover:bg-accent-100 dark:hover:bg-accent-800',
+                    )
+            )}
+            title={webSearchEnabled ? t('chat.webSearchOn') : t('chat.webSearchOff')}
+          >
+            <Globe size={18} />
+          </button>
 
           <textarea
             ref={textareaRef}

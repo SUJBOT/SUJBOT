@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import AsyncGenerator, Dict, Any, List, Optional
 
 from src.single_agent.runner import SingleAgentRunner
+from src.single_agent.routing_runner import RoutingAgentRunner
 from src.agent.config import AgentConfig
 from src.cost_tracker import get_global_tracker, reset_global_tracker
 from src.utils.security import sanitize_error
@@ -91,6 +92,7 @@ class AgentAdapter:
             logger.warning(f"config.json not found at {config_path}, using defaults")
 
         # Build runner configuration
+        routing_config = full_config.get("routing", {})
         runner_config = {
             "api_keys": {
                 "anthropic_api_key": self.config.anthropic_api_key,
@@ -105,14 +107,50 @@ class AgentAdapter:
             "single_agent": full_config.get("single_agent", {}),
             "langsmith": full_config.get("langsmith", {}),
             "vl": full_config.get("vl", {}),
+            "routing": routing_config,
         }
+
+        # Track degraded components for health endpoint
+        self.degraded_components = []
 
         # Initialize single-agent runner
         logger.info("Initializing single-agent system...")
         self.runner = SingleAgentRunner(runner_config)
 
-        # Track degraded components for health endpoint
-        self.degraded_components = []
+        # Initialize routing runner (8B router → 30B worker) if enabled
+        self.routing_runner = None
+        if routing_config.get("enabled", False):
+            try:
+                self.routing_runner = RoutingAgentRunner(runner_config, self.runner)
+                logger.info(
+                    "Routing runner initialized: %s → %s",
+                    routing_config.get("router_model", "qwen3-vl-8b-local"),
+                    routing_config.get("worker_model", "qwen3-vl-30b-local"),
+                )
+            except FileNotFoundError as e:
+                logger.error("Routing runner init failed (prompt missing?): %s", e)
+                self.degraded_components.append({
+                    "component": "routing_runner",
+                    "error": str(e),
+                    "severity": "high",
+                    "user_message": "Query routing disabled: router prompt file not found",
+                })
+            except (ValueError, KeyError, TypeError) as e:
+                logger.error("Routing runner init failed (config error): %s", e, exc_info=True)
+                self.degraded_components.append({
+                    "component": "routing_runner",
+                    "error": str(e),
+                    "severity": "high",
+                    "user_message": "Query routing disabled due to configuration error",
+                })
+            except Exception as e:
+                logger.error("Routing runner init failed (unexpected): %s", e, exc_info=True)
+                self.degraded_components.append({
+                    "component": "routing_runner",
+                    "error": sanitize_error(e),
+                    "severity": "critical",
+                    "user_message": "Query routing disabled due to unexpected error",
+                })
 
         # Store current model
         self.current_model = model or full_config.get("single_agent", {}).get(
@@ -253,13 +291,19 @@ class AgentAdapter:
             }
             await asyncio.sleep(0)
 
-            # Stream query through single agent runner
-            logger.info(f"Starting query execution: variant={variant}, model={model}")
+            # Choose runner: routing runner for local variant, standard for remote
+            use_routing = self.routing_runner is not None and variant == "local"
+            runner = self.routing_runner if use_routing else self.runner
+
+            logger.info(
+                "Starting query execution: variant=%s, model=%s, routing=%s",
+                variant, model, use_routing,
+            )
             if messages:
                 logger.info(f"Including {len(messages)} messages of conversation history")
 
             result = None
-            async for event in self.runner.run_query(
+            async for event in runner.run_query(
                 query,
                 model=model,
                 stream_progress=True,
@@ -269,7 +313,17 @@ class AgentAdapter:
             ):
                 event_type = event.get("type")
 
-                if event_type == "tool_call":
+                if event_type == "routing":
+                    yield {
+                        "event": "routing",
+                        "data": {
+                            k: v for k, v in event.items()
+                            if k != "type" and v is not None
+                        },
+                    }
+                    await asyncio.sleep(0)
+
+                elif event_type == "tool_call":
                     yield {
                         "event": "tool_call",
                         "data": {

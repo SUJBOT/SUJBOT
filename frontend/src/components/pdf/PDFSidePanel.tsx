@@ -196,8 +196,9 @@ export function PDFSidePanel({
           try {
             const page = await pdfDocRef.current.getPage(i);
             const textContent = await page.getTextContent();
-            pageText = textContent.items.map((item: any) => item.str).join('');
-            cache.set(i, pageText);
+            const extracted = textContent.items.map((item: any) => item.str).join('');
+            cache.set(i, extracted);
+            pageText = extracted;
           } catch (err) {
             console.warn(`Failed to extract text from page ${i}:`, err);
             cache.set(i, '');
@@ -205,7 +206,7 @@ export function PDFSidePanel({
           }
         }
 
-        const normalizedPageText = normalizeText(pageText);
+        const normalizedPageText = normalizeText(pageText || '');
         let startIdx = 0;
         let matchIdx = 0;
         while ((startIdx = normalizedPageText.indexOf(query, startIdx)) !== -1) {
