@@ -1,19 +1,25 @@
 #!/usr/bin/env python3
 """
-vLLM throughput benchmark for Qwen3-VL-30B-A3B-Thinking on GB10.
+vLLM throughput benchmark for Qwen3-VL models on GB10.
 
 Measures TTFT, decode throughput, and e2e latency for realistic RAG workloads.
 Uses streaming to capture per-token timing. Supports A/B comparison between
-two endpoints (baseline vs optimized).
+two endpoints (baseline vs optimized), including different models.
 
 Usage:
-    # Single endpoint
+    # Single endpoint (default model: Qwen3-VL-30B)
     python scripts/vllm_benchmark.py --url http://localhost:8080/v1
 
-    # A/B comparison
+    # Benchmark 8B model
+    python scripts/vllm_benchmark.py \
+        --url http://localhost:8082/v1 \
+        --model Qwen/Qwen3-VL-8B-Instruct
+
+    # A/B comparison: 30B vs 8B (different models on different endpoints)
     python scripts/vllm_benchmark.py \
         --url http://localhost:8080/v1 \
-        --compare-url http://gx10-fa34:8082/v1
+        --compare-url http://localhost:8082/v1 \
+        --compare-model Qwen/Qwen3-VL-8B-Instruct
 
     # Quick test (1 iteration, no warmup)
     python scripts/vllm_benchmark.py --url http://localhost:8080/v1 --quick
@@ -35,7 +41,7 @@ from typing import Optional
 
 import httpx
 
-MODEL = "Qwen/Qwen3-VL-30B-A3B-Thinking"
+DEFAULT_MODEL = "Qwen/Qwen3-VL-30B-A3B-Thinking"
 
 # ---------------------------------------------------------------------------
 # Realistic tool definitions (subset matching production SUJBOT tools)
@@ -434,6 +440,7 @@ def run_single_benchmark(
     base_url: str,
     profile_name: str,
     profile: dict,
+    model: str = DEFAULT_MODEL,
     timeout: float = 120.0,
 ) -> BenchmarkResult:
     """Run a single benchmark request with streaming and measure timing."""
@@ -442,7 +449,7 @@ def run_single_benchmark(
     max_tokens = profile.get("max_tokens", 2048)
 
     payload = {
-        "model": MODEL,
+        "model": model,
         "messages": messages,
         "max_tokens": max_tokens,
         "temperature": 0.3,
@@ -531,6 +538,7 @@ def run_profile_benchmark(
     base_url: str,
     profile_name: str,
     profile: dict,
+    model: str = DEFAULT_MODEL,
     n_warmup: int = 2,
     n_iterations: int = 5,
     timeout: float = 120.0,
@@ -542,7 +550,7 @@ def run_profile_benchmark(
     for i in range(n_warmup):
         print(f"  Warmup {i+1}/{n_warmup}...", end=" ", flush=True)
         try:
-            result = run_single_benchmark(client, base_url, profile_name, profile, timeout)
+            result = run_single_benchmark(client, base_url, profile_name, profile, model, timeout)
             print(f"OK ({result.total_tokens} tok, {result.e2e_latency_s:.1f}s)")
         except Exception as e:
             print(f"FAILED: {e}")
@@ -552,7 +560,7 @@ def run_profile_benchmark(
     for i in range(n_iterations):
         print(f"  Run {i+1}/{n_iterations}...", end=" ", flush=True)
         try:
-            result = run_single_benchmark(client, base_url, profile_name, profile, timeout)
+            result = run_single_benchmark(client, base_url, profile_name, profile, model, timeout)
             results.append(result)
             print(
                 f"TTFT={result.ttft_s:.2f}s  "
@@ -693,7 +701,7 @@ def check_server(base_url: str, label: str = "Server") -> bool:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="vLLM throughput benchmark for Qwen3-VL-30B",
+        description="vLLM throughput benchmark for Qwen3-VL models on GB10",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
@@ -702,8 +710,17 @@ def main():
         help="Base URL of vLLM server (e.g., http://localhost:8080/v1)",
     )
     parser.add_argument(
+        "--model",
+        default=DEFAULT_MODEL,
+        help=f"Model name for primary endpoint (default: {DEFAULT_MODEL})",
+    )
+    parser.add_argument(
         "--compare-url",
         help="Second URL for A/B comparison",
+    )
+    parser.add_argument(
+        "--compare-model",
+        help="Model name for compare endpoint (defaults to --model value)",
     )
     parser.add_argument(
         "--iterations", "-n",
@@ -744,6 +761,7 @@ def main():
         args.iterations = 1
         args.warmup = 0
 
+    compare_model = args.compare_model or args.model
     profiles_to_run = {args.profile: PROFILES[args.profile]} if args.profile else PROFILES
 
     # Health check
@@ -756,45 +774,50 @@ def main():
         sys.exit(1)
 
     # Run primary benchmarks
-    print(f"\n--- Benchmarking: {args.url} ---")
+    primary_label = f"{args.url} ({args.model})"
+    print(f"\n--- Benchmarking: {primary_label} ---")
     print(f"    Iterations: {args.iterations}, Warmup: {args.warmup}")
     primary_results = []
     for name, profile in profiles_to_run.items():
         print(f"\n[{name}] {profile['description']}")
         summary = run_profile_benchmark(
             args.url, name, profile,
+            model=args.model,
             n_warmup=args.warmup,
             n_iterations=args.iterations,
             timeout=args.timeout,
         )
         primary_results.append(summary)
 
-    print_summary_table(args.url, primary_results)
+    print_summary_table(primary_label, primary_results)
 
     # Run comparison benchmarks
     compare_results = None
     if args.compare_url:
-        print(f"\n--- Benchmarking: {args.compare_url} ---")
+        compare_label = f"{args.compare_url} ({compare_model})"
+        print(f"\n--- Benchmarking: {compare_label} ---")
         print(f"    Iterations: {args.iterations}, Warmup: {args.warmup}")
         compare_results = []
         for name, profile in profiles_to_run.items():
             print(f"\n[{name}] {profile['description']}")
             summary = run_profile_benchmark(
                 args.compare_url, name, profile,
+                model=compare_model,
                 n_warmup=args.warmup,
                 n_iterations=args.iterations,
                 timeout=args.timeout,
             )
             compare_results.append(summary)
 
-        print_summary_table(args.compare_url, compare_results)
-        print_comparison(args.url, primary_results, args.compare_url, compare_results)
+        print_summary_table(compare_label, compare_results)
+        print_comparison(primary_label, primary_results, compare_label, compare_results)
 
     # JSON output
     if args.json:
         output = {
             "primary": {
                 "url": args.url,
+                "model": args.model,
                 "results": [
                     {
                         "profile": s.profile,
@@ -816,6 +839,7 @@ def main():
         if compare_results:
             output["compare"] = {
                 "url": args.compare_url,
+                "model": compare_model,
                 "results": [
                     {
                         "profile": s.profile,

@@ -172,6 +172,7 @@ class AgentAdapter:
         user_id: Optional[int] = None,
         messages: Optional[List[Dict[str, str]]] = None,
         attachment_blocks: Optional[List[Dict]] = None,
+        web_search_enabled: bool = False,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Stream agent response as SSE-compatible events.
@@ -263,6 +264,7 @@ class AgentAdapter:
                 stream_progress=True,
                 conversation_history=messages or [],
                 attachment_blocks=attachment_blocks,
+                disabled_tools={"web_search"} if not web_search_enabled else None,
             ):
                 event_type = event.get("type")
 

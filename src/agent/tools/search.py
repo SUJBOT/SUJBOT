@@ -1,7 +1,8 @@
 """
 Search Tool — VL-only.
 
-Jina v4 cosine similarity on vectors.vl_pages -> page images (base64 PNG).
+Cosine similarity on vectors.vl_pages -> page images (base64 PNG).
+Embedder: Jina v4 (cloud) or Qwen3-VL-Embedding-8B (local), selected via config.
 Supports both text queries and image queries (from attachments or existing pages).
 """
 
@@ -14,15 +15,6 @@ from ._base import BaseTool, ToolInput, ToolResult
 from ._registry import register_tool
 
 logger = logging.getLogger(__name__)
-
-# Module-level availability check — runs once at import time
-try:
-    from rag_confidence import score_retrieval_general as _score_retrieval_general
-
-    _HAS_RAG_CONFIDENCE = True
-except ImportError:
-    _HAS_RAG_CONFIDENCE = False
-    logger.debug("rag_confidence not available — QPP scoring disabled")
 
 
 class SearchInput(ToolInput):
@@ -92,7 +84,7 @@ class SearchTool(BaseTool):
     """
     Semantic search over document corpus (VL mode).
 
-    Jina v4 cosine similarity on page embeddings -> returns page images (base64 PNG).
+    Cosine similarity on page embeddings -> returns page images (base64 PNG).
     Supports text queries AND image queries (from attachments or existing pages).
     """
 
@@ -103,7 +95,7 @@ class SearchTool(BaseTool):
         "or image_page_id (existing page)."
     )
     detailed_help = """
-    Semantic search using Jina v4 (2048-dim) embeddings.
+    Semantic search across document corpus.
 
     **Text search (default):**
     - search(query="What is safety margin?", k=5)
@@ -220,8 +212,7 @@ class SearchTool(BaseTool):
                     error=f"Image search failed: {type(e).__name__}: {e}",
                 )
 
-            search_method = "vl_jina_v4_image"
-            confidence_result = None  # QPP not applicable for image search
+            search_method = "vl_image"
         else:
             logger.info(
                 "VL search: '%s...' (k=%d, category=%s)",
@@ -231,7 +222,7 @@ class SearchTool(BaseTool):
             )
 
             try:
-                results, query_embedding = self.vl_retriever.search_with_embedding(
+                results = self.vl_retriever.search(
                     query=query,
                     k=k,
                     document_filter=filter_document,
@@ -245,29 +236,7 @@ class SearchTool(BaseTool):
                     error=f"VL search failed: {type(e).__name__}: {e}",
                 )
 
-            search_method = "vl_jina_v4"
-
-            # QPP confidence scoring (best-effort — never blocks search)
-            confidence_result = None
-            if _HAS_RAG_CONFIDENCE:
-                try:
-                    all_similarities = self.vector_store.get_all_vl_similarities(
-                        query_embedding
-                    )
-                    if len(all_similarities) > 0:
-                        confidence_result = _score_retrieval_general(
-                            query, all_similarities
-                        )
-                        logger.info(
-                            "QPP confidence: %.3f (%s) for '%s...'",
-                            confidence_result["confidence"],
-                            confidence_result["band"],
-                            query[:40],
-                        )
-                except (RuntimeError, ValueError, OSError) as e:
-                    logger.warning(
-                        "QPP confidence scoring failed (non-fatal): %s", e
-                    )
+            search_method = "vl_text"
 
         # Build result data (shared for both text and image search)
         return self._build_search_result(
@@ -277,7 +246,6 @@ class SearchTool(BaseTool):
             filter_document=filter_document,
             filter_category=filter_category,
             search_method=search_method,
-            confidence_result=confidence_result,
         )
 
     def _build_search_result(
@@ -288,7 +256,6 @@ class SearchTool(BaseTool):
         filter_document: Optional[str],
         filter_category: Optional[str],
         search_method: str,
-        confidence_result: Optional[dict] = None,
     ) -> ToolResult:
         """Build ToolResult from VLPageResult list (shared by text and image search)."""
         formatted = []
@@ -353,23 +320,10 @@ class SearchTool(BaseTool):
                 "score_range": (round(min(scores), 4), round(max(scores), 4)),
             }
 
-        # Include QPP retrieval confidence if available
-        if confidence_result:
-            result_metadata["retrieval_confidence"] = {
-                "score": round(confidence_result["confidence"], 4),
-                "band": confidence_result["band"],
-            }
-
         citations = [
             f"[{i+1}] {r['document_id']} p.{r['page_number']} (score: {r['score']:.3f})"
             for i, r in enumerate(formatted)
         ]
-
-        # Append confidence annotation for the agent
-        if confidence_result:
-            citations.append(
-                f"[Retrieval confidence: {confidence_result['confidence']:.2f} ({confidence_result['band']})]"
-            )
 
         return ToolResult(
             success=True,

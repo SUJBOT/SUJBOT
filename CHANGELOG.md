@@ -1,5 +1,58 @@
 # Changelog — 13.–19. února 2026
 
+## 26. Deploy Qwen3-VL-8B-Instruct on gx10-fa34 (19. února 2026)
+
+### Infrastructure
+- **New vLLM container** (`vllm-qwen3vl-8b`) on gx10-fa34, coexisting with embedding server
+- Model: Qwen/Qwen3-VL-8B-Instruct-FP8 (official FP8 quant, served as `Qwen/Qwen3-VL-8B-Instruct`), port 8082/18082
+- Flags: `--max-model-len 32768 --max-num-batched-tokens 16384 --max-num-seqs 16 --gpu-memory-utilization 0.60 --enable-auto-tool-choice --tool-call-parser hermes`
+- GPU: model 10.5 GiB + embedding 17 GiB = ~78 GiB / 119 GiB (~41 GiB headroom)
+- SSH tunnel + socat bridge (18082) + UFW rule for Docker access
+
+### FP8 benchmark results (5 iterations, 2 warmup)
+- **Decode**: 20-23 tok/s (FP8 halves weight reads per token vs BF16's 11-13 tok/s → +73%)
+- **TTFT**: 0.09-0.38s (prefix caching helps; BF16 was 0.15-0.66s)
+- **KV cache**: 405K tokens, 12.35x concurrency at 32K context
+- **E2E**: text_only ~2.1s, rag_5pages ~10.5s, tool_call ~1.9s
+- **Think ratio**: 73-100% (Qwen3 Instruct still activates hybrid thinking)
+- Quality: "nearly identical to BF16" per official Qwen benchmarks
+
+### Benchmark script enhancements (`scripts/vllm_benchmark.py`)
+- Added `--model` CLI argument (default: Qwen3-VL-30B) — configurable model name per endpoint
+- Added `--compare-model` argument — different models on different endpoints for A/B comparison
+- Labels now include model name for clarity in output tables
+
+## 25. Upload modal with drag-and-drop + document access level (19. února 2026)
+
+### New UploadModal component
+- Full-screen modal with drag-and-drop file upload, replaces inline upload in DocumentBrowser
+- Batch file selection (multiple files at once)
+- Per-file category selector (legislation / documentation) with amber/blue toggle buttons
+- New access level selector (secret / public) with lock/globe icons
+- Progress bar with stage labels during upload
+- i18n: full CZ/EN translations for all new labels
+
+### Backend: access_level support
+- `access_level` column added to `vectors.documents` (CHECK constraint: `public`/`secret`, default `public`)
+- Upload endpoint accepts `access_level` form parameter
+- Admin PATCH endpoint accepts optional `access_level` alongside `category`
+- COALESCE-safe UPSERT — prevents NULL constraint violations when only one field is provided
+
+### DocumentBrowser improvements
+- Inline category toggle: click the category icon (Scale/BookOpen) to switch a document between legislation and documentation instantly
+- Simplified to pure document browser — upload UI moved to UploadModal
+- Click-outside handler respects open UploadModal (won't close browser while modal is open)
+
+### API fixes
+- `Accept: application/json` header added to all API calls — required for nginx admin route map
+- New `updateDocumentCategory()` method for PATCH requests
+
+### Cleanup
+- Removed QPP-based search confidence scoring (disabled, not production-ready)
+- Simplified search tool and tests (removed confidence bands, QPP feature extraction)
+- Removed unused `postgres_adapter` search confidence methods
+- Deleted `tests/agent/test_search_confidence.py`
+
 ## 24. Fix empty response with local_llm tool calling + 30B model restoration (19. února 2026)
 
 ### Bug fix: "Model returned empty response" when agent uses tools (local variant)

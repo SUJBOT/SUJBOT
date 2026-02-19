@@ -28,7 +28,7 @@ interface ChatContainerProps {
     documentName: string;
     pageStart: number;
     pageEnd: number;
-  } | null, attachments?: Attachment[] | null) => void;
+  } | null, attachments?: Attachment[] | null, webSearchEnabled?: boolean) => void;
   onEditMessage: (messageId: string, newContent: string) => void;
   onRegenerateMessage: (messageId: string) => void;
   onCancelStreaming: () => void;
@@ -65,7 +65,7 @@ export function ChatContainer({
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Wrapper that includes selected context and clears selection after send
-  const handleSendMessage = (message: string, attachments?: Attachment[]) => {
+  const handleSendMessage = (message: string, attachments?: Attachment[], webSearchEnabled?: boolean) => {
     const context = selectedText ? {
       text: selectedText.text,
       documentId: selectedText.documentId,
@@ -74,7 +74,7 @@ export function ChatContainer({
       pageEnd: selectedText.pageEnd,
     } : null;
 
-    onSendMessage(message, true, context, attachments?.length ? attachments : null);
+    onSendMessage(message, true, context, attachments?.length ? attachments : null, webSearchEnabled);
 
     // Auto-clear selection after sending (per user requirement)
     if (selectedText) {

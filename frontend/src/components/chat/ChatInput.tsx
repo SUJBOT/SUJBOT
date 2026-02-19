@@ -3,7 +3,7 @@
  */
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Square, FileText, X, Paperclip } from 'lucide-react';
+import { Send, Square, FileText, X, Paperclip, Globe } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../design-system/utils/cn';
 import { useAuth } from '../../contexts/AuthContext';
@@ -42,7 +42,7 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 const MAX_ATTACHMENTS = 5;
 
 interface ChatInputProps {
-  onSend: (message: string, attachments?: Attachment[]) => void;
+  onSend: (message: string, attachments?: Attachment[], webSearchEnabled?: boolean) => void;
   onCancel?: () => void;  // Cancel streaming
   isStreaming: boolean;   // Whether currently streaming
   disabled: boolean;      // Disabled for other reasons (not streaming)
@@ -59,6 +59,7 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled, refreshSpen
   const selectionLineCount = selectedText
     ? selectedText.text.split('\n').filter(line => line.trim()).length || 1
     : 0;
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [message, setMessage] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
@@ -188,7 +189,7 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled, refreshSpen
     e.preventDefault();
 
     if (hasContent && !disabled && !isStreaming && !isMessageTooLong) {
-      onSend(message.trim(), attachments.length > 0 ? attachments : undefined);
+      onSend(message.trim(), attachments.length > 0 ? attachments : undefined, webSearchEnabled);
       setMessage('');
       setAttachments([]);
     }
@@ -282,6 +283,37 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled, refreshSpen
               title={t('attachments.attach')}
             >
               <Paperclip size={18} />
+            </button>
+          )}
+
+          {/* Web search toggle */}
+          {!isStreaming && (
+            <button
+              type="button"
+              onClick={() => setWebSearchEnabled(prev => !prev)}
+              disabled={disabled}
+              className={cn(
+                'flex-shrink-0 self-center',
+                'w-10 h-10 rounded-xl',
+                'flex items-center justify-center',
+                'transition-all duration-200',
+                disabled
+                  ? 'text-accent-300 dark:text-accent-700 cursor-not-allowed'
+                  : webSearchEnabled
+                    ? cn(
+                        'text-blue-600 dark:text-blue-400',
+                        'bg-blue-50 dark:bg-blue-900/30',
+                        'hover:bg-blue-100 dark:hover:bg-blue-900/50',
+                      )
+                    : cn(
+                        'text-accent-400 dark:text-accent-600',
+                        'hover:text-accent-600 dark:hover:text-accent-300',
+                        'hover:bg-accent-100 dark:hover:bg-accent-800',
+                      )
+              )}
+              title={webSearchEnabled ? t('chat.webSearchOn') : t('chat.webSearchOff')}
+            >
+              <Globe size={18} />
             </button>
           )}
 

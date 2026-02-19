@@ -25,7 +25,21 @@
     "reconnecting": "Připojuji se k nahrávání...",
     "unsupportedFormat": "Nepodporovaný formát. Podporováno: PDF, DOCX, TXT, Markdown, HTML, LaTeX",
     "fileTooLarge": "Soubor je příliš velký (max 100 MB)",
-    "alreadyExists": "Dokument již existuje"
+    "alreadyExists": "Dokument již existuje",
+    "accessLevel": "Klasifikace dokumentu",
+    "secret": "Tajné",
+    "public": "Volně přístupné",
+    "dropzone": "Přetáhněte soubor sem",
+    "dropzoneOr": "nebo",
+    "dropzoneBrowse": "vyberte soubor",
+    "dropzoneFormats": "PDF, DOCX, TXT, Markdown, HTML, LaTeX (max 100 MB)",
+    "someFilesSkipped": "{{count}} soubor(ů) přeskočeno (nepodporovaný formát nebo příliš velký)",
+    "categoryUpdateFailed": "Nepodařilo se změnit kategorii",
+    "filesSelected": "{{count}} souborů vybráno",
+    "uploadProgress": "Nahrávám {{current}} z {{total}}",
+    "uploadAllComplete": "Všech {{count}} dokumentů úspěšně indexováno",
+    "someUploadsFailed": "{{success}} z {{total}} nahráno, {{failed}} selhalo",
+    "remove": "Odebrat"
   },
   "login": {
     "email": "E-mail",
@@ -73,7 +87,9 @@
     "spendingUsed": "Utraceno",
     "copyResponse": "Kopírovat odpověď",
     "copied": "Zkopírováno!",
-    "thinking": "Přemýšlím..."
+    "thinking": "Přemýšlím...",
+    "webSearchOn": "Webové vyhledávání zapnuto",
+    "webSearchOff": "Webové vyhledávání vypnuto"
   },
   "progress": {
     "planning": "Plánování",
@@ -158,7 +174,8 @@
     "verifyingSession": "Ověřuji relaci...",
     "justNow": "Právě teď",
     "ok": "OK",
-    "cancel": "Zrušit"
+    "cancel": "Zrušit",
+    "refresh": "Obnovit"
   },
   "language": {
     "switchTo": "Přepnout jazyk",

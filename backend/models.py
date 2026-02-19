@@ -115,6 +115,10 @@ class ChatRequest(BaseModel):
         None,
         description="File attachments (images/PDFs) for multimodal context",
     )
+    web_search_enabled: bool = Field(
+        False,
+        description="Enable web search tool for this request",
+    )
 
     @field_validator("attachments")
     @classmethod
