@@ -404,6 +404,63 @@ export class ApiService {
   }
 
   /**
+   * Upload multiple images as a single document, streaming indexing progress via SSE
+   */
+  async *uploadImages(
+    files: File[],
+    signal?: AbortSignal,
+    category?: string,
+    accessLevel?: string
+  ): AsyncGenerator<SSEEvent, void, unknown> {
+    const formData = new FormData();
+    for (const file of files) {
+      formData.append('files', file);
+    }
+    if (category) formData.append('category', category);
+    if (accessLevel) formData.append('access_level', accessLevel);
+
+    let response;
+    try {
+      response = await fetch(`${API_BASE_URL}/documents/upload-images`, {
+        method: 'POST',
+        credentials: 'include',
+        body: formData,
+        signal,
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') return;
+      yield {
+        event: 'error',
+        data: { error: `Upload failed: ${(error as Error).message}`, type: 'NetworkError' },
+      };
+      return;
+    }
+
+    if (!response.ok) {
+      let detail = `Upload failed (${response.status})`;
+      try {
+        const errorData = await response.json();
+        detail = errorData.detail || detail;
+      } catch (e) {
+        console.warn('Failed to parse upload error response:', e);
+      }
+      yield {
+        event: 'error',
+        data: { error: detail, type: 'HTTPError', status: response.status },
+      };
+      return;
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      yield { event: 'error', data: { error: 'No response body', type: 'NoResponseBody' } };
+      return;
+    }
+
+    yield* parseSSEStream(reader, { timeoutMs: 10 * 60 * 1000, abortSignal: signal });
+  }
+
+  /**
    * Stream clarification response using Server-Sent Events (SSE)
    *
    * Called when user responds to clarification questions. Resumes the workflow.

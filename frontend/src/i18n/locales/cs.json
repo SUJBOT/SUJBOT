@@ -23,7 +23,7 @@
     "summarizing": "Generuji shrnutí stránek...",
     "graph_extraction": "Extrakce entit...",
     "reconnecting": "Připojuji se k nahrávání...",
-    "unsupportedFormat": "Nepodporovaný formát. Podporováno: PDF, DOCX, TXT, Markdown, HTML, LaTeX",
+    "unsupportedFormat": "Nepodporovaný formát. Podporováno: PDF, DOCX, TXT, Markdown, HTML, LaTeX, obrázky (PNG, JPG, TIFF, BMP, WebP)",
     "fileTooLarge": "Soubor je příliš velký (max 100 MB)",
     "alreadyExists": "Dokument již existuje",
     "accessLevel": "Klasifikace dokumentu",
@@ -32,14 +32,15 @@
     "dropzone": "Přetáhněte soubor sem",
     "dropzoneOr": "nebo",
     "dropzoneBrowse": "vyberte soubor",
-    "dropzoneFormats": "PDF, DOCX, TXT, Markdown, HTML, LaTeX (max 100 MB)",
+    "dropzoneFormats": "PDF, DOCX, TXT, MD, HTML, LaTeX, PNG, JPG, TIFF, BMP, WebP (max 100 MB)",
     "someFilesSkipped": "{{count}} soubor(ů) přeskočeno (nepodporovaný formát nebo příliš velký)",
     "categoryUpdateFailed": "Nepodařilo se změnit kategorii",
     "filesSelected": "{{count}} souborů vybráno",
     "uploadProgress": "Nahrávám {{current}} z {{total}}",
     "uploadAllComplete": "Všech {{count}} dokumentů úspěšně indexováno",
     "someUploadsFailed": "{{success}} z {{total}} nahráno, {{failed}} selhalo",
-    "remove": "Odebrat"
+    "remove": "Odebrat",
+    "convertingImages": "Převod obrázků na dokument..."
   },
   "login": {
     "email": "E-mail",
@@ -121,7 +122,10 @@
     "auditingCitations": "Audituji citace",
     "synthesizingInfo": "Syntetizuji informace",
     "generatingReportMsg": "Generuji report",
-    "runningAgent": "Spouštím {{agent}}"
+    "runningAgent": "Spouštím {{agent}}",
+    "routingClassifying": "Klasifikuji dotaz...",
+    "routingDelegating": "Předávám myslícímu agentovi...",
+    "routingDirect": "Odpovídám přímo..."
   },
   "welcome": {
     "suggestedQuestions": "Návrhy",

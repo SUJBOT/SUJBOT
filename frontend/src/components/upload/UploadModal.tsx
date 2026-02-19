@@ -21,6 +21,7 @@ import {
   AlertCircle,
   FileText,
   Trash2,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../design-system/utils/cn';
@@ -33,7 +34,11 @@ interface UploadModalProps {
   onUploadComplete: () => void;
 }
 
-const SUPPORTED_EXTENSIONS = ['.pdf', '.docx', '.txt', '.md', '.html', '.htm', '.tex', '.latex'];
+const SUPPORTED_EXTENSIONS = [
+  '.pdf', '.docx', '.txt', '.md', '.html', '.htm', '.tex', '.latex',
+  '.png', '.jpg', '.jpeg', '.tiff', '.tif', '.bmp', '.webp',
+];
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.tiff', '.tif', '.bmp', '.webp']);
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
 
 type Category = 'documentation' | 'legislation';
@@ -67,6 +72,8 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
   const [currentProgress, setCurrentProgress] = useState<UploadProgress | null>(null);
   const [uploadResults, setUploadResults] = useState<UploadFileResult[]>([]);
   const abortRef = useRef<AbortController | null>(null);
+  const [currentLabel, setCurrentLabel] = useState<string>('');
+  const [totalJobs, setTotalJobs] = useState(0);
 
   // Reset state when modal closes
   useEffect(() => {
@@ -80,6 +87,8 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
       setCurrentProgress(null);
       setUploadResults([]);
       abortRef.current = null;
+      setCurrentLabel('');
+      setTotalJobs(0);
     }
   }, [isOpen]);
 
@@ -98,6 +107,11 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
       file.name.toLowerCase().endsWith(ext)
     );
     return hasValidExt && file.size <= MAX_FILE_SIZE;
+  }, []);
+
+  const isImageFile = useCallback((file: File): boolean => {
+    const ext = '.' + file.name.split('.').pop()?.toLowerCase();
+    return IMAGE_EXTENSIONS.has(ext);
   }, []);
 
   const addFiles = useCallback(
@@ -193,13 +207,35 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
     setIsUploading(true);
     setUploadResults([]);
 
+    // Partition into images and documents
+    const imageEntries = files.filter((f) => isImageFile(f.file));
+    const docEntries = files.filter((f) => !isImageFile(f.file));
+
+    // Build ordered list: image batch first (as one item), then individual docs
+    type UploadJob = { type: 'image-batch'; entries: FileEntry[] } | { type: 'document'; entry: FileEntry };
+    const jobs: UploadJob[] = [];
+    if (imageEntries.length > 0) {
+      jobs.push({ type: 'image-batch', entries: imageEntries });
+    }
+    for (const entry of docEntries) {
+      jobs.push({ type: 'document', entry });
+    }
+
+    setTotalJobs(jobs.length);
+
     const results: UploadFileResult[] = [];
     let anySuccess = false;
 
-    for (let i = 0; i < files.length; i++) {
-      const entry = files[i];
+    for (let i = 0; i < jobs.length; i++) {
+      const job = jobs[i];
       setCurrentIndex(i);
       setCurrentProgress(null);
+
+      if (job.type === 'image-batch') {
+        setCurrentLabel(`${job.entries.length} images`);
+      } else {
+        setCurrentLabel(job.entry.file.name);
+      }
 
       abortRef.current = new AbortController();
 
@@ -207,12 +243,21 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
         let fileResult: UploadResult | undefined;
         let fileError: string | undefined;
 
-        for await (const event of apiService.uploadDocument(
-          entry.file,
-          abortRef.current.signal,
-          entry.category,
-          accessLevel
-        )) {
+        const stream = job.type === 'image-batch'
+          ? apiService.uploadImages(
+              job.entries.map((e) => e.file),
+              abortRef.current.signal,
+              job.entries[0].category,
+              accessLevel
+            )
+          : apiService.uploadDocument(
+              job.entry.file,
+              abortRef.current.signal,
+              job.entry.category,
+              accessLevel
+            );
+
+        for await (const event of stream) {
           if (event.event === 'progress') {
             setCurrentProgress(event.data as UploadProgress);
           } else if (event.event === 'complete') {
@@ -223,34 +268,55 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
           }
         }
 
-        results.push({
-          id: entry.id,
-          filename: entry.file.name,
-          success: !!fileResult,
-          result: fileResult,
-          error: fileError ?? (!fileResult ? 'Upload ended without confirmation' : undefined),
-        });
+        if (job.type === 'image-batch') {
+          const batchName = `${job.entries.length} images`;
+          results.push({
+            id: job.entries[0].id,
+            filename: batchName,
+            success: !!fileResult,
+            result: fileResult,
+            error: fileError ?? (!fileResult ? 'Upload ended without confirmation' : undefined),
+          });
+        } else {
+          results.push({
+            id: job.entry.id,
+            filename: job.entry.file.name,
+            success: !!fileResult,
+            result: fileResult,
+            error: fileError ?? (!fileResult ? 'Upload ended without confirmation' : undefined),
+          });
+        }
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') {
-          // User cancelled — stop the whole batch
-          results.push({ id: entry.id, filename: entry.file.name, success: false, error: 'Cancelled' });
+          const label = job.type === 'image-batch'
+            ? `${job.entries.length} images`
+            : job.entry.file.name;
+          const id = job.type === 'image-batch' ? job.entries[0].id : job.entry.id;
+          results.push({ id, filename: label, success: false, error: 'Cancelled' });
           break;
         }
+        const label = job.type === 'image-batch'
+          ? `${job.entries.length} images`
+          : job.entry.file.name;
+        const id = job.type === 'image-batch' ? job.entries[0].id : job.entry.id;
         results.push({
-          id: entry.id,
-          filename: entry.file.name,
+          id,
+          filename: label,
           success: false,
           error: err instanceof Error ? err.message : 'Unexpected error',
         });
       }
     }
 
-    // Mark remaining files as not attempted (after cancel break)
-    const attemptedIds = new Set(results.map(r => r.id));
-    for (const entry of files) {
-      if (!attemptedIds.has(entry.id)) {
-        results.push({ id: entry.id, filename: entry.file.name, success: false, error: 'Cancelled' });
-      }
+    // Mark remaining jobs as not attempted (after cancel break)
+    const attemptedCount = results.length;
+    for (let j = attemptedCount; j < jobs.length; j++) {
+      const job = jobs[j];
+      const label = job.type === 'image-batch'
+        ? `${job.entries.length} images`
+        : job.entry.file.name;
+      const id = job.type === 'image-batch' ? job.entries[0].id : job.entry.id;
+      results.push({ id, filename: label, success: false, error: 'Cancelled' });
     }
 
     setUploadResults(results);
@@ -259,7 +325,7 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
     abortRef.current = null;
 
     if (anySuccess) onUploadComplete();
-  }, [files, accessLevel, onUploadComplete]);
+  }, [files, accessLevel, isImageFile, onUploadComplete]);
 
   const handleCancel = useCallback(() => {
     abortRef.current?.abort();
@@ -375,7 +441,7 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".pdf,.docx,.txt,.md,.html,.htm,.tex,.latex"
+                accept=".pdf,.docx,.txt,.md,.html,.htm,.tex,.latex,.png,.jpg,.jpeg,.tiff,.tif,.bmp,.webp"
                 multiple
                 onChange={handleInputChange}
                 className="hidden"
@@ -431,7 +497,11 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
                         key={entry.id}
                         className="flex items-center gap-3 px-3 py-2 group"
                       >
-                        <FileText size={16} className="text-accent-400 dark:text-accent-500 flex-shrink-0" />
+                        {isImageFile(entry.file) ? (
+                          <ImageIcon size={16} className="text-accent-400 dark:text-accent-500 flex-shrink-0" />
+                        ) : (
+                          <FileText size={16} className="text-accent-400 dark:text-accent-500 flex-shrink-0" />
+                        )}
                         <div className="flex-1 min-w-0">
                           <p className="text-sm text-accent-800 dark:text-accent-200 truncate">
                             {entry.file.name}
@@ -524,7 +594,7 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
               <div className="text-sm font-medium text-accent-700 dark:text-accent-300 text-center">
                 {t('documentBrowser.uploadProgress', {
                   current: currentIndex + 1,
-                  total: files.length,
+                  total: totalJobs,
                 })}
               </div>
 
@@ -532,7 +602,7 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
               <div className="flex items-center gap-2 px-3 py-2 bg-accent-50 dark:bg-accent-800/50 rounded-lg">
                 <FileText size={16} className="text-blue-500 flex-shrink-0" />
                 <span className="text-sm text-accent-700 dark:text-accent-300 truncate">
-                  {files[currentIndex]?.file.name}
+                  {currentLabel}
                 </span>
               </div>
 
@@ -556,7 +626,7 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
               <div className="w-full h-1 bg-accent-200 dark:bg-accent-700 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-green-500 rounded-full transition-all duration-300"
-                  style={{ width: `${((currentIndex) / files.length) * 100}%` }}
+                  style={{ width: `${((currentIndex) / totalJobs) * 100}%` }}
                 />
               </div>
 
