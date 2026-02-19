@@ -328,17 +328,23 @@ export class ApiService {
     documentId: string,
     updates: { category?: string; access_level?: string }
   ): Promise<void> {
-    const response = await fetch(
-      `${API_BASE_URL}/admin/documents/${encodeURIComponent(documentId)}/category`,
-      {
-        method: 'PATCH',
-        headers: this.getHeaders(),
-        credentials: 'include',
-        body: JSON.stringify(updates),
-      }
-    );
+    let response;
+    try {
+      response = await fetch(
+        `${API_BASE_URL}/admin/documents/${encodeURIComponent(documentId)}/category`,
+        {
+          method: 'PATCH',
+          headers: this.getHeaders(),
+          credentials: 'include',
+          body: JSON.stringify(updates),
+        }
+      );
+    } catch (error) {
+      throw new Error(`Network error updating document: ${(error as Error).message}`);
+    }
     if (!response.ok) {
-      throw new Error(`Failed to update document: ${response.status}`);
+      const errorData = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }));
+      throw new Error(errorData.detail || `Failed to update document: ${response.status}`);
     }
   }
 

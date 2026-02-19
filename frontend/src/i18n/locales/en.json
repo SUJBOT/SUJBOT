@@ -33,8 +33,8 @@
     "dropzoneOr": "or",
     "dropzoneBrowse": "browse files",
     "dropzoneFormats": "PDF, DOCX, TXT, Markdown, HTML, LaTeX (max 100 MB)",
-    "dropzoneFolderHint": "You can also drop a folder",
-    "browseFolder": "Browse folder",
+    "someFilesSkipped": "{{count}} file(s) skipped (unsupported format or too large)",
+    "categoryUpdateFailed": "Failed to update category",
     "filesSelected": "{{count}} files selected",
     "uploadProgress": "Uploading {{current}} of {{total}}",
     "uploadAllComplete": "All {{count}} documents indexed successfully",
@@ -173,7 +173,8 @@
     "verifyingSession": "Verifying session...",
     "justNow": "Just now",
     "ok": "OK",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "refresh": "Refresh"
   },
   "language": {
     "switchTo": "Switch language",

@@ -1,7 +1,7 @@
 /**
  * DocumentBrowser Component
  *
- * Dropdown menu for browsing and selecting available PDF documents.
+ * Dropdown menu for browsing and selecting available documents.
  * Upload is handled via the separate UploadModal component.
  */
 
@@ -12,6 +12,7 @@ import { cn } from '../../design-system/utils/cn';
 import { apiService } from '../../services/api';
 import type { DocumentInfo } from '../../types';
 import { useCitationContext } from '../../contexts/CitationContext';
+import { useAuth } from '../../contexts/AuthContext';
 import { UploadModal } from '../upload/UploadModal';
 
 interface DocumentBrowserProps {
@@ -22,6 +23,7 @@ interface DocumentBrowserProps {
 export function DocumentBrowser({ isOpen, onClose }: DocumentBrowserProps) {
   const { t } = useTranslation();
   const { openPdf } = useCitationContext();
+  const { user } = useAuth();
   const [documents, setDocuments] = useState<DocumentInfo[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,8 +87,9 @@ export function DocumentBrowser({ isOpen, onClose }: DocumentBrowserProps) {
       );
     } catch (err) {
       console.error('Failed to update category:', err);
+      setError(t('documentBrowser.categoryUpdateFailed'));
     }
-  }, []);
+  }, [t]);
 
   const formatSize = (bytes: number): string => {
     if (bytes < 1024 * 1024) {
@@ -150,7 +153,7 @@ export function DocumentBrowser({ isOpen, onClose }: DocumentBrowserProps) {
                 'transition-colors',
                 'disabled:opacity-50'
               )}
-              title="Refresh"
+              title={t('common.refresh')}
             >
               <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
             </button>
@@ -215,23 +218,33 @@ export function DocumentBrowser({ isOpen, onClose }: DocumentBrowserProps) {
                   'group'
                 )}
               >
-                {/* Category toggle icon */}
-                <button
-                  onClick={(e) => { e.stopPropagation(); handleToggleCategory(doc); }}
-                  title={doc.category === 'legislation'
-                    ? t('documentBrowser.documentation')
-                    : t('documentBrowser.legislation')}
-                  className={cn(
-                    'flex-shrink-0 p-0.5 rounded transition-colors',
-                    'hover:bg-accent-200 dark:hover:bg-accent-700'
-                  )}
-                >
-                  {doc.category === 'legislation' ? (
-                    <Scale size={16} className="text-amber-500 dark:text-amber-400" />
-                  ) : (
-                    <BookOpen size={16} className="text-blue-500 dark:text-blue-400" />
-                  )}
-                </button>
+                {/* Category icon — clickable toggle for admins, static for others */}
+                {user?.is_admin ? (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleToggleCategory(doc); }}
+                    title={doc.category === 'legislation'
+                      ? t('documentBrowser.documentation')
+                      : t('documentBrowser.legislation')}
+                    className={cn(
+                      'flex-shrink-0 p-0.5 rounded transition-colors',
+                      'hover:bg-accent-200 dark:hover:bg-accent-700'
+                    )}
+                  >
+                    {doc.category === 'legislation' ? (
+                      <Scale size={16} className="text-amber-500 dark:text-amber-400" />
+                    ) : (
+                      <BookOpen size={16} className="text-blue-500 dark:text-blue-400" />
+                    )}
+                  </button>
+                ) : (
+                  <span className="flex-shrink-0 p-0.5">
+                    {doc.category === 'legislation' ? (
+                      <Scale size={16} className="text-amber-500 dark:text-amber-400" />
+                    ) : (
+                      <BookOpen size={16} className="text-blue-500 dark:text-blue-400" />
+                    )}
+                  </span>
+                )}
                 {/* Document name — opens PDF */}
                 <button
                   onClick={() => handleSelectDocument(doc)}

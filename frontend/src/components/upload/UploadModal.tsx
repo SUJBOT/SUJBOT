@@ -1,8 +1,8 @@
 /**
- * UploadModal — Batch document upload with drag & drop (files or folders).
+ * UploadModal — Batch document upload with drag & drop.
  *
  * Features:
- * - Drag-and-drop files or entire folders (+ click to browse)
+ * - Drag-and-drop files (+ click to browse)
  * - Per-file category toggle switch (legislation / documentation)
  * - Global access level selector (secret / public)
  * - Sequential upload with per-file progress
@@ -113,7 +113,7 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
           continue;
         }
         valid.push({
-          id: `f_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          id: crypto.randomUUID(),
           file,
           category: 'documentation',
         });
@@ -121,6 +121,8 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
 
       if (skipped > 0 && valid.length === 0) {
         setValidationError(t('documentBrowser.unsupportedFormat'));
+      } else if (skipped > 0) {
+        setValidationError(t('documentBrowser.someFilesSkipped', { count: skipped }));
       }
 
       if (valid.length > 0) {
@@ -361,7 +363,7 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
                 </div>
               </div>
 
-              {/* Hidden inputs: files + folder */}
+              {/* Hidden file input */}
               <input
                 ref={fileInputRef}
                 type="file"

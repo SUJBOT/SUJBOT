@@ -1,7 +1,8 @@
 """
 Search Tool — VL-only.
 
-Jina v4 cosine similarity on vectors.vl_pages -> page images (base64 PNG).
+Cosine similarity on vectors.vl_pages -> page images (base64 PNG).
+Embedder: Jina v4 (cloud) or Qwen3-VL-Embedding-8B (local), selected via config.
 Supports both text queries and image queries (from attachments or existing pages).
 """
 
@@ -83,7 +84,7 @@ class SearchTool(BaseTool):
     """
     Semantic search over document corpus (VL mode).
 
-    Jina v4 cosine similarity on page embeddings -> returns page images (base64 PNG).
+    Cosine similarity on page embeddings -> returns page images (base64 PNG).
     Supports text queries AND image queries (from attachments or existing pages).
     """
 
@@ -94,7 +95,7 @@ class SearchTool(BaseTool):
         "or image_page_id (existing page)."
     )
     detailed_help = """
-    Semantic search using Jina v4 (2048-dim) embeddings.
+    Semantic search across document corpus.
 
     **Text search (default):**
     - search(query="What is safety margin?", k=5)
@@ -211,7 +212,7 @@ class SearchTool(BaseTool):
                     error=f"Image search failed: {type(e).__name__}: {e}",
                 )
 
-            search_method = "vl_jina_v4_image"
+            search_method = "vl_image"
         else:
             logger.info(
                 "VL search: '%s...' (k=%d, category=%s)",
@@ -235,7 +236,7 @@ class SearchTool(BaseTool):
                     error=f"VL search failed: {type(e).__name__}: {e}",
                 )
 
-            search_method = "vl_jina_v4"
+            search_method = "vl_text"
 
         # Build result data (shared for both text and image search)
         return self._build_search_result(

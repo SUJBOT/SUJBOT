@@ -33,8 +33,8 @@
     "dropzoneOr": "nebo",
     "dropzoneBrowse": "vyberte soubor",
     "dropzoneFormats": "PDF, DOCX, TXT, Markdown, HTML, LaTeX (max 100 MB)",
-    "dropzoneFolderHint": "Můžete také přetáhnout složku",
-    "browseFolder": "Vybrat složku",
+    "someFilesSkipped": "{{count}} soubor(ů) přeskočeno (nepodporovaný formát nebo příliš velký)",
+    "categoryUpdateFailed": "Nepodařilo se změnit kategorii",
     "filesSelected": "{{count}} souborů vybráno",
     "uploadProgress": "Nahrávám {{current}} z {{total}}",
     "uploadAllComplete": "Všech {{count}} dokumentů úspěšně indexováno",
@@ -174,7 +174,8 @@
     "verifyingSession": "Ověřuji relaci...",
     "justNow": "Právě teď",
     "ok": "OK",
-    "cancel": "Zrušit"
+    "cancel": "Zrušit",
+    "refresh": "Obnovit"
   },
   "language": {
     "switchTo": "Přepnout jazyk",

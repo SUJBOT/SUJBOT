@@ -311,6 +311,7 @@ class SingleAgentRunner:
             stream_progress: If True, yields intermediate progress events
             conversation_history: Previous messages for context
             attachment_blocks: Multimodal content blocks from user attachments
+            disabled_tools: Optional set of tool names to exclude from this request
 
         Yields:
             Dict events. Final event has type='final'.

@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from src.utils.security import sanitize_error
+
 from fastapi import (
     APIRouter,
     Depends,
@@ -857,7 +859,7 @@ async def _run_pipeline_task(state: UploadState, content: bytes) -> None:
         state.events.append(
             {
                 "event": "error",
-                "data": json.dumps({"message": str(e), "stage": "converting"}),
+                "data": json.dumps({"message": sanitize_error(e), "stage": "converting"}),
             }
         )
 
@@ -875,7 +877,7 @@ async def _run_pipeline_task(state: UploadState, content: bytes) -> None:
         state.events.append(
             {
                 "event": "error",
-                "data": json.dumps({"message": str(e), "stage": "indexing"}),
+                "data": json.dumps({"message": sanitize_error(e), "stage": "indexing"}),
             }
         )
 
