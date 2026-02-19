@@ -102,7 +102,7 @@
     "router_model": "qwen3-vl-8b-local",
     "worker_model": "qwen3-vl-30b-local",
     "router_prompt_file": "prompts/agents/router.txt",
-    "router_max_tokens": 2048,
+    "router_max_tokens": 1024,
     "router_temperature": 0.1,
     "thinking_budgets": {
       "low": 1024,

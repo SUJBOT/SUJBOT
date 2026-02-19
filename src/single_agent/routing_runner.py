@@ -71,7 +71,10 @@ DELEGATE_TOOL_SCHEMA = {
 ROUTER_SIMPLE_TOOLS = ["get_document_list", "get_stats", "web_search"]
 
 # Shared extra_body to disable thinking on 8B router calls
-_THINKING_DISABLED_BODY = {"chat_template_kwargs": {"enable_thinking": False}}
+_THINKING_DISABLED_BODY = {
+    "chat_template_kwargs": {"enable_thinking": False},
+    "repetition_penalty": 1.1,
+}
 
 # Provider exceptions to catch (typed + OpenAI SDK + standard Python network errors)
 try:
