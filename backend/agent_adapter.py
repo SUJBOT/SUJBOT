@@ -1,10 +1,9 @@
 """
-Agent Adapter - Wraps SingleAgentRunner (or RoutingAgentRunner) for web frontend.
+Agent Adapter - Wraps SingleAgentRunner for web frontend.
 
 This adapter:
-1. Initializes runner: RoutingAgentRunner (8B router → 30B worker) when
-   routing.enabled=true, otherwise plain SingleAgentRunner
-2. Handles SSE event formatting (routing, tool_call, thinking_delta, text_delta, etc.)
+1. Initializes SingleAgentRunner
+2. Handles SSE event formatting (tool_call, thinking_delta, text_delta, etc.)
 3. Tracks cost per message
 4. Provides clean interface for FastAPI
 """
@@ -17,7 +16,6 @@ from pathlib import Path
 from typing import AsyncGenerator, Dict, Any, List, Optional
 
 from src.single_agent.runner import SingleAgentRunner
-from src.single_agent.routing_runner import RoutingAgentRunner
 from src.agent.config import AgentConfig
 from src.cost_tracker import get_global_tracker, reset_global_tracker
 from src.utils.security import sanitize_error
@@ -33,10 +31,10 @@ logger = logging.getLogger(__name__)
 
 class AgentAdapter:
     """
-    Adapter wrapping SingleAgentRunner (or RoutingAgentRunner) for web frontend.
+    Adapter wrapping SingleAgentRunner for web frontend.
 
     Responsibilities:
-    - Initialize runner: RoutingAgentRunner when routing.enabled, else SingleAgentRunner
+    - Initialize SingleAgentRunner
     - Convert runner events to SSE format
     - Track costs per request
     - Resolve variant → model for each request
@@ -105,20 +103,13 @@ class AgentAdapter:
             "storage": full_config.get("storage", {}),
             "agent_tools": full_config.get("agent_tools", {}),
             "single_agent": full_config.get("single_agent", {}),
-            "multi_agent": full_config.get("multi_agent", {}),  # For LangSmith config
+            "langsmith": full_config.get("langsmith", {}),
             "vl": full_config.get("vl", {}),
-            "routing": full_config.get("routing", {}),
         }
 
-        # Initialize runner (routing wrapper if enabled, otherwise plain single-agent)
-        routing_config = full_config.get("routing", {})
-        inner_runner = SingleAgentRunner(runner_config)
-        if routing_config.get("enabled", False):
-            logger.info("Initializing routing agent (8B router → 30B worker)...")
-            self.runner = RoutingAgentRunner(runner_config, inner_runner)
-        else:
-            logger.info("Initializing single-agent system...")
-            self.runner = inner_runner
+        # Initialize single-agent runner
+        logger.info("Initializing single-agent system...")
+        self.runner = SingleAgentRunner(runner_config)
 
         # Track degraded components for health endpoint
         self.degraded_components = []
@@ -188,7 +179,6 @@ class AgentAdapter:
 
         Yields SSE events:
         - tool_health: Tool status before query
-        - routing: Router classification decision (when RoutingAgentRunner is active)
         - progress: Workflow stage updates
         - tool_call: Tool execution events
         - thinking_delta: Thinking content from local LLM
@@ -279,18 +269,7 @@ class AgentAdapter:
             ):
                 event_type = event.get("type")
 
-                if event_type == "routing":
-                    yield {
-                        "event": "routing",
-                        "data": {
-                            "decision": event.get("decision"),
-                            "complexity": event.get("complexity"),
-                            "thinking_budget": event.get("thinking_budget"),
-                        },
-                    }
-                    await asyncio.sleep(0)
-
-                elif event_type == "tool_call":
+                if event_type == "tool_call":
                     yield {
                         "event": "tool_call",
                         "data": {

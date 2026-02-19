@@ -60,6 +60,8 @@ function MainApp() {
     awaitingClarification,
     spendingLimitError,
     spendingRefreshTrigger,
+    webSearchEnabled,
+    setWebSearchEnabled,
     createConversation,
     selectConversation,
     deleteConversation,
@@ -232,6 +234,8 @@ function MainApp() {
             spendingRefreshTrigger={spendingRefreshTrigger}
             spendingLimitError={spendingLimitError}
             onClearSpendingLimitError={clearSpendingLimitError}
+            webSearchEnabled={webSearchEnabled}
+            onToggleWebSearch={() => setWebSearchEnabled(prev => !prev)}
           />
         </div>
 

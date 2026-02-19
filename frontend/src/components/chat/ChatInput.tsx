@@ -49,9 +49,11 @@ interface ChatInputProps {
   refreshSpendingTrigger?: number; // Increment to refresh spending data
   selectedText?: TextSelection | null;  // Selected text from PDF
   onClearSelection?: () => void;  // Clear selection callback
+  webSearchEnabled: boolean;  // Web search toggle state (owned by useChat hook)
+  onToggleWebSearch: () => void;  // Toggle callback
 }
 
-export function ChatInput({ onSend, onCancel, isStreaming, disabled, refreshSpendingTrigger, selectedText, onClearSelection }: ChatInputProps) {
+export function ChatInput({ onSend, onCancel, isStreaming, disabled, refreshSpendingTrigger, selectedText, onClearSelection, webSearchEnabled, onToggleWebSearch }: ChatInputProps) {
   const { t } = useTranslation();
   const { user } = useAuth();
 
@@ -59,7 +61,6 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled, refreshSpen
   const selectionLineCount = selectedText
     ? selectedText.text.split('\n').filter(line => line.trim()).length || 1
     : 0;
-  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [message, setMessage] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
@@ -290,7 +291,7 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled, refreshSpen
           {!isStreaming && (
             <button
               type="button"
-              onClick={() => setWebSearchEnabled(prev => !prev)}
+              onClick={onToggleWebSearch}
               disabled={disabled}
               className={cn(
                 'flex-shrink-0 self-center',

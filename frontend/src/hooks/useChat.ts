@@ -6,7 +6,6 @@
  */
 
 import { useState, useCallback, useRef, useEffect, type SetStateAction, type Dispatch } from 'react';
-import { useTranslation } from 'react-i18next';
 import { apiService } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import type { Message, Conversation, ToolCall, ClarificationData, Attachment } from '../types';
@@ -56,7 +55,6 @@ interface StreamingState {
 }
 
 export function useChat() {
-  const { t } = useTranslation();
   const { isAuthenticated } = useAuth();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   // Current conversation ID - initialized from URL query param for refresh persistence
@@ -504,36 +502,8 @@ export function useChat() {
           apiAttachments,  // Pass file attachments for multimodal context
           webSearchEnabled,  // Per-request web search toggle
         )) {
-          // Handle routing decision (8B router → 30B worker)
-          if (event.event === 'routing') {
-            if (streamState.currentMessage && streamState.currentMessage.agentProgress) {
-              const { decision } = event.data;
-              if (decision === 'classifying') {
-                streamState.currentMessage.agentProgress.currentMessage = t('progress.routingClassifying');
-              } else if (decision === 'delegate') {
-                streamState.currentMessage.agentProgress.currentMessage = t('progress.routingDelegating');
-              } else if (decision === 'direct') {
-                streamState.currentMessage.agentProgress.currentMessage = t('progress.routingDirect');
-              }
-
-              // Update UI
-              setConversations((prev) =>
-                prev.map((c) => {
-                  if (c.id !== updatedConversation.id) return c;
-                  const messages = [...c.messages];
-                  const lastMsg = messages[messages.length - 1];
-                  if (lastMsg?.role === 'assistant') {
-                    messages[messages.length - 1] = { ...streamState.currentMessage! };
-                  } else {
-                    messages.push({ ...streamState.currentMessage! });
-                  }
-                  return { ...c, messages };
-                })
-              );
-            }
-          }
           // Handle tool health check (first event)
-          else if (event.event === 'tool_health') {
+          if (event.event === 'tool_health') {
             // Log tool health status (visible in browser console)
             if (!event.data.healthy) {
               console.warn('Tool health warning:', event.data.summary);
@@ -654,7 +624,7 @@ export function useChat() {
             // Append thinking content (live from local LLM)
             if (!streamState.currentMessage) {
               console.warn('thinking_delta received but no currentMessage exists');
-            } else if (streamState.currentMessage) {
+            } else {
               streamState.currentMessage.thinkingContent =
                 (streamState.currentMessage.thinkingContent || '') + event.data.content;
               streamState.currentMessage.isThinking = true;
@@ -682,7 +652,7 @@ export function useChat() {
             // Thinking phase finished
             if (!streamState.currentMessage) {
               console.warn('thinking_done received but no currentMessage exists');
-            } else if (streamState.currentMessage) {
+            } else {
               streamState.currentMessage.isThinking = false;
               // Keep thinkingContent for now; clear on first text_delta
 

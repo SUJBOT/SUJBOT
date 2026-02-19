@@ -125,10 +125,7 @@
     "auditingCitations": "Audituji citace",
     "synthesizingInfo": "Syntetizuji informace",
     "generatingReportMsg": "Generuji report",
-    "runningAgent": "Spouštím {{agent}}",
-    "routingClassifying": "Klasifikuji dotaz...",
-    "routingDelegating": "Předávám myslícímu agentovi...",
-    "routingDirect": "Odpovídám přímo..."
+    "runningAgent": "Spouštím {{agent}}"
   },
   "welcome": {
     "suggestedQuestions": "Návrhy",

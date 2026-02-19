@@ -39,6 +39,8 @@ interface ChatContainerProps {
   spendingRefreshTrigger?: number;
   spendingLimitError?: SpendingLimitError | null;
   onClearSpendingLimitError?: () => void;
+  webSearchEnabled: boolean;
+  onToggleWebSearch: () => void;
 }
 
 export function ChatContainer({
@@ -55,6 +57,8 @@ export function ChatContainer({
   spendingRefreshTrigger,
   spendingLimitError,
   onClearSpendingLimitError,
+  webSearchEnabled,
+  onToggleWebSearch,
 }: ChatContainerProps) {
   const { t, i18n } = useTranslation();
   const { selectedText, clearSelection } = useCitationContext();
@@ -124,6 +128,8 @@ export function ChatContainer({
                 refreshSpendingTrigger={spendingRefreshTrigger}
                 selectedText={selectedText}
                 onClearSelection={clearSelection}
+                webSearchEnabled={webSearchEnabled}
+                onToggleWebSearch={onToggleWebSearch}
               />
             </div>
           </WelcomeScreen>
@@ -230,6 +236,8 @@ export function ChatContainer({
             refreshSpendingTrigger={spendingRefreshTrigger}
             selectedText={selectedText}
             onClearSelection={clearSelection}
+            webSearchEnabled={webSearchEnabled}
+            onToggleWebSearch={onToggleWebSearch}
           />
         </div>
       )}

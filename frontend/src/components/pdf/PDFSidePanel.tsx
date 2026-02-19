@@ -12,7 +12,7 @@
  * - Mobile fullscreen overlay mode
  */
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { Document, Page, pdfjs } from 'react-pdf';
 import type { TextItem } from 'pdfjs-dist/types/src/display/api';
@@ -89,6 +89,39 @@ const normalizeText = (text: string): string =>
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase();
 
+/**
+ * Memoized Page wrapper — only re-renders when pageNumber, scale, or
+ * customTextRenderer change. Prevents all loaded pages from re-rendering
+ * when search state or loadedPages set updates.
+ */
+const MemoizedPage = React.memo(function MemoizedPage({
+  pageNumber,
+  scale,
+  onRenderSuccess,
+  customTextRenderer,
+}: {
+  pageNumber: number;
+  scale: number;
+  onRenderSuccess: () => void;
+  customTextRenderer?: (textItem: TextItem) => string;
+}) {
+  return (
+    <Page
+      pageNumber={pageNumber}
+      scale={scale}
+      renderTextLayer={true}
+      renderAnnotationLayer={true}
+      onRenderSuccess={onRenderSuccess}
+      customTextRenderer={customTextRenderer}
+      loading={
+        <div className="flex items-center justify-center w-full h-96 bg-white">
+          <Loader2 size={24} className="animate-spin text-accent-400" />
+        </div>
+      }
+    />
+  );
+});
+
 export function PDFSidePanel({
   isOpen,
   documentId,
@@ -123,6 +156,11 @@ export function PDFSidePanel({
   const scrolledToInitialRef = useRef(false);
   const renderedPagesRef = useRef(new Set<number>());
 
+  // Text content cache: avoids re-extracting page text on every search
+  const textCacheRef = useRef<Map<number, string>>(new Map());
+  // Pending scroll target: resolved by handlePageRenderSuccess when page renders
+  const pendingScrollRef = useRef<{ pageNumber: number; matchIndex: number } | null>(null);
+
   // Highlight phrases for chunk matching
   const highlightPhrases = useMemo(() => {
     if (!chunkContent) return [];
@@ -135,7 +173,7 @@ export function PDFSidePanel({
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // Execute search when debounced query changes
+  // Execute search when debounced query changes (uses cached text content)
   useEffect(() => {
     if (!debouncedQuery.trim() || !pdfDocRef.current || !numPages) {
       setSearchResults([]);
@@ -148,23 +186,31 @@ export function PDFSidePanel({
 
     (async () => {
       const results: Array<{ pageNumber: number; matchIndex: number }> = [];
+      const cache = textCacheRef.current;
+
       for (let i = 1; i <= numPages; i++) {
         if (cancelled) return;
-        try {
-          const page = await pdfDocRef.current.getPage(i);
-          const textContent = await page.getTextContent();
-          const pageText = textContent.items
-            .map((item: any) => item.str)
-            .join('');
-          const normalizedPageText = normalizeText(pageText);
-          let startIdx = 0;
-          let matchIdx = 0;
-          while ((startIdx = normalizedPageText.indexOf(query, startIdx)) !== -1) {
-            results.push({ pageNumber: i, matchIndex: matchIdx++ });
-            startIdx += query.length;
+
+        let pageText = cache.get(i);
+        if (pageText === undefined) {
+          try {
+            const page = await pdfDocRef.current.getPage(i);
+            const textContent = await page.getTextContent();
+            pageText = textContent.items.map((item: any) => item.str).join('');
+            cache.set(i, pageText);
+          } catch (err) {
+            console.warn(`Failed to extract text from page ${i}:`, err);
+            cache.set(i, '');
+            continue;
           }
-        } catch {
-          // Skip pages that fail to load
+        }
+
+        const normalizedPageText = normalizeText(pageText);
+        let startIdx = 0;
+        let matchIdx = 0;
+        while ((startIdx = normalizedPageText.indexOf(query, startIdx)) !== -1) {
+          results.push({ pageNumber: i, matchIndex: matchIdx++ });
+          startIdx += query.length;
         }
       }
       if (!cancelled) {
@@ -176,7 +222,34 @@ export function PDFSidePanel({
     return () => { cancelled = true; };
   }, [debouncedQuery, numPages]);
 
-  // Navigate to current match — scroll to the page, then refine to the highlight
+  // Scroll helper: calculate offset relative to scroll container
+  const scrollToTarget = useCallback((el: Element) => {
+    const container = containerRef.current;
+    if (!container) return;
+    let offset = 0;
+    let current: Element | null = el;
+    while (current && current !== container) {
+      offset += (current as HTMLElement).offsetTop;
+      current = (current as HTMLElement).offsetParent;
+    }
+    container.scrollTo({ top: offset - container.clientHeight / 2, behavior: 'instant' });
+  }, []);
+
+  // Try to refine scroll to the exact highlight span within a rendered page.
+  // Called immediately after render or when highlights are applied.
+  const refineScrollToHighlight = useCallback((targetPage: number, matchOnPage: number) => {
+    const el = pageRefs.current.get(targetPage);
+    if (!el) return false;
+    const highlights = el.querySelectorAll('mark.search-hl');
+    if (highlights.length > 0) {
+      const hl = highlights[Math.min(matchOnPage, highlights.length - 1)] ?? highlights[0];
+      scrollToTarget(hl);
+      return true;
+    }
+    return false;
+  }, [scrollToTarget]);
+
+  // Navigate to current match — scroll to the page, set pending scroll for render callback
   useEffect(() => {
     if (searchResults.length === 0 || currentMatchIndex >= searchResults.length) return;
     const targetPage = searchResults[currentMatchIndex].pageNumber;
@@ -191,49 +264,26 @@ export function PDFSidePanel({
       return next;
     });
 
-    // scrollIntoView doesn't work reliably with nested overflow containers,
-    // so we calculate scrollTop directly on containerRef.
-    const scrollToTarget = (el: Element) => {
-      const container = containerRef.current;
-      if (!container) return;
-      let offset = 0;
-      let current: Element | null = el;
-      while (current && current !== container) {
-        offset += (current as HTMLElement).offsetTop;
-        current = (current as HTMLElement).offsetParent;
-      }
-      container.scrollTo({ top: offset - container.clientHeight / 2, behavior: 'smooth' });
-    };
-
     // Phase 1: Immediately scroll to the page wrapper (rough positioning)
     const pageEl = pageRefs.current.get(targetPage);
     if (pageEl) {
       scrollToTarget(pageEl);
     }
 
-    // Phase 2: Refine scroll to the exact highlight once DOM highlights are applied.
-    let cancelled = false;
-    const refineScroll = (attempts: number) => {
-      if (cancelled) return;
-      const el = pageRefs.current.get(targetPage);
-      if (!el) return;
-
-      const highlights = el.querySelectorAll('span.search-hl');
-      if (highlights.length > 0) {
-        const hl = highlights[Math.min(matchOnPage, highlights.length - 1)] ?? highlights[0];
-        scrollToTarget(hl);
-        return;
-      }
-
-      // Retry up to ~3s (page rendering + highlight delay can take time for large PDFs)
-      if (attempts < 30) {
-        setTimeout(() => refineScroll(attempts + 1), 100);
-      }
-    };
-
-    setTimeout(() => refineScroll(0), 300);
-    return () => { cancelled = true; };
-  }, [currentMatchIndex, searchResults, numPages]);
+    // Phase 2: If page is already rendered, try to refine to highlight immediately.
+    // Otherwise, store pending scroll — handlePageRenderSuccess will pick it up.
+    if (renderedPagesRef.current.has(targetPage)) {
+      // Page already rendered; highlights may need a tick to be applied by the DOM effect
+      requestAnimationFrame(() => {
+        if (!refineScrollToHighlight(targetPage, matchOnPage)) {
+          // Highlights not yet in DOM — store pending for the highlight effect
+          pendingScrollRef.current = { pageNumber: targetPage, matchIndex: matchOnPage };
+        }
+      });
+    } else {
+      pendingScrollRef.current = { pageNumber: targetPage, matchIndex: matchOnPage };
+    }
+  }, [currentMatchIndex, searchResults, numPages, scrollToTarget, refineScrollToHighlight]);
 
   const handleSearchNext = useCallback(() => {
     if (searchResults.length === 0) return;
@@ -309,6 +359,8 @@ export function PDFSidePanel({
     setLoadedPages(new Set());
     scrolledToInitialRef.current = false;
     renderedPagesRef.current = new Set();
+    textCacheRef.current = new Map();
+    pendingScrollRef.current = null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [documentId]);
 
@@ -409,6 +461,7 @@ export function PDFSidePanel({
 
   // Scroll compensation: when a page above the viewport renders, its height changes
   // from placeholder (800px) to actual size. Compensate scrollTop to prevent viewport shift.
+  // Also resolves pending search-scroll targets.
   const handlePageRenderSuccess = useCallback((pageNum: number) => {
     if (renderedPagesRef.current.has(pageNum)) return;
 
@@ -441,7 +494,15 @@ export function PDFSidePanel({
         }
       }
     }
-  }, [initialPage]);
+
+    // Resolve pending search scroll — page just rendered, scroll to it
+    const pending = pendingScrollRef.current;
+    if (pending && pending.pageNumber === pageNum) {
+      pendingScrollRef.current = null;
+      // Scroll to page first, then refine after highlights are applied
+      scrollToTarget(el);
+    }
+  }, [initialPage, scrollToTarget]);
 
   // Text selection handler
   const handleSelectionChange = useCallback(() => {
@@ -535,12 +596,17 @@ export function PDFSidePanel({
     [highlightPhrases]
   );
 
-  // DOM-based search highlighting: works across TextItem boundaries (needed for LaTeX PDFs
-  // where diacritics are separate characters, splitting words across multiple spans)
+  // DOM-based search highlighting: wraps only the matched character range in <mark>.
+  // Works across TextItem boundaries (needed for LaTeX PDFs where diacritics are
+  // separate characters, splitting words across multiple spans).
   useEffect(() => {
-    // Clear all previous search highlights
-    containerRef.current?.querySelectorAll('.search-hl').forEach(el => {
-      el.classList.remove('search-hl');
+    // Remove all previous highlight <mark> wrappers — unwrap their text back into parent
+    containerRef.current?.querySelectorAll('mark.search-hl').forEach(mark => {
+      const parent = mark.parentNode;
+      if (!parent) return;
+      while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
+      parent.removeChild(mark);
+      parent.normalize(); // merge adjacent text nodes
     });
 
     if (!debouncedQuery.trim() || searchResults.length === 0) return;
@@ -600,27 +666,66 @@ export function PDFSidePanel({
 
         const normalizedFull = normChars.join('');
 
-        // Find all match positions in normalized text, map back to original spans
+        // Collect match ranges in original text coordinates (process in reverse
+        // so that DOM mutations don't shift positions of earlier matches)
+        const matchRanges: Array<{ origStart: number; origEnd: number }> = [];
         let searchIdx = 0;
         while ((searchIdx = normalizedFull.indexOf(query, searchIdx)) !== -1) {
           const origStart = normToOrig[searchIdx];
           const origEnd = normToOrig[Math.min(searchIdx + query.length - 1, normToOrig.length - 1)] + 1;
-
-          // Mark all spans that overlap with [origStart, origEnd)
-          for (const { span, start, end } of spanRanges) {
-            if (start < origEnd && end > origStart) {
-              span.classList.add('search-hl');
-            }
-          }
+          matchRanges.push({ origStart, origEnd });
           searchIdx += query.length;
+        }
+
+        // Wrap only the matched character range within each overlapping span.
+        // Process matches in reverse so earlier DOM positions stay valid.
+        for (let m = matchRanges.length - 1; m >= 0; m--) {
+          const { origStart, origEnd } = matchRanges[m];
+
+          for (const { span, start: spanStart, end: spanEnd } of spanRanges) {
+            if (spanStart >= origEnd || spanEnd <= origStart) continue;
+
+            // Character range within this span's text
+            const hlStart = Math.max(0, origStart - spanStart);
+            const hlEnd = Math.min(spanEnd - spanStart, origEnd - spanStart);
+
+            const textNode = span.firstChild;
+            if (!textNode || textNode.nodeType !== Node.TEXT_NODE) continue;
+            const text = textNode.textContent || '';
+            if (hlStart >= text.length) continue;
+
+            // Split: [before][match][after]
+            const before = text.slice(0, hlStart);
+            const match = text.slice(hlStart, hlEnd);
+            const after = text.slice(hlEnd);
+
+            // Build fragment: before text + <mark> + after text
+            const frag = document.createDocumentFragment();
+            if (before) frag.appendChild(document.createTextNode(before));
+            const mark = document.createElement('mark');
+            mark.className = 'search-hl';
+            mark.textContent = match;
+            frag.appendChild(mark);
+            if (after) frag.appendChild(document.createTextNode(after));
+
+            span.replaceChild(frag, textNode);
+          }
         }
       });
     };
 
-    // Delay to ensure text layer has rendered
-    const timer = setTimeout(applyHighlights, 400);
+    // Delay to ensure text layer has rendered, then resolve any pending scroll
+    const timer = setTimeout(() => {
+      applyHighlights();
+      // After highlights are in the DOM, resolve any pending scroll refinement
+      const pending = pendingScrollRef.current;
+      if (pending) {
+        pendingScrollRef.current = null;
+        refineScrollToHighlight(pending.pageNumber, pending.matchIndex);
+      }
+    }, 400);
     return () => clearTimeout(timer);
-  }, [debouncedQuery, searchResults, loadedPages]);
+  }, [debouncedQuery, searchResults, loadedPages, refineScrollToHighlight]);
 
   if (!isOpen) return null;
 
@@ -838,21 +943,14 @@ export function PDFSidePanel({
                 style={{ minHeight: loadedPages.has(pageNum) ? undefined : '800px' }}
               >
                 {loadedPages.has(pageNum) ? (
-                  <Page
+                  <MemoizedPage
                     pageNumber={pageNum}
                     scale={scale}
-                    renderTextLayer={true}
-                    renderAnnotationLayer={true}
                     onRenderSuccess={() => handlePageRenderSuccess(pageNum)}
                     customTextRenderer={
                       pageNum === initialPage && highlightPhrases.length > 0
                         ? customTextRenderer
                         : undefined
-                    }
-                    loading={
-                      <div className="flex items-center justify-center w-full h-96 bg-white">
-                        <Loader2 size={24} className="animate-spin text-accent-400" />
-                      </div>
                     }
                   />
                 ) : (

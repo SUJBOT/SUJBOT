@@ -81,7 +81,15 @@ class SingleAgentRunner:
 
     def _setup_langsmith(self) -> None:
         """Setup LangSmith tracing if configured."""
-        langsmith_config = self.config.get("multi_agent", {}).get("langsmith", {})
+        langsmith_config = self.config.get("langsmith", {})
+        # Backward compat: check old nested location
+        if not langsmith_config:
+            langsmith_config = self.config.get("multi_agent", {}).get("langsmith", {})
+            if langsmith_config:
+                logger.warning(
+                    "LangSmith config found under 'multi_agent.langsmith' (deprecated). "
+                    "Move to top-level 'langsmith' key in config.json."
+                )
         if not langsmith_config.get("enabled", False):
             return
         try:
@@ -184,7 +192,6 @@ class SingleAgentRunner:
             adaptive_retrieval=adaptive_config,
             max_document_compare=agent_tools_config.get("max_document_compare", 3),
             compliance_threshold=agent_tools_config.get("compliance_threshold", 0.7),
-            web_search_enabled=web_search_config.get("enabled", True),
             web_search_model=web_search_config.get("model", "gemini-2.0-flash"),
         )
 
@@ -524,6 +531,37 @@ class SingleAgentRunner:
                         tool_use_id = tool_use.get("id")
 
                         logger.info(f"Tool call: {tool_name}")
+
+                        # Reject tool calls to disabled tools (LLM hallucinated a filtered tool)
+                        if tool_name in _disabled:
+                            logger.warning(
+                                "LLM called disabled tool '%s', returning error result",
+                                tool_name,
+                            )
+                            if stream_progress:
+                                yield {
+                                    "type": "tool_call",
+                                    "tool": tool_name,
+                                    "status": "failed",
+                                }
+                            tool_results.append(
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": tool_use_id,
+                                    "content": f"Error: Tool '{tool_name}' is not available for this request.",
+                                    "is_error": True,
+                                }
+                            )
+                            tool_call_history.append(
+                                {
+                                    "tool": tool_name,
+                                    "input": tool_input,
+                                    "success": False,
+                                    "duration_ms": 0,
+                                    "api_cost_usd": 0.0,
+                                }
+                            )
+                            continue
 
                         if stream_progress:
                             yield {
