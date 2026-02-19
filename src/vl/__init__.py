@@ -1,9 +1,9 @@
 """
 Vision-Language (VL) RAG Architecture
 
-Embeds PDF pages as images via Jina Embeddings v4, retrieves relevant pages by
-cosine similarity, and sends page images to a vision-capable LLM for answer
-generation.
+Embeds PDF pages as images via configurable embedder (Jina v4 cloud or
+Qwen3-VL-Embedding-8B local), retrieves relevant pages by cosine similarity,
+and sends page images to a vision-capable LLM for answer generation.
 """
 
 import logging
@@ -71,8 +71,7 @@ def create_vl_components(
     """
     Create VL components from config (SSOT factory function).
 
-    Used by both SingleAgentRunner and MultiAgentRunner to avoid
-    duplicate initialization code.
+    Used by SingleAgentRunner to avoid duplicate initialization code.
 
     Embedder selection via config key "embedder": "jina" (default) or "local".
 

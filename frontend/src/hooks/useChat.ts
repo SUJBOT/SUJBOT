@@ -614,7 +614,9 @@ export function useChat() {
           }
           else if (event.event === 'thinking_delta') {
             // Append thinking content (live from local LLM)
-            if (streamState.currentMessage) {
+            if (!streamState.currentMessage) {
+              console.warn('thinking_delta received but no currentMessage exists');
+            } else if (streamState.currentMessage) {
               streamState.currentMessage.thinkingContent =
                 (streamState.currentMessage.thinkingContent || '') + event.data.content;
               streamState.currentMessage.isThinking = true;
@@ -639,8 +641,10 @@ export function useChat() {
             }
           }
           else if (event.event === 'thinking_done') {
-            // Thinking phase finished — clear thinking content
-            if (streamState.currentMessage) {
+            // Thinking phase finished
+            if (!streamState.currentMessage) {
+              console.warn('thinking_done received but no currentMessage exists');
+            } else if (streamState.currentMessage) {
               streamState.currentMessage.isThinking = false;
               // Keep thinkingContent for now; clear on first text_delta
 
@@ -748,13 +752,13 @@ export function useChat() {
             // Tool calls summary from backend
             if (streamState.currentMessage && event.data.tool_calls) {
               // Convert backend tool calls to frontend format
-              streamState.currentMessage.toolCalls = event.data.tool_calls.map((tc: any) => ({
-                id: tc.id,
+              streamState.currentMessage.toolCalls = event.data.tool_calls.map((tc: any, idx: number) => ({
+                id: tc.id || `summary-${idx}`,
                 name: tc.name,
-                input: tc.input,
+                input: tc.input || {},
                 result: tc.result,
                 executionTimeMs: tc.executionTimeMs,
-                success: tc.success,
+                success: tc.success ?? true,
                 status: tc.success === false ? 'failed' as const : 'completed' as const,
                 explicitParams: tc.explicitParams,
               }));

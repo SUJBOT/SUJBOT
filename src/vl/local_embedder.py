@@ -166,7 +166,8 @@ class LocalVLEmbedder:
         Embed a single image for retrieval query (image-to-page search).
 
         Args:
-            base64_data: Base64-encoded image data (without data URI prefix)
+            base64_data: Base64-encoded image data. Accepts raw base64 or
+                         full data URI (data:image/png;base64,...)
 
         Returns:
             L2-normalized embedding array of shape (dimensions,)
@@ -176,7 +177,7 @@ class LocalVLEmbedder:
         else:
             data_uri = f"data:image/png;base64,{base64_data}"
 
-        # Pass data URI as plain string input (custom FastAPI embedding server)
+        # Pass data URI as plain string input (OpenAI-compatible embedding server)
         payload = {
             "model": self.model,
             "input": data_uri,
@@ -201,7 +202,7 @@ class LocalVLEmbedder:
         for batch_start in range(0, len(page_images), self.batch_size):
             batch = page_images[batch_start : batch_start + self.batch_size]
 
-            # Pass data URIs as plain string inputs (custom FastAPI embedding server)
+            # Pass data URIs as plain string inputs (OpenAI-compatible embedding server)
             inputs = []
             for img_bytes in batch:
                 b64 = base64.b64encode(img_bytes).decode("utf-8")

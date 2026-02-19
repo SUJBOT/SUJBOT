@@ -92,7 +92,7 @@ def create_embeddings(request: EmbeddingRequest):
         embeddings = encode_inputs(inputs)
     except Exception as e:
         logger.error(f"Embedding error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Embedding computation failed")
 
     data = [
         EmbeddingData(index=i, embedding=emb.tolist())

@@ -173,7 +173,7 @@ def detect_provider_from_model(model: str) -> str:
         model: Model name or alias
 
     Returns:
-        Provider name ("anthropic", "openai", "google", "deepinfra")
+        Provider name ("anthropic", "openai", "google", "deepinfra", "local_llm")
 
     Raises:
         ValueError: If provider cannot be determined

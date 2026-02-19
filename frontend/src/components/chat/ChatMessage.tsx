@@ -4,7 +4,7 @@
  * Features:
  * - Asymmetric bubble layout (user right, assistant left)
  * - Inline editing with smooth transitions
- * - Tool activity shown in thinking stream (not inline)
+ * - Collapsible thinking/tool-activity stream
  * - Markdown rendering with syntax highlighting
  */
 
@@ -17,7 +17,6 @@ import { Clock, DollarSign, Edit2, RotateCw, Check, X, FileText, Copy } from 'lu
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../design-system/utils/cn';
 import type { Message } from '../../types';
-// ToolCallDisplay removed — tool activity shown in thinking stream
 import { ProgressPhaseDisplay } from './ProgressPhaseDisplay';
 import { FeedbackButtons } from './FeedbackButtons';
 import { CitationLink } from '../citation/CitationLink';

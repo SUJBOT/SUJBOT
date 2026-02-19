@@ -2,20 +2,21 @@
 VL Retrieval Pipeline
 
 Simple retrieval for Vision-Language architecture:
-  query text -> Jina embed_query() -> PostgreSQL cosine search -> page results
+  query text -> embedder embed_query() -> PostgreSQL cosine search -> page results
 
-No HyDE/expansion fusion -- Jina v4's task-specific LoRA adapters
-(retrieval.query vs retrieval.passage) already handle the query-document
-asymmetry that HyDE addresses for text-only embeddings.
+Supports Jina v4 cloud or local Qwen3-VL-Embedding-8B (same interface).
+No HyDE/expansion fusion -- cosine similarity with L2-normalized embeddings
+provides sufficient accuracy for ~500 pages.
 """
 
 import logging
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 
 from .jina_client import JinaClient
+from .local_embedder import LocalVLEmbedder
 from .page_store import PageStore
 
 logger = logging.getLogger(__name__)
@@ -36,19 +37,28 @@ class VLPageResult:
             raise ValueError(f"page_number must be >= 1, got {self.page_number}")
         # Clamp score to [0.0, 1.0] — cosine similarity with L2-normalized
         # embeddings can be slightly negative for dissimilar content
-        object.__setattr__(self, "score", max(0.0, min(1.0, self.score)))
+        raw_score = self.score
+        clamped = max(0.0, min(1.0, raw_score))
+        if abs(raw_score - clamped) > 0.01:
+            logger.warning(
+                "VLPageResult score %.4f clamped to %.4f for page %s (possible embedding issue)",
+                raw_score, clamped, self.page_id,
+            )
+        object.__setattr__(self, "score", clamped)
 
 
 class VLRetriever:
     """
     Vision-Language retrieval pipeline.
 
-    Flow: query -> Jina text embedding -> PostgreSQL cosine search -> VLPageResult list
+    Flow: query -> embedder text embedding -> PostgreSQL cosine search -> VLPageResult list
+
+    Accepts JinaClient or LocalVLEmbedder (duck-typed, same interface).
     """
 
     def __init__(
         self,
-        jina_client: JinaClient,
+        jina_client: Union[JinaClient, LocalVLEmbedder],
         vector_store,  # PostgresVectorStoreAdapter
         page_store: PageStore,
         default_k: int = 5,
@@ -159,9 +169,9 @@ class VLRetriever:
         """
         Search for relevant pages and return the query embedding.
 
-        Identical to search() but also returns the Jina query embedding,
+        Identical to search() but also returns the query embedding,
         allowing callers to reuse it (e.g., for QPP confidence scoring)
-        without a redundant Jina API call.
+        without a redundant embedder API call.
 
         Args:
             query: Natural language query text
@@ -171,7 +181,7 @@ class VLRetriever:
 
         Returns:
             Tuple of (results, query_embedding) where query_embedding is
-            the raw Jina v4 embedding as np.ndarray.
+            the L2-normalized embedding as np.ndarray.
         """
         k = k or self.default_k
 

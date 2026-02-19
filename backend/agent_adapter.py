@@ -180,7 +180,10 @@ class AgentAdapter:
         - tool_health: Tool status before query
         - progress: Workflow stage updates
         - tool_call: Tool execution events
-        - text_delta: Final answer text chunks
+        - thinking_delta: Thinking content from local LLM
+        - thinking_done: Thinking phase finished
+        - text_delta: Answer text chunks (live-streamed or chunked from final)
+        - tool_calls_summary: Summary of tools used
         - cost_summary: Cost breakdown
         - done: Stream completed
         - error: Error occurred
@@ -190,6 +193,7 @@ class AgentAdapter:
             conversation_id: Optional conversation ID
             user_id: User ID for loading agent variant preference
             messages: Conversation history
+            attachment_blocks: Multimodal content blocks from user attachments
 
         Yields:
             Dict containing event type and data
@@ -364,7 +368,8 @@ class AgentAdapter:
                     "event": "tool_calls_summary",
                     "data": {
                         "tool_calls": [
-                            {"name": tool_name} for tool_name in tools_used
+                            {"name": tool_name, "success": True}
+                            for tool_name in tools_used
                         ],
                         "count": len(tools_used),
                     },

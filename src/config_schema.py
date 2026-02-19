@@ -980,16 +980,16 @@ class VLConfig(BaseModel):
     )
     local_embedding_url: Optional[str] = Field(
         default=None,
-        description="Local embedding server URL (e.g. http://localhost:18888/v1)"
+        description="Local embedding server URL (e.g. http://localhost:8081/v1)"
     )
     local_embedding_model: str = Field(
         default="Qwen/Qwen3-VL-Embedding-8B",
         description="Local embedding model name"
     )
     dimensions: int = Field(
-        default=2048,
+        default=4096,
         ge=1,
-        description="Embedding dimensions"
+        description="Embedding dimensions (4096 for local Qwen3-VL-Embedding-8B, 2048 for Jina v4)"
     )
     default_k: int = Field(
         default=5,

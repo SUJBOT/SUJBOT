@@ -341,11 +341,12 @@ class SingleAgentRunner:
             provider = self._create_provider(model)
             provider_name = provider.get_provider_name()
             model_name = provider.get_model_name()
-            # Local models (thinking models) need higher max_tokens for <think> blocks;
-            # cloud providers cap max_tokens to avoid SDK timeout enforcement
+            # local_llm: ensure at least 32768 tokens (thinking models emit large <think> blocks).
+            # Anthropic: if configured max_tokens exceeds 16384, clamp to 4096
+            # (Anthropic SDK rejects high non-streaming values).
             if provider_name == "local_llm":
                 max_tokens = max(max_tokens, 32768)
-            elif max_tokens > 16384:
+            elif provider_name == "anthropic" and max_tokens > 16384:
                 max_tokens = 4096
         except Exception as e:
             yield {
@@ -417,6 +418,7 @@ class SingleAgentRunner:
         total_tool_cost = 0.0
         final_text = ""
         iteration = 0
+        text_was_streamed = False  # Track whether final text was actually streamed live
         seen_page_ids: set = set()  # Track seen page_ids to avoid duplicate base64 images (~1600 tokens/page)
 
         try:
@@ -427,7 +429,7 @@ class SingleAgentRunner:
                 # voluntarily call tools (e.g., Qwen3-VL on DeepInfra)
                 extra_kwargs = {}
                 if iteration == 0 and tool_schemas:
-                    if provider_name == "deepinfra":
+                    if provider_name in ("deepinfra", "local_llm"):
                         extra_kwargs["tool_choice"] = "required"
                     elif provider_name == "anthropic":
                         extra_kwargs["tool_choice"] = {"type": "any"}
@@ -438,16 +440,21 @@ class SingleAgentRunner:
                     if provider_name == "local_llm":
                         # Streaming path: yields thinking/text events live
                         response = None
+                        used_fallback = False
                         async for event in self._stream_llm_iteration(
                             provider, messages, tool_schemas, system,
                             max_tokens, temperature, **extra_kwargs,
                         ):
                             if event["type"] == "llm_response":
                                 response = event["response"]
+                            elif event["type"] == "streaming_fallback":
+                                used_fallback = True
                             elif stream_progress:
                                 yield event  # Forward thinking/text events to caller
                         if response is None:
                             raise RuntimeError("Streaming produced no response")
+                        if not used_fallback:
+                            text_was_streamed = True
                     else:
                         response = provider.create_message(
                             messages=messages,
@@ -679,7 +686,7 @@ class SingleAgentRunner:
                 "iterations": iteration + 1,
                 "model": model_name,
                 "errors": [],
-                "text_already_streamed": provider_name == "local_llm",
+                "text_already_streamed": text_was_streamed,
             }
 
         except Exception as e:
@@ -768,10 +775,11 @@ class SingleAgentRunner:
         Parses <think> tags live and yields events:
           - thinking_delta: Thinking content (streamed immediately)
           - thinking_done: Thinking phase finished
-          - text_delta: Text content chunks (buffered, emitted at end)
+          - text_delta: Text content chunks (whitespace-only buffered until substantive text arrives)
+          - streaming_fallback: Streaming failed, fell back to non-streaming
           - llm_response: Final ProviderResponse
 
-        Falls back to non-streaming create_message() on error.
+        Falls back to non-streaming create_message() on network/timeout errors.
         """
         from ..agent.providers.think_parser import (
             ChunkType,
@@ -792,7 +800,7 @@ class SingleAgentRunner:
 
         try:
             # Call sync stream_message via executor to avoid blocking async loop
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             stream = await loop.run_in_executor(
                 None,
                 lambda: provider.stream_message(
@@ -911,8 +919,15 @@ class SingleAgentRunner:
                 try:
                     parsed_args = json.loads(tc["args_str"]) if tc["args_str"] else {}
                 except json.JSONDecodeError:
-                    logger.warning("Failed to parse tool args for %s: %s", tc["name"], tc["args_str"][:200])
-                    parsed_args = {}
+                    logger.error(
+                        "Failed to parse tool args for %s (skipping tool call): %s",
+                        tc["name"], tc["args_str"][:200],
+                    )
+                    content_blocks.append({
+                        "type": "text",
+                        "text": f"[Tool call '{tc['name']}' had unparseable arguments and was skipped]",
+                    })
+                    continue
                 content_blocks.append({
                     "type": "tool_use",
                     "id": tc["id"],
@@ -939,9 +954,13 @@ class SingleAgentRunner:
 
             yield {"type": "llm_response", "response": response}
 
+        except asyncio.CancelledError:
+            logger.info("Streaming cancelled by user")
+            raise
         except Exception as e:
-            logger.warning("Streaming failed, falling back to non-streaming: %s", e, exc_info=True)
-            # Fallback to non-streaming
+            logger.error("Streaming failed, falling back to non-streaming: %s", e, exc_info=True)
+            # Signal that we fell back so text_already_streamed is set correctly
+            yield {"type": "streaming_fallback"}
             response = provider.create_message(
                 messages=messages,
                 tools=tools,

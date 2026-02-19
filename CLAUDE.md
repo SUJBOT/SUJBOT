@@ -196,7 +196,7 @@ VL flow: Query → embedder embed_query() → PostgreSQL exact cosine (vectors.v
 - Benchmark script: `scripts/vllm_benchmark.py` — TTFT, decode throughput, e2e latency for RAG profiles
 - `"remote"` variant: Sonnet 4.5 (vision natively)
 - `local_llm` provider: reuses DeepInfraProvider with custom `base_url` (vLLM OpenAI-compatible API)
-- Dynamic max_tokens in runner: local_llm→16384 (thinking model), cloud→4096 (Anthropic SDK rejects high non-streaming values)
+- Dynamic max_tokens in runner: local_llm→32768 (thinking models emit large `<think>` blocks), Anthropic→4096 if configured > 16384 (SDK rejects high non-streaming values)
 - **vLLM Qwen3 thinking tags**: Chat template strips opening `<think>` — only `</think>` appears in stream. Raw completions API shows both tags. `ThinkTagStreamParser(start_thinking=True)` handles this. Test with raw completions API (`client.completions.create`) if debugging tag behavior.
 - **Streaming thinking**: `local_llm` uses `_stream_llm_iteration()` in runner — yields `thinking_delta`/`thinking_done`/`text_delta` events. Other providers keep non-streaming `create_message()`. Parser: `src/agent/providers/think_parser.py`.
 - DeepInfra provider converts Anthropic image blocks → OpenAI `image_url` format

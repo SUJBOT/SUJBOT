@@ -54,7 +54,7 @@ class DeepInfraProvider(BaseProvider):
                       Defaults to DeepInfra cloud endpoint.
 
         Raises:
-            ValueError: If API key is missing (cloud mode only)
+            APIKeyError: If API key is missing (cloud mode only)
         """
         self._is_local = base_url is not None
 
@@ -492,6 +492,14 @@ class DeepInfraProvider(BaseProvider):
             "cache_read_tokens": 0,  # DeepInfra doesn't support caching
             "cache_creation_tokens": 0,
         }
+
+        if not content_blocks:
+            logger.warning(
+                "DeepInfra response had no usable content after processing "
+                "(text stripped or all tool calls failed parsing). Raw: %s",
+                (message.content or "")[:200],
+            )
+            content_blocks = [{"type": "text", "text": ""}]
 
         return ProviderResponse(
             content=content_blocks,
