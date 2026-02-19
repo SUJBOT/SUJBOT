@@ -27,7 +27,7 @@ SingleAgentRunner (autonomous tool loop)
   |       - vectors.layer1/layer2/layer3 (OCR mode)
   |       - graph.entities / graph.relationships / graph.communities
   |
-  +---> LLM Provider (Anthropic, OpenAI, DeepInfra)
+  +---> LLM Provider (Anthropic, OpenAI, local vLLM)
 ```
 
 ## Dual Architecture: OCR vs VL
@@ -108,7 +108,7 @@ Users can select between two agent variants (per-user setting):
 | Variant | Model | Provider | Vision |
 |---------|-------|----------|--------|
 | `remote` (default) | `claude-sonnet-4-5-20250929` | Anthropic | Yes |
-| `local` | `Qwen/Qwen3-VL-235B-A22B-Instruct` | DeepInfra | Yes |
+| `local` | 8B Router + 30B Thinking | local vLLM | Yes |
 
 Variant configuration lives in `config.json` → `agent_variants`. The backend resolves variant to model via `backend/constants.py:get_variant_model()`.
 
@@ -181,7 +181,7 @@ src/
   single_agent/     # Production runner (autonomous tool loop)
   agent/            # Agent CLI, tools, providers
     tools/          # Individual tool implementations
-    providers/      # LLM provider adapters (Anthropic, OpenAI, DeepInfra)
+    providers/      # LLM provider adapters (Anthropic, OpenAI, vLLM)
   vl/               # Vision-Language module (Jina, PageStore, VLRetriever)
   graph/            # Graph RAG (storage, entity extraction, communities)
   retrieval/        # HyDE + Expansion Fusion pipeline (OCR mode)

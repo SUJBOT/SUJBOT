@@ -158,7 +158,7 @@
     "remote": "Remote",
     "remoteTooltip": "Remote - Haiku 4.5 (fast and affordable)",
     "local": "Local",
-    "localTooltip": "Local - Qwen3 VL 235B (open-source via DeepInfra)"
+    "localTooltip": "Local - 8B Router + 30B Thinking (on-premise vLLM)"
   },
   "degradedMode": {
     "title": "Running in Degraded Mode",

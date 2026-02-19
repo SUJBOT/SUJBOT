@@ -20,8 +20,8 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 # Type alias for providers
-LLMProvider = Literal["anthropic", "openai", "google", "deepinfra", "local_llm", "local_llm_8b"]
-EmbeddingProvider = Literal["openai", "deepinfra", "voyage", "huggingface", "jina"]
+LLMProvider = Literal["anthropic", "openai", "google", "local_llm", "local_llm_8b"]
+EmbeddingProvider = Literal["openai", "voyage", "huggingface", "jina"]
 
 
 # =============================================================================
@@ -63,7 +63,7 @@ class LLMModelConfig(BaseModel):
     )
     provider: LLMProvider = Field(
         ...,
-        description="Provider name: anthropic, openai, google, deepinfra"
+        description="Provider name: anthropic, openai, google, local_llm, local_llm_8b"
     )
     pricing: ModelPricing = Field(
         ...,
@@ -102,7 +102,7 @@ class EmbeddingModelConfig(BaseModel):
     )
     provider: EmbeddingProvider = Field(
         ...,
-        description="Provider name: openai, deepinfra, voyage, huggingface"
+        description="Provider name: openai, voyage, huggingface, jina"
     )
     pricing: ModelPricing = Field(
         ...,
@@ -917,10 +917,6 @@ class AgentVariantsConfig(BaseModel):
     default_variant: str = Field(
         "remote",
         description="Default variant when lookup fails or user has no preference"
-    )
-    deepinfra_supported_models: list[str] = Field(
-        default_factory=list,
-        description="List of DeepInfra-supported models for validation"
     )
 
     @model_validator(mode="after")

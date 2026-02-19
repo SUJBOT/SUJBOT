@@ -1,7 +1,7 @@
 """
 Shared OpenAI-compatible format conversion helpers.
 
-Used by both OpenAIProvider and DeepInfraProvider to avoid duplicating
+Used by both OpenAIProvider and VLLMProvider to avoid duplicating
 Anthropic <-> OpenAI format translation logic.
 """
 

@@ -98,7 +98,6 @@ class AgentAdapter:
                 "anthropic_api_key": self.config.anthropic_api_key,
                 "openai_api_key": self.config.openai_api_key,
                 "google_api_key": self.config.google_api_key,
-                "deepinfra_api_key": os.getenv("DEEPINFRA_API_KEY"),
             },
             "vector_store_path": str(self.config.vector_store_path),
             "models": full_config.get("models", {}),

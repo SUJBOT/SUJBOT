@@ -163,7 +163,7 @@ class AgentVariantRequest(BaseModel):
 
     variant: Literal["remote", "local"] = Field(
         ...,
-        description="Agent variant: 'remote' (Haiku) or 'local' (Qwen3 VL 235B via DeepInfra)"
+        description="Agent variant: 'remote' (Sonnet 4.5) or 'local' (8B Router + 30B Thinking via vLLM)"
     )
 
 

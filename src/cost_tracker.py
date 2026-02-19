@@ -114,31 +114,6 @@ PRICING = {
         "gemini-flash": {"input": 0.30, "output": 2.50},
         "gemini-pro": {"input": 1.25, "output": 10.00},
     },
-    # DeepInfra models (per 1M tokens)
-    # Source: https://api.deepinfra.com/models/list (API, updated 2026-01-10)
-    # Run: uv run python scripts/fetch_deepinfra_pricing.py --configured
-    "deepinfra": {
-        # Llama 4 Scout (MoE, 17B active / 109B total)
-        "meta-llama/Llama-4-Scout-17B-16E-Instruct": {"input": 0.08, "output": 0.30},
-        "llama-4-scout": {"input": 0.08, "output": 0.30},
-        # MiniMax M2 (MoE, 10B active / 230B total)
-        "MiniMaxAI/MiniMax-M2": {"input": 0.25, "output": 1.02},
-        "minimax-m2": {"input": 0.25, "output": 1.02},
-        # Qwen models
-        "Qwen/Qwen2.5-72B-Instruct": {"input": 0.12, "output": 0.39},
-        "Qwen/Qwen2.5-7B-Instruct": {"input": 0.04, "output": 0.10},
-        "qwen-72b": {"input": 0.12, "output": 0.39},
-        "qwen-7b": {"input": 0.04, "output": 0.10},
-        # Llama 3.1 models
-        "meta-llama/Meta-Llama-3.1-70B-Instruct": {"input": 0.40, "output": 0.40},
-        "meta-llama/Meta-Llama-3.1-8B-Instruct": {"input": 0.03, "output": 0.05},
-        "llama-70b": {"input": 0.40, "output": 0.40},
-        # Embedding models
-        "BAAI/bge-m3": {"input": 0.01, "output": 0.0},
-        "bge-m3": {"input": 0.01, "output": 0.0},
-        "BAAI/bge-large-en-v1.5": {"input": 0.01, "output": 0.0},
-        "intfloat/e5-large-v2": {"input": 0.01, "output": 0.0},
-    },
     # Local models (free)
     "huggingface": {
         "bge-m3": {"input": 0.0, "output": 0.0},
@@ -859,33 +834,29 @@ def reset_global_tracker():
 
 def validate_pricing_coverage(config: Any) -> List[str]:
     """
-    Check if all configured models have pricing data.
+    Check if all configured variant models have pricing data.
 
-    Validates that all models in agent_variants.deepinfra_supported_models
-    and agent_variants.variants have pricing in config.json model_registry
-    or fallback PRICING dict.
+    Validates that all models in agent_variants.variants have pricing
+    in config.json model_registry or fallback PRICING dict.
 
     Args:
         config: Application config (RootConfig Pydantic model or dict)
 
     Returns:
-        List of missing model identifiers (e.g., ["deepinfra/model-name"])
+        List of missing model identifiers
     """
     missing = []
 
     # Handle both Pydantic RootConfig and dict
     if hasattr(config, "agent_variants"):
         agent_variants = config.agent_variants
-        deepinfra_models = agent_variants.deepinfra_supported_models if agent_variants else []
         variants = agent_variants.variants if agent_variants else {}
     else:
         agent_variants = config.get("agent_variants", {})
-        deepinfra_models = agent_variants.get("deepinfra_supported_models", [])
         variants = agent_variants.get("variants", {})
 
     def _has_pricing(model: str) -> bool:
         """Check if model has pricing in SSOT (config.json) or fallback PRICING dict."""
-        # Check SSOT first (ModelRegistry -> config.json)
         try:
             from src.utils.model_registry import ModelRegistry
 
@@ -893,13 +864,11 @@ def validate_pricing_coverage(config: Any) -> List[str]:
                 return True
         except (ImportError, KeyError, ValueError):
             pass
-        # Fallback: check PRICING dict
-        return model in PRICING.get("deepinfra", {})
-
-    # Check deepinfra_supported_models
-    for model in deepinfra_models:
-        if not _has_pricing(model):
-            missing.append(f"deepinfra/{model}")
+        # Fallback: check PRICING dict (all providers)
+        for provider_pricing in PRICING.values():
+            if model in provider_pricing:
+                return True
+        return False
 
     # Check variant models
     for variant_name, variant in (variants.items() if isinstance(variants, dict) else []):
@@ -913,9 +882,8 @@ def validate_pricing_coverage(config: Any) -> List[str]:
         # Skip Anthropic/OpenAI models (handled by their providers)
         if not model or model.startswith("claude-") or model.startswith("gpt-"):
             continue
-        # Check if it's a DeepInfra model (contains "/" = HuggingFace-style path)
-        if "/" in model and not _has_pricing(model):
-            missing.append(f"deepinfra/{model} (variant: {variant_name})")
+        if not _has_pricing(model):
+            missing.append(f"{model} (variant: {variant_name})")
 
     return missing
 

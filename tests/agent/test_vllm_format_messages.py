@@ -1,23 +1,25 @@
 """
-Tests for DeepInfraProvider._format_messages — Anthropic → OpenAI format translation.
+Tests for VLLMProvider._format_messages — Anthropic → OpenAI format translation.
 
 Tests tool_use, tool_result, multimodal image, and text-only message handling.
 """
 
 import json
-import os
 from unittest.mock import patch
 
 import pytest
 
-from src.agent.providers.deepinfra_provider import DeepInfraProvider
+from src.agent.providers.vllm_provider import VLLMProvider
 
 
 @pytest.fixture
 def provider():
-    """Create DeepInfraProvider with mock API key."""
-    with patch.dict(os.environ, {"DEEPINFRA_API_KEY": "test-key"}):
-        return DeepInfraProvider(model="meta-llama/Llama-4-Scout-17B-16E-Instruct")
+    """Create VLLMProvider with mock vLLM server URL."""
+    with patch("src.agent.providers.vllm_provider.wrap_openai", return_value=None):
+        return VLLMProvider(
+            base_url="http://localhost:18080/v1",
+            model="Qwen/Qwen3-VL-30B-A3B-Thinking",
+        )
 
 
 class TestFormatMessagesTextOnly:
