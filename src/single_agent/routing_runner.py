@@ -5,7 +5,7 @@ Architecture:
   User Query → RoutingAgentRunner.run_query()
     → 8B Router (streaming classification, thinking DISABLED, tool_choice=auto)
        ├── text-only response → buffer then flush text_delta (greetings, meta)
-       ├── simple tool (get_document_list, get_stats)
+       ├── simple tool (get_document_list, get_stats, web_search if enabled)
        │    → execute tool → feed result back → 8B streams response (text_delta)
        └── delegate_to_thinking_agent (SILENT — pre-delegation text discarded)
             → 30B worker with full autonomous tool loop + thinking budget
@@ -67,7 +67,8 @@ DELEGATE_TOOL_SCHEMA = {
 }
 
 # Tools the 8B router can execute directly (simple, fast, no deep reasoning)
-ROUTER_SIMPLE_TOOLS = ["get_document_list", "get_stats"]
+# web_search included here but filtered at runtime based on config.agent_tools.web_search.enabled
+ROUTER_SIMPLE_TOOLS = ["get_document_list", "get_stats", "web_search"]
 
 # Shared extra_body to disable thinking on 8B router calls
 _THINKING_DISABLED_BODY = {"chat_template_kwargs": {"enable_thinking": False}}
@@ -400,18 +401,33 @@ class RoutingAgentRunner:
     def __getattr__(self, name):
         return getattr(self.inner_runner, name)
 
+    def _get_effective_simple_tools(
+        self, disabled_tools: Optional[Set[str]] = None
+    ) -> List[str]:
+        """Return simple tool names filtered by disabled_tools and config flags."""
+        _disabled = disabled_tools or set()
+        ws_enabled = (
+            self.config.get("agent_tools", {}).get("web_search", {}).get("enabled", True)
+        )
+        effective = []
+        for t in self.simple_tool_names:
+            if t in _disabled:
+                continue
+            if t == "web_search" and not ws_enabled:
+                continue
+            effective.append(t)
+        return effective
+
     def _build_router_tools(
         self, disabled_tools: Optional[Set[str]] = None
     ) -> List[Dict[str, Any]]:
         """Build tool list for the 8B router: delegation + real simple tool schemas."""
         tools = [DELEGATE_TOOL_SCHEMA]
-        _disabled = disabled_tools or set()
+        active_tools = self._get_effective_simple_tools(disabled_tools)
 
         # Add real tool schemas from inner runner's tool adapter
         tool_adapter = self.inner_runner.tool_adapter
-        for tool_name in self.simple_tool_names:
-            if tool_name in _disabled:
-                continue
+        for tool_name in active_tools:
             schema = tool_adapter.get_tool_schema(tool_name)
             if schema:
                 tools.append(schema)
@@ -424,8 +440,7 @@ class RoutingAgentRunner:
         self, disabled_tools: Optional[Set[str]] = None
     ) -> str:
         """Build system prompt with dynamic tool list based on what's actually available."""
-        _disabled = disabled_tools or set()
-        active_tools = [t for t in self.simple_tool_names if t not in _disabled]
+        active_tools = self._get_effective_simple_tools(disabled_tools)
 
         tool_descriptions = {
             "get_document_list": '- `get_document_list` — list available documents ("Kolik máš dokumentů?", "Jaké dokumenty máš?")',

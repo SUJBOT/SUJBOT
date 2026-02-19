@@ -110,7 +110,7 @@
       "high": 16384,
       "maximum": 32768
     },
-    "router_simple_tools": ["get_document_list", "get_stats"]
+    "router_simple_tools": ["get_document_list", "get_stats", "web_search"]
   },
   "model_registry": {
     "llm_models": {
