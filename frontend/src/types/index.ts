@@ -89,6 +89,8 @@ export interface Message {
   runId?: string;  // LangSmith trace ID for feedback correlation (assistant messages only)
   dbMessageId?: number;  // Database message ID for feedback submission
   feedback?: MessageFeedback;  // User feedback on this message (assistant messages only)
+  thinkingContent?: string;  // Transient thinking content from local LLM (not persisted)
+  isThinking?: boolean;  // Whether model is currently in thinking phase
 }
 
 /**
@@ -145,7 +147,7 @@ export interface Conversation {
 }
 
 export interface SSEEvent {
-  event: 'tool_health' | 'text_delta' | 'tool_call' | 'tool_result' | 'tool_calls_summary' | 'cost_summary' | 'done' | 'error' | 'clarification_needed' | 'agent_start' | 'progress' | 'title_update' | 'message_saved' | 'complete';
+  event: 'tool_health' | 'text_delta' | 'tool_call' | 'tool_result' | 'tool_calls_summary' | 'cost_summary' | 'done' | 'error' | 'clarification_needed' | 'agent_start' | 'progress' | 'title_update' | 'message_saved' | 'complete' | 'thinking_delta' | 'thinking_done';
   data: any;
 }
 

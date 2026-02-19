@@ -97,8 +97,11 @@ docker run -d --name sujbot_frontend \
 docker stop sujbot_backend && docker rm sujbot_backend
 docker run -d --name sujbot_backend \
   --network sujbot_sujbot_prod_net --network-alias backend \
+  --add-host=host.docker.internal:host-gateway \
   --env-file /home/prusemic/SUJBOT/.env \
   -e DATABASE_URL=postgresql://postgres:sujbot_secure_password@sujbot_postgres:5432/sujbot \
+  -e LOCAL_LLM_BASE_URL=http://host.docker.internal:18080/v1 \
+  -e LOCAL_EMBEDDING_BASE_URL=http://host.docker.internal:18081/v1 \
   -v $(pwd)/config.json:/app/config.json:ro \
   -v $(pwd)/prompts:/app/prompts:ro \
   -v $(pwd)/data:/app/data \
@@ -106,19 +109,33 @@ docker run -d --name sujbot_backend \
   -v $(pwd)/vector_db:/app/vector_db:ro \
   --restart unless-stopped sujbot-backend
 docker network connect sujbot_sujbot_db_net sujbot_backend
+docker network connect bridge sujbot_backend
 ```
-- MUST connect to BOTH networks: `sujbot_prod_net` (nginx) + `sujbot_db_net` (postgres)
+- **After container recreation**: Run `docker exec sujbot_nginx nginx -s reload` to force DNS re-resolution. Without this, nginx connects to old container IPs → 502 errors.
+- MUST connect to THREE networks: `sujbot_prod_net` (nginx) + `sujbot_db_net` (postgres) + `bridge` (host.docker.internal access)
+- `--add-host=host.docker.internal:host-gateway` required for local model access (vLLM + embedding) via socat bridges
 - `--env-file .env` required (API keys); `-e DATABASE_URL=...@sujbot_postgres:5432/...` overrides dev port
+- `LOCAL_LLM_BASE_URL` / `LOCAL_EMBEDDING_BASE_URL` override `.env` values (which point to localhost, unreachable from Docker)
 - `/app/data` must be writable (no `:ro`) for document uploads
 - `/app/vector_db:ro` required even if empty (validation check)
+
+### Local Model Prerequisites (socat bridges)
+Before backend can reach local models, SSH tunnels and socat bridges must be running:
+```bash
+# socat bridges (forward Docker-reachable ports to SSH tunnel ports)
+socat TCP-LISTEN:18080,bind=0.0.0.0,reuseaddr,fork TCP:127.0.0.1:8080 &  # LLM
+socat TCP-LISTEN:18081,bind=0.0.0.0,reuseaddr,fork TCP:127.0.0.1:8081 &  # Embedding
+```
+UFW rules (one-time): `sudo ufw allow from 172.16.0.0/12 to any port 18080 proto tcp` (and 18081)
 
 ## Architecture Overview
 
 ```
 User Query → SingleAgentRunner (autonomous tool loop)
   → RAG Tools (search, expand_context, get_document_info, compliance_check, web_search, etc.)
-  → VL Retrieval: Jina v4 cosine → page images → multimodal LLM
+  → VL Retrieval: embedder cosine → page images → multimodal LLM
   → Storage (PostgreSQL: vectors + checkpoints)
+  → LLM: "remote" (Sonnet 4.5 cloud) or "local" (Qwen3-VL-30B-A3B-Thinking on GB10 via vLLM)
 ```
 
 **Key directories:**
@@ -142,7 +159,8 @@ User Query → SingleAgentRunner (autonomous tool loop)
 - `src/agent/providers/openai_compat.py` - Shared Anthropic↔OpenAI format conversion helpers
 - `src/agent/tools/adapter.py` - `ToolAdapter` (tool lookup, validation, execution, metrics)
 - `src/agent/observability.py` - `setup_langsmith()` + `LangSmithIntegration`
-- `src/vl/__init__.py:create_vl_components()` - VL initialization factory
+- `src/vl/__init__.py:create_vl_components()` - VL initialization factory (embedder selection: jina/local)
+- `src/vl/local_embedder.py:LocalVLEmbedder` - Local VL embedding via vLLM (drop-in for JinaClient)
 - `src/graph/types.py` - `ENTITY_TYPES` + `RELATIONSHIP_TYPES` constants
 - `src/graph/embedder.py:GraphEmbedder` - multilingual-e5-small (384-dim) for graph semantic search
 - `src/graph/storage.py:GraphStorageAdapter` - Graph CRUD + embedding/FTS search
@@ -164,15 +182,23 @@ User Query → SingleAgentRunner (autonomous tool loop)
 ### VL (Vision-Language) Architecture
 
 ```
-VL flow: Query → Jina v4 embed_query() → PostgreSQL exact cosine (vectors.vl_pages)
+VL flow: Query → embedder embed_query() → PostgreSQL exact cosine (vectors.vl_pages)
   → top-k page images (base64 PNG) → multimodal tool result → VL-capable LLM
 ```
 
-- Jina v4 embeddings (2048-dim), stored in `vectors.vl_pages`
-- Jina v4 supports multimodal: `embed_query()` for text, `embed_image()` for image-based retrieval
+- 4096-dim embeddings stored in `vectors.vl_pages` (Qwen3-VL-Embedding-8B; was 2048 with Jina v4)
+- Embedder selection via `config.json` → `vl.embedder`: `"local"` (Qwen3-VL-Embedding-8B on GB10) or `"jina"` (Jina v4 cloud)
+- `src/vl/local_embedder.py:LocalVLEmbedder` — drop-in replacement for JinaClient (same interface)
+- `_create_embedder()` factory in `src/vl/__init__.py` handles embedder instantiation
 - No HNSW index — ~500 pages, exact cosine scan <50ms, 100% recall
-- `"local"` variant: `Qwen/Qwen3-VL-235B-A22B-Instruct` (DeepInfra, vision)
-- `"remote"` variant: Haiku 4.5 (vision natively)
+- `"local"` variant: Qwen3-VL-30B-A3B-Thinking via vLLM on GB10 (single DGX Spark, 131K ctx, ~21 tok/s SSE, KV cache 512K tokens/3.9x concurrency)
+- **vLLM production flags** (gx10-eb6e): `--max-model-len 131072 --max-num-batched-tokens 8192 --max-num-seqs 8 --gpu-memory-utilization 0.92 --enable-chunked-prefill --enable-prefix-caching --load-format fastsafetensors`
+- Benchmark script: `scripts/vllm_benchmark.py` — TTFT, decode throughput, e2e latency for RAG profiles
+- `"remote"` variant: Sonnet 4.5 (vision natively)
+- `local_llm` provider: reuses DeepInfraProvider with custom `base_url` (vLLM OpenAI-compatible API)
+- Dynamic max_tokens in runner: local_llm→16384 (thinking model), cloud→4096 (Anthropic SDK rejects high non-streaming values)
+- **vLLM Qwen3 thinking tags**: Chat template strips opening `<think>` — only `</think>` appears in stream. Raw completions API shows both tags. `ThinkTagStreamParser(start_thinking=True)` handles this. Test with raw completions API (`client.completions.create`) if debugging tag behavior.
+- **Streaming thinking**: `local_llm` uses `_stream_llm_iteration()` in runner — yields `thinking_delta`/`thinking_done`/`text_delta` events. Other providers keep non-streaming `create_message()`. Parser: `src/agent/providers/think_parser.py`.
 - DeepInfra provider converts Anthropic image blocks → OpenAI `image_url` format
 - ~1600 tokens/page
 
@@ -207,7 +233,7 @@ Agents MUST be LLM-driven. LLM decides tool calling sequence via `BaseAgent.run_
 Vectors in `vectors` schema (NOT `public`). Tables: `vl_pages`, `documents`.
 Graph data in `graph` schema. Tables: `entities`, `relationships`, `communities`, `entity_aliases`.
 
-- Embeddings: 2048-dim (Jina v4) in `vectors.vl_pages`
+- Embeddings: 4096-dim (Qwen3-VL-Embedding-8B local, was 2048 Jina v4) in `vectors.vl_pages`
 - Cosine similarity: `1 - (embedding <=> query_vector)`
 - `vectors.documents`: Document registry with category (`documentation` | `legislation`). Created at upload, deleted on document removal. Backfill: `scripts/backfill_document_categories.py`.
 

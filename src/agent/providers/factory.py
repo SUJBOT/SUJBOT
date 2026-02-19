@@ -72,9 +72,14 @@ def create_provider(
         resolved_model = model
         provider_name = detect_provider_from_model(model)
     else:
-        # Resolve model alias
+        # Resolve model alias to full model ID
         resolved_model = ModelRegistry.resolve_llm(model)
-        provider_name = ModelRegistry.get_provider(resolved_model, "llm")
+        # Look up provider from ORIGINAL alias first (handles same-ID, different-provider entries
+        # like qwen3-vl-235b [deepinfra] vs qwen3-vl-235b-local [local_llm])
+        try:
+            provider_name = ModelRegistry.get_provider(model, "llm")
+        except (ValueError, KeyError):
+            provider_name = ModelRegistry.get_provider(resolved_model, "llm")
 
     logger.info(f"Creating provider: model={resolved_model}, provider={provider_name}")
 
@@ -140,10 +145,20 @@ def create_provider(
 
         return DeepInfraProvider(api_key=key, model=resolved_model)
 
+    elif provider_name == "local_llm":
+        # Local LLM via llama.cpp / vLLM (OpenAI-compatible API)
+        base_url = os.getenv("LOCAL_LLM_BASE_URL", "http://localhost:18080/v1")
+        return DeepInfraProvider(
+            api_key="local-no-key-needed",
+            model=resolved_model,
+            base_url=base_url,
+        )
+
     else:
         raise ValueError(
             f"Unsupported provider: {provider_name} for model: {model}\n"
-            f"Supported providers: anthropic (Claude), openai (GPT-4o/o-series), google (Gemini), deepinfra (Qwen)"
+            f"Supported providers: anthropic (Claude), openai (GPT-4o/o-series), "
+            f"google (Gemini), deepinfra (Qwen), local_llm (local llama.cpp/vLLM)"
         )
 
 
@@ -198,5 +213,6 @@ def detect_provider_from_model(model: str) -> str:
         f"Cannot determine provider for model: {model}\n"
         f"Add model to config.json model_registry with explicit 'provider' field,\n"
         f"or use a model name containing: 'claude', 'haiku', 'sonnet', 'opus' (Anthropic), "
-        f"'gpt-', 'o1', 'o3', 'o4' (OpenAI), 'gemini' (Google), or 'qwen'/'llama'/'minimax' (DeepInfra)"
+        f"'gpt-', 'o1', 'o3', 'o4' (OpenAI), 'gemini' (Google), 'qwen'/'llama'/'minimax' (DeepInfra), "
+        f"or set provider to 'local_llm' for local llama.cpp/vLLM servers"
     )

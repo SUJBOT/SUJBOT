@@ -6,6 +6,7 @@ LLM that decides which tools to call and when to stop.
 """
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -340,6 +341,12 @@ class SingleAgentRunner:
             provider = self._create_provider(model)
             provider_name = provider.get_provider_name()
             model_name = provider.get_model_name()
+            # Local models (thinking models) need higher max_tokens for <think> blocks;
+            # cloud providers cap max_tokens to avoid SDK timeout enforcement
+            if provider_name == "local_llm":
+                max_tokens = max(max_tokens, 32768)
+            elif max_tokens > 16384:
+                max_tokens = 4096
         except Exception as e:
             yield {
                 "type": "final",
@@ -425,17 +432,31 @@ class SingleAgentRunner:
                     elif provider_name == "anthropic":
                         extra_kwargs["tool_choice"] = {"type": "any"}
 
-                # LLM call
+                # LLM call — streaming for local_llm, non-streaming otherwise
                 llm_start = time.time()
                 try:
-                    response = provider.create_message(
-                        messages=messages,
-                        tools=tool_schemas,
-                        system=system,
-                        max_tokens=max_tokens,
-                        temperature=temperature,
-                        **extra_kwargs,
-                    )
+                    if provider_name == "local_llm":
+                        # Streaming path: yields thinking/text events live
+                        response = None
+                        async for event in self._stream_llm_iteration(
+                            provider, messages, tool_schemas, system,
+                            max_tokens, temperature, **extra_kwargs,
+                        ):
+                            if event["type"] == "llm_response":
+                                response = event["response"]
+                            elif stream_progress:
+                                yield event  # Forward thinking/text events to caller
+                        if response is None:
+                            raise RuntimeError("Streaming produced no response")
+                    else:
+                        response = provider.create_message(
+                            messages=messages,
+                            tools=tool_schemas,
+                            system=system,
+                            max_tokens=max_tokens,
+                            temperature=temperature,
+                            **extra_kwargs,
+                        )
                     llm_time_ms = (time.time() - llm_start) * 1000
                 except Exception as e:
                     logger.error(f"LLM call failed: {e}", exc_info=True)
@@ -658,6 +679,7 @@ class SingleAgentRunner:
                 "iterations": iteration + 1,
                 "model": model_name,
                 "errors": [],
+                "text_already_streamed": provider_name == "local_llm",
             }
 
         except Exception as e:
@@ -729,6 +751,206 @@ class SingleAgentRunner:
             )
 
         return images
+
+    async def _stream_llm_iteration(
+        self,
+        provider,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]],
+        system: Any,
+        max_tokens: int,
+        temperature: float,
+        **extra_kwargs,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Stream a single LLM iteration for local_llm provider.
+
+        Parses <think> tags live and yields events:
+          - thinking_delta: Thinking content (streamed immediately)
+          - thinking_done: Thinking phase finished
+          - text_delta: Text content chunks (buffered, emitted at end)
+          - llm_response: Final ProviderResponse
+
+        Falls back to non-streaming create_message() on error.
+        """
+        from ..agent.providers.think_parser import (
+            ChunkType,
+            ThinkTagStreamParser,
+        )
+        from ..agent.providers.base import ProviderResponse
+        from ..agent.providers.openai_compat import STOP_REASON_MAP
+
+        # vLLM Qwen3 chat template strips opening <think> — model starts in thinking mode
+        parser = ThinkTagStreamParser(start_thinking=True)
+        text_buffer = ""
+        text_delta_pending = ""  # Buffer leading whitespace after </think> (avoid premature text_delta)
+        tool_call_deltas: Dict[int, Dict[str, Any]] = {}  # index → {id, name, args_str}
+        finish_reason = None
+        usage_data = None
+        had_thinking = False
+        thinking_done_sent = False
+
+        try:
+            # Call sync stream_message via executor to avoid blocking async loop
+            loop = asyncio.get_event_loop()
+            stream = await loop.run_in_executor(
+                None,
+                lambda: provider.stream_message(
+                    messages=messages,
+                    tools=tools,
+                    system=system,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    **extra_kwargs,
+                ),
+            )
+
+            # Consume sync iterator in executor, chunk by chunk
+            def _next_chunk(it):
+                try:
+                    return next(it)
+                except StopIteration:
+                    return None
+
+            while True:
+                chunk = await loop.run_in_executor(None, _next_chunk, stream)
+                if chunk is None:
+                    break
+
+                # Extract usage from final chunk (stream_options.include_usage)
+                if hasattr(chunk, "usage") and chunk.usage is not None:
+                    usage_data = {
+                        "input_tokens": getattr(chunk.usage, "prompt_tokens", 0) or 0,
+                        "output_tokens": getattr(chunk.usage, "completion_tokens", 0) or 0,
+                        "cache_read_tokens": 0,
+                        "cache_creation_tokens": 0,
+                    }
+
+                if not chunk.choices:
+                    continue
+
+                delta = chunk.choices[0].delta
+                chunk_finish = chunk.choices[0].finish_reason
+
+                if chunk_finish:
+                    finish_reason = chunk_finish
+
+                # Accumulate tool call deltas
+                if hasattr(delta, "tool_calls") and delta.tool_calls:
+                    for tc_delta in delta.tool_calls:
+                        idx = tc_delta.index
+                        if idx not in tool_call_deltas:
+                            tool_call_deltas[idx] = {
+                                "id": tc_delta.id or "",
+                                "name": "",
+                                "args_str": "",
+                            }
+                        if tc_delta.id:
+                            tool_call_deltas[idx]["id"] = tc_delta.id
+                        if hasattr(tc_delta, "function") and tc_delta.function:
+                            if tc_delta.function.name:
+                                tool_call_deltas[idx]["name"] = tc_delta.function.name
+                            if tc_delta.function.arguments:
+                                tool_call_deltas[idx]["args_str"] += tc_delta.function.arguments
+
+                # Parse text content through think-tag parser
+                if hasattr(delta, "content") and delta.content:
+                    parsed_chunks = parser.feed(delta.content)
+                    for pc in parsed_chunks:
+                        if pc.type == ChunkType.THINKING:
+                            had_thinking = True
+                            yield {"type": "thinking_delta", "content": pc.content}
+                        else:
+                            # Accumulate for ProviderResponse always
+                            text_buffer += pc.content
+                            if not thinking_done_sent and had_thinking:
+                                thinking_done_sent = True
+                                yield {"type": "thinking_done"}
+                            # Buffer leading whitespace after </think> to avoid
+                            # premature text_delta that clears frontend progress indicator
+                            # before tool calls arrive.
+                            text_delta_pending += pc.content
+                            if text_delta_pending.strip():
+                                # Substantive content — flush entire buffer
+                                yield {"type": "text_delta", "content": text_delta_pending}
+                                text_delta_pending = ""
+
+            # Flush parser (handles truncated tags)
+            for pc in parser.flush():
+                if pc.type == ChunkType.THINKING:
+                    had_thinking = True
+                    yield {"type": "thinking_delta", "content": pc.content}
+                else:
+                    text_buffer += pc.content
+                    if not thinking_done_sent and had_thinking:
+                        thinking_done_sent = True
+                        yield {"type": "thinking_done"}
+                    text_delta_pending += pc.content
+                    if text_delta_pending.strip():
+                        yield {"type": "text_delta", "content": text_delta_pending}
+                        text_delta_pending = ""
+
+            # Flush any remaining pending text (whitespace-only at end of iteration
+            # is discarded — it's just formatting between </think> and tool calls)
+            # Only emit if there's substantive content we haven't flushed yet.
+            # Note: text_buffer already has this content for ProviderResponse.
+
+            # Signal thinking done if no text followed (tool-call-only iteration)
+            if had_thinking and not thinking_done_sent:
+                yield {"type": "thinking_done"}
+
+            # Build ProviderResponse from accumulated data
+            content_blocks = []
+            clean_text = text_buffer.strip()
+            if clean_text:
+                content_blocks.append({"type": "text", "text": clean_text})
+
+            # Convert tool call deltas to content blocks
+            for idx in sorted(tool_call_deltas.keys()):
+                tc = tool_call_deltas[idx]
+                try:
+                    parsed_args = json.loads(tc["args_str"]) if tc["args_str"] else {}
+                except json.JSONDecodeError:
+                    logger.warning("Failed to parse tool args for %s: %s", tc["name"], tc["args_str"][:200])
+                    parsed_args = {}
+                content_blocks.append({
+                    "type": "tool_use",
+                    "id": tc["id"],
+                    "name": tc["name"],
+                    "input": parsed_args,
+                })
+
+            stop_reason = STOP_REASON_MAP.get(finish_reason, "end_turn")
+
+            if not usage_data:
+                usage_data = {
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cache_read_tokens": 0,
+                    "cache_creation_tokens": 0,
+                }
+
+            response = ProviderResponse(
+                content=content_blocks if content_blocks else [{"type": "text", "text": ""}],
+                stop_reason=stop_reason,
+                usage=usage_data,
+                model=provider.get_model_name(),
+            )
+
+            yield {"type": "llm_response", "response": response}
+
+        except Exception as e:
+            logger.warning("Streaming failed, falling back to non-streaming: %s", e, exc_info=True)
+            # Fallback to non-streaming
+            response = provider.create_message(
+                messages=messages,
+                tools=tools,
+                system=system,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                **extra_kwargs,
+            )
+            yield {"type": "llm_response", "response": response}
 
     def _should_stop_early(self, tool_call_history: List[Dict]) -> bool:
         """Check if we should stop (2+ consecutive failed searches)."""

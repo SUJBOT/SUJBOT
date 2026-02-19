@@ -34,8 +34,9 @@ class VLPageResult:
     def __post_init__(self):
         if self.page_number < 1:
             raise ValueError(f"page_number must be >= 1, got {self.page_number}")
-        if not (0.0 <= self.score <= 1.0):
-            raise ValueError(f"score must be in [0.0, 1.0], got {self.score}")
+        # Clamp score to [0.0, 1.0] — cosine similarity with L2-normalized
+        # embeddings can be slightly negative for dissimilar content
+        object.__setattr__(self, "score", max(0.0, min(1.0, self.score)))
 
 
 class VLRetriever:

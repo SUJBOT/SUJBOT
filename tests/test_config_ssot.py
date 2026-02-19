@@ -191,9 +191,9 @@ class TestArchitectureConfig:
         for field in required:
             assert field in vl, f"Missing VL field: {field}"
 
-    def test_vl_jina_dimensions_2048(self, config_data):
-        """Jina v4 must produce 2048-dim embeddings (NOT 4096 like Qwen3)."""
-        assert config_data["vl"]["dimensions"] == 2048
+    def test_vl_dimensions_4096(self, config_data):
+        """VL embeddings are 4096-dim (Qwen3-VL-Embedding-8B local)."""
+        assert config_data["vl"]["dimensions"] == 4096
 
     def test_vl_jina_model_is_v4(self, config_data):
         """Jina model must be v4."""

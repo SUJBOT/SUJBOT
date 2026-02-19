@@ -1,7 +1,10 @@
 {
   "vl": {
+    "embedder": "local",
     "jina_model": "jina-embeddings-v4",
-    "dimensions": 2048,
+    "local_embedding_url": "http://localhost:8081/v1",
+    "local_embedding_model": "Qwen/Qwen3-VL-Embedding-8B",
+    "dimensions": 4096,
     "default_k": 5,
     "page_image_dpi": 150,
     "page_image_format": "png",
@@ -26,7 +29,7 @@
     "postgresql": {
       "connection_string_env": "DATABASE_URL",
       "pool_size": 20,
-      "dimensions": 2048
+      "dimensions": 4096
     }
   },
   "embedding": {
@@ -236,7 +239,7 @@
       "enabled": false,
       "policy": {
         "trigger_after_agent": "extractor",
-        "quality_threshold": 0.60,
+        "quality_threshold": 0.6,
         "min_complexity_score": 40,
         "always_ask_if_zero_results": true,
         "never_ask_for_simple_queries": true,
@@ -248,22 +251,22 @@
         "metrics": {
           "retrieval_score": {
             "enabled": true,
-            "weight": 0.30,
+            "weight": 0.3,
             "threshold": 0.65
           },
           "semantic_coherence": {
             "enabled": true,
             "weight": 0.25,
-            "threshold": 0.30
+            "threshold": 0.3
           },
           "query_pattern": {
             "enabled": true,
             "weight": 0.25,
-            "threshold": 0.50
+            "threshold": 0.5
           },
           "document_diversity": {
             "enabled": true,
-            "weight": 0.20,
+            "weight": 0.2,
             "threshold": 5.0
           }
         }
@@ -320,21 +323,30 @@
       "haiku": {
         "id": "claude-haiku-4-5-20251001",
         "provider": "anthropic",
-        "pricing": {"input": 1.00, "output": 5.00},
+        "pricing": {
+          "input": 1.0,
+          "output": 5.0
+        },
         "context_window": 200000,
         "supports_caching": true
       },
       "sonnet": {
         "id": "claude-sonnet-4-5-20250929",
         "provider": "anthropic",
-        "pricing": {"input": 3.00, "output": 15.00},
+        "pricing": {
+          "input": 3.0,
+          "output": 15.0
+        },
         "context_window": 200000,
         "supports_caching": true
       },
       "opus": {
         "id": "claude-opus-4-5-20251101",
         "provider": "anthropic",
-        "pricing": {"input": 5.00, "output": 25.00},
+        "pricing": {
+          "input": 5.0,
+          "output": 25.0
+        },
         "context_window": 200000,
         "supports_caching": true,
         "supports_extended_thinking": true
@@ -342,63 +354,113 @@
       "gpt-4o": {
         "id": "gpt-4o",
         "provider": "openai",
-        "pricing": {"input": 2.50, "output": 10.00},
+        "pricing": {
+          "input": 2.5,
+          "output": 10.0
+        },
         "context_window": 128000
       },
       "gpt-4o-mini": {
         "id": "gpt-4o-mini",
         "provider": "openai",
-        "pricing": {"input": 0.15, "output": 0.60},
+        "pricing": {
+          "input": 0.15,
+          "output": 0.6
+        },
         "context_window": 128000
       },
       "o1": {
         "id": "o1",
         "provider": "openai",
-        "pricing": {"input": 15.00, "output": 60.00},
+        "pricing": {
+          "input": 15.0,
+          "output": 60.0
+        },
         "context_window": 200000
       },
       "o1-mini": {
         "id": "o1-mini",
         "provider": "openai",
-        "pricing": {"input": 3.00, "output": 12.00},
+        "pricing": {
+          "input": 3.0,
+          "output": 12.0
+        },
         "context_window": 128000
       },
       "o3-mini": {
         "id": "o3-mini",
         "provider": "openai",
-        "pricing": {"input": 3.00, "output": 12.00},
+        "pricing": {
+          "input": 3.0,
+          "output": 12.0
+        },
         "context_window": 200000
       },
       "gemini-flash": {
         "id": "gemini-2.5-flash",
         "provider": "google",
-        "pricing": {"input": 0.30, "output": 2.50},
+        "pricing": {
+          "input": 0.3,
+          "output": 2.5
+        },
         "context_window": 1000000
       },
       "gemini-pro": {
         "id": "gemini-2.5-pro",
         "provider": "google",
-        "pricing": {"input": 1.25, "output": 10.00},
+        "pricing": {
+          "input": 1.25,
+          "output": 10.0
+        },
         "context_window": 1000000
       },
       "gemini-flash-lite": {
         "id": "gemini-2.5-flash-lite",
         "provider": "google",
-        "pricing": {"input": 0.10, "output": 0.40},
+        "pricing": {
+          "input": 0.1,
+          "output": 0.4
+        },
         "context_window": 1000000
       },
       "qwen-vl-32b": {
         "id": "Qwen/Qwen2.5-VL-32B-Instruct",
         "provider": "deepinfra",
-        "pricing": {"input": 0.20, "output": 0.60},
+        "pricing": {
+          "input": 0.2,
+          "output": 0.6
+        },
         "context_window": 128000,
         "supports_vision": true
       },
       "qwen3-vl-235b": {
         "id": "Qwen/Qwen3-VL-235B-A22B-Instruct",
         "provider": "deepinfra",
-        "pricing": {"input": 0.20, "output": 0.88},
+        "pricing": {
+          "input": 0.2,
+          "output": 0.88
+        },
         "context_window": 262144,
+        "supports_vision": true
+      },
+      "qwen3-vl-235b-local": {
+        "id": "QuantTrio/Qwen3-VL-235B-A22B-Thinking-AWQ",
+        "provider": "local_llm",
+        "pricing": {
+          "input": 0.0,
+          "output": 0.0
+        },
+        "context_window": 32768,
+        "supports_vision": true
+      },
+      "qwen3-vl-30b-local": {
+        "id": "Qwen/Qwen3-VL-30B-A3B-Thinking",
+        "provider": "local_llm",
+        "pricing": {
+          "input": 0.0,
+          "output": 0.0
+        },
+        "context_window": 131072,
         "supports_vision": true
       }
     },
@@ -406,83 +468,122 @@
       "text-embedding-3-large": {
         "id": "text-embedding-3-large",
         "provider": "openai",
-        "pricing": {"input": 0.13, "output": 0.0},
+        "pricing": {
+          "input": 0.13,
+          "output": 0.0
+        },
         "dimensions": 3072
       },
       "text-embedding-3-small": {
         "id": "text-embedding-3-small",
         "provider": "openai",
-        "pricing": {"input": 0.02, "output": 0.0},
+        "pricing": {
+          "input": 0.02,
+          "output": 0.0
+        },
         "dimensions": 1536
       },
       "text-embedding-ada-002": {
         "id": "text-embedding-ada-002",
         "provider": "openai",
-        "pricing": {"input": 0.10, "output": 0.0},
+        "pricing": {
+          "input": 0.1,
+          "output": 0.0
+        },
         "dimensions": 1536
       },
       "voyage-3-large": {
         "id": "voyage-3-large",
         "provider": "voyage",
-        "pricing": {"input": 0.12, "output": 0.0},
+        "pricing": {
+          "input": 0.12,
+          "output": 0.0
+        },
         "dimensions": 1024
       },
       "voyage-3": {
         "id": "voyage-3",
         "provider": "voyage",
-        "pricing": {"input": 0.06, "output": 0.0},
+        "pricing": {
+          "input": 0.06,
+          "output": 0.0
+        },
         "dimensions": 1024
       },
       "voyage-3-lite": {
         "id": "voyage-3-lite",
         "provider": "voyage",
-        "pricing": {"input": 0.02, "output": 0.0},
+        "pricing": {
+          "input": 0.02,
+          "output": 0.0
+        },
         "dimensions": 512
       },
       "voyage-law-2": {
         "id": "voyage-law-2",
         "provider": "voyage",
-        "pricing": {"input": 0.12, "output": 0.0},
+        "pricing": {
+          "input": 0.12,
+          "output": 0.0
+        },
         "dimensions": 1024
       },
       "bge-m3": {
         "id": "BAAI/bge-m3",
         "provider": "huggingface",
-        "pricing": {"input": 0.0, "output": 0.0},
+        "pricing": {
+          "input": 0.0,
+          "output": 0.0
+        },
         "dimensions": 1024,
         "is_local": true
       },
       "bge-large": {
         "id": "BAAI/bge-large-en-v1.5",
         "provider": "huggingface",
-        "pricing": {"input": 0.0, "output": 0.0},
+        "pricing": {
+          "input": 0.0,
+          "output": 0.0
+        },
         "dimensions": 1024,
         "is_local": true
       },
       "bge-base": {
         "id": "BAAI/bge-base-en-v1.5",
         "provider": "huggingface",
-        "pricing": {"input": 0.0, "output": 0.0},
+        "pricing": {
+          "input": 0.0,
+          "output": 0.0
+        },
         "dimensions": 768,
         "is_local": true
       },
       "bge-small": {
         "id": "BAAI/bge-small-en-v1.5",
         "provider": "huggingface",
-        "pricing": {"input": 0.0, "output": 0.0},
+        "pricing": {
+          "input": 0.0,
+          "output": 0.0
+        },
         "dimensions": 384,
         "is_local": true
       },
       "qwen3-embedding": {
         "id": "Qwen/Qwen3-Embedding-8B",
         "provider": "deepinfra",
-        "pricing": {"input": 0.03, "output": 0.0},
+        "pricing": {
+          "input": 0.03,
+          "output": 0.0
+        },
         "dimensions": 4096
       },
       "jina-v4": {
         "id": "jina-embeddings-v4",
         "provider": "jina",
-        "pricing": {"input": 0.02, "output": 0.00},
+        "pricing": {
+          "input": 0.02,
+          "output": 0.0
+        },
         "dimensions": 2048
       }
     },
@@ -539,8 +640,8 @@
         "model": "claude-sonnet-4-5-20250929"
       },
       "local": {
-        "display_name": "Local (Qwen3 VL 235B)",
-        "model": "Qwen/Qwen3-VL-235B-A22B-Instruct"
+        "display_name": "Local (Qwen3 VL 30B, vLLM on GB10)",
+        "model": "qwen3-vl-30b-local"
       }
     },
     "default_variant": "remote",
@@ -552,7 +653,12 @@
   "security_monitoring": {
     "enabled": true,
     "schedule": {
-      "regular_checks": ["6:00", "10:00", "14:00", "18:00"],
+      "regular_checks": [
+        "6:00",
+        "10:00",
+        "14:00",
+        "18:00"
+      ],
       "daily_summary": "22:00",
       "timezone": "Europe/Prague"
     },
@@ -635,7 +741,9 @@
     "notifications": {
       "email": {
         "enabled": false,
-        "recipients": ["sujbot.fjfi@gmail.com"],
+        "recipients": [
+          "sujbot.fjfi@gmail.com"
+        ],
         "smtp_host": "smtp.gmail.com",
         "smtp_port": 587,
         "smtp_user_env": "GMAIL_USER",
@@ -649,19 +757,34 @@
           {
             "name": "monitoring",
             "webhook_url_env": "TEAMS_WEBHOOK_URL",
-            "severity": ["critical", "warning", "healthy"]
+            "severity": [
+              "critical",
+              "warning",
+              "healthy"
+            ]
           }
         ]
       },
       "severity_filter": {
-        "email_on": ["critical", "warning"],
-        "teams_on": ["critical", "warning", "healthy"]
+        "email_on": [
+          "critical",
+          "warning"
+        ],
+        "teams_on": [
+          "critical",
+          "warning",
+          "healthy"
+        ]
       }
     },
     "claude_settings": {
       "prompt_file": "prompts/security_monitor.txt",
       "daily_prompt_file": "prompts/security_monitor_daily.txt",
-      "allowed_tools": ["Bash", "Read", "Grep"],
+      "allowed_tools": [
+        "Bash",
+        "Read",
+        "Grep"
+      ],
       "timeout_seconds": 120
     },
     "logging": {

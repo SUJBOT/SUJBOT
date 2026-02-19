@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 # Type alias for providers
-LLMProvider = Literal["anthropic", "openai", "google", "deepinfra"]
+LLMProvider = Literal["anthropic", "openai", "google", "deepinfra", "local_llm"]
 EmbeddingProvider = Literal["openai", "deepinfra", "voyage", "huggingface", "jina"]
 
 
@@ -81,6 +81,10 @@ class LLMModelConfig(BaseModel):
     supports_extended_thinking: bool = Field(
         default=False,
         description="Whether model supports extended thinking"
+    )
+    supports_vision: bool = Field(
+        default=False,
+        description="Whether model supports vision/image inputs"
     )
 
 
@@ -966,14 +970,26 @@ class AgentVariantsConfig(BaseModel):
 class VLConfig(BaseModel):
     """Vision-Language architecture configuration."""
 
+    embedder: Literal["jina", "local"] = Field(
+        default="jina",
+        description="Embedder backend: 'jina' (cloud API) or 'local' (vLLM on GB10)"
+    )
     jina_model: str = Field(
         default="jina-embeddings-v4",
         description="Jina embedding model for VL page embeddings"
     )
+    local_embedding_url: Optional[str] = Field(
+        default=None,
+        description="Local embedding server URL (e.g. http://localhost:18888/v1)"
+    )
+    local_embedding_model: str = Field(
+        default="Qwen/Qwen3-VL-Embedding-8B",
+        description="Local embedding model name"
+    )
     dimensions: int = Field(
         default=2048,
         ge=1,
-        description="Jina embedding dimensions"
+        description="Embedding dimensions"
     )
     default_k: int = Field(
         default=5,
