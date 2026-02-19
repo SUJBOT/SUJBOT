@@ -45,7 +45,7 @@ def create_provider(
         google_api_key: Google API key (optional, defaults to GOOGLE_API_KEY env var)
 
     Returns:
-        Provider instance (AnthropicProvider, OpenAIProvider, or GeminiProvider)
+        Provider instance (AnthropicProvider, OpenAIProvider, GeminiProvider, or DeepInfraProvider)
 
     Raises:
         ValueError: If provider cannot be determined or API key is missing
@@ -146,7 +146,7 @@ def create_provider(
         return DeepInfraProvider(api_key=key, model=resolved_model)
 
     elif provider_name == "local_llm":
-        # Local LLM via llama.cpp / vLLM (OpenAI-compatible API)
+        # Local 30B LLM via vLLM (OpenAI-compatible API)
         base_url = os.getenv("LOCAL_LLM_BASE_URL", "http://localhost:18080/v1")
         return DeepInfraProvider(
             api_key="local-no-key-needed",

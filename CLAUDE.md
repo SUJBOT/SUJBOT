@@ -134,8 +134,7 @@ UFW rules (one-time): `sudo ufw allow from 172.16.0.0/12 to any port 18080 proto
 
 ```
 User Query → AgentAdapter.stream_response()
-  → variant="remote" → SingleAgentRunner (Sonnet 4.5, unchanged)
-  → variant="local" + routing enabled → RoutingAgentRunner
+  → routing.enabled=true (init-time) → RoutingAgentRunner wraps SingleAgentRunner
      → Phase 1: 8B Router (single non-streaming call, thinking DISABLED, tool_choice=required)
         ├── answer_directly → yield text_delta + final (greetings, meta-questions)
         ├── Simple tool (get_document_list, get_stats, web_search)
@@ -143,11 +142,12 @@ User Query → AgentAdapter.stream_response()
         ├── delegate_to_thinking_agent → Phase 2: 30B with thinking budget
         │    → Full autonomous tool loop (search, compliance, graph, web, etc.)
         └── Unknown tool → fallback to 30B delegation
+  → routing.enabled=false → SingleAgentRunner directly
   → RAG Tools, VL Retrieval, Storage (PostgreSQL), Graph RAG
 ```
 
 **Routing architecture** (`src/single_agent/routing_runner.py`):
-- 8B FP8 (Qwen3-VL-8B-Instruct-FP8, gx10-fa34:8082) classifies queries via 5 tools: `answer_directly`, `delegate_to_thinking_agent`, `get_document_list`, `get_stats`, `web_search`
+- 8B FP8 (Qwen3-VL-8B-Instruct-FP8, gx10-fa34:8082) classifies queries via virtual + real tools: `answer_directly`, `delegate_to_thinking_agent`, plus configurable simple tools (`get_document_list`, `get_stats`, `web_search`)
 - Tool-based classification (LLM-driven, `tool_choice="required"`) — router always picks a tool
 - 30B worker (Qwen3-VL-30B-A3B-Thinking, gx10-eb6e:8080) gets `extra_llm_kwargs` with thinking budget
 - Router call disables thinking: `extra_body={"chat_template_kwargs": {"enable_thinking": False}}`

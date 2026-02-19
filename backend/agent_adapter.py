@@ -33,10 +33,10 @@ logger = logging.getLogger(__name__)
 
 class AgentAdapter:
     """
-    Adapter wrapping SingleAgentRunner for web frontend.
+    Adapter wrapping SingleAgentRunner (or RoutingAgentRunner) for web frontend.
 
     Responsibilities:
-    - Initialize single-agent system with config
+    - Initialize runner: RoutingAgentRunner when routing.enabled, else SingleAgentRunner
     - Convert runner events to SSE format
     - Track costs per request
     - Resolve variant → model for each request
@@ -188,6 +188,7 @@ class AgentAdapter:
 
         Yields SSE events:
         - tool_health: Tool status before query
+        - routing: Router classification decision (when RoutingAgentRunner is active)
         - progress: Workflow stage updates
         - tool_call: Tool execution events
         - thinking_delta: Thinking content from local LLM
@@ -204,6 +205,7 @@ class AgentAdapter:
             user_id: User ID for loading agent variant preference
             messages: Conversation history
             attachment_blocks: Multimodal content blocks from user attachments
+            web_search_enabled: Whether to enable web_search tool for this request
 
         Yields:
             Dict containing event type and data

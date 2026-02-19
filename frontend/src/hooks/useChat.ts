@@ -70,6 +70,8 @@ export function useChat() {
   // Spending tracking
   const [spendingLimitError, setSpendingLimitError] = useState<SpendingLimitError | null>(null);
   const [spendingRefreshTrigger, setSpendingRefreshTrigger] = useState(0);
+  // Per-session web search toggle (survives conversation switches, resets on page refresh)
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
 
   // Derived: is the CURRENT conversation streaming? (backward-compatible API)
   const isStreaming = currentConversationId
@@ -183,11 +185,16 @@ export function useChat() {
   // When to use: Async callbacks that need latest state (regenerate, edit)
   // When NOT to use: Synchronous operations - use functional setState instead
   const conversationsRef = useRef<Conversation[]>(conversations);
+  const webSearchEnabledRef = useRef(webSearchEnabled);
 
-  // Keep ref synchronized with state
+  // Keep refs synchronized with state
   useEffect(() => {
     conversationsRef.current = conversations;
   }, [conversations]);
+
+  useEffect(() => {
+    webSearchEnabledRef.current = webSearchEnabled;
+  }, [webSearchEnabled]);
 
   /**
    * Clean invalid/incomplete messages from conversation
@@ -500,7 +507,7 @@ export function useChat() {
           // Handle routing decision (8B router → 30B worker)
           if (event.event === 'routing') {
             if (streamState.currentMessage && streamState.currentMessage.agentProgress) {
-              const { decision, complexity, thinking_budget } = event.data;
+              const { decision } = event.data;
               if (decision === 'classifying') {
                 streamState.currentMessage.agentProgress.currentMessage = t('progress.routingClassifying');
               } else if (decision === 'delegate') {
@@ -1027,7 +1034,7 @@ export function useChat() {
         //
         // Alternative considered: useEffect with dependency, but creates unnecessary rerender
         await new Promise(resolve => setTimeout(resolve, 10));
-        await sendMessage(newContent);
+        await sendMessage(newContent, true, null, null, webSearchEnabledRef.current);
       }
     },
     [sendMessage, currentConversationId]
@@ -1113,7 +1120,7 @@ export function useChat() {
       // Alternative considered: useEffect with dependency, but creates unnecessary rerender
       await new Promise(resolve => setTimeout(resolve, 10));
       // Pass false to prevent adding a new user message (we're regenerating from existing)
-      await sendMessage(userMessageContent, false);
+      await sendMessage(userMessageContent, false, null, null, webSearchEnabledRef.current);
     },
     [sendMessage, currentConversationId, cleanMessages]
   );
@@ -1437,6 +1444,8 @@ export function useChat() {
     awaitingClarification,
     spendingLimitError,
     spendingRefreshTrigger,
+    webSearchEnabled,
+    setWebSearchEnabled,
     createConversation,
     selectConversation,
     deleteConversation,

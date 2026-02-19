@@ -24,7 +24,7 @@
 - i18n strings for routing progress (cs/en).
 
 ### Configuration
-- `routing.enabled`: Toggle routing on/off (default: true for local variant).
+- `routing.enabled`: Toggle routing on/off (currently `true` in config.json).
 - `routing.thinking_budgets`: Token budgets per complexity level.
 - `.env` — Added `LOCAL_LLM_8B_BASE_URL=http://localhost:8082/v1`.
 - Backend deploy: Add `-e LOCAL_LLM_8B_BASE_URL=http://host.docker.internal:18082/v1`.

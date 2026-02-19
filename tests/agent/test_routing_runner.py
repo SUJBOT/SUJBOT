@@ -481,7 +481,7 @@ class TestStreamingResponse:
 
         events = []
         async for ev in runner._stream_router_response(
-            mock_provider, [{"role": "user", "content": "test"}], True
+            mock_provider, [{"role": "user", "content": "test"}], "You are a router."
         ):
             events.append(ev)
 
@@ -511,7 +511,7 @@ class TestStreamingResponse:
 
         events = []
         async for ev in runner._stream_router_response(
-            mock_provider, [{"role": "user", "content": "test"}], True
+            mock_provider, [{"role": "user", "content": "test"}], "You are a router."
         ):
             events.append(ev)
 
