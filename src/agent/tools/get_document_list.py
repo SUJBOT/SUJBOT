@@ -1,7 +1,7 @@
 """
 Get Document List Tool
 
-Lists all documents in the vector store for orchestrator routing decisions.
+Lists all documents in the vector store.
 """
 
 import logging
@@ -30,7 +30,7 @@ class GetDocumentListTool(BaseTool):
     Returns a list of all document IDs, categories, and summaries from the vector store.
 
     **Use cases:**
-    - Orchestrator routing: understand what documents exist
+    - Understanding what documents exist in the corpus
     - Query scoping: check if relevant documents are indexed
     - Corpus overview: see available document coverage
     - Category awareness: identify legislation vs documentation

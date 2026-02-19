@@ -201,7 +201,7 @@ class AgentExecutionError(AgentError):
 
 
 class OrchestratorError(AgentError):
-    """Error in orchestrator routing or synthesis."""
+    """Error in agent orchestration or synthesis."""
     pass
 
 

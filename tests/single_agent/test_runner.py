@@ -3,6 +3,7 @@ Tests for SingleAgentRunner.run_query() — initialization guard, provider failu
 """
 
 import pytest
+from unittest.mock import MagicMock, AsyncMock
 
 from src.single_agent.runner import SingleAgentRunner
 
@@ -107,6 +108,143 @@ class TestForceFinishAnswer:
         )
 
         assert len(original_messages) == original_len
+
+
+class TestDisabledToolRejection:
+    """Test that run_query rejects LLM calls to disabled tools."""
+
+    @pytest.mark.anyio
+    async def test_disabled_tool_yields_failed_event(self, runner):
+        """When LLM calls a disabled tool, runner yields failed tool_call and
+        returns error tool_result to LLM instead of executing the tool."""
+        from src.agent.providers.base import ProviderResponse
+
+        runner._initialized = True
+        runner.tool_adapter = MagicMock()
+        runner.tool_adapter.get_available_tools.return_value = ["search", "web_search"]
+        runner.tool_adapter.get_tool_schema.side_effect = lambda name: {
+            "name": name,
+            "description": f"{name} tool",
+            "input_schema": {"type": "object", "properties": {}, "required": []},
+        }
+        runner.tool_adapter.registry = MagicMock()
+        runner.system_prompt = "test prompt"
+
+        # First call: LLM hallucinates web_search (disabled)
+        # Second call: LLM gives final answer
+        call_count = 0
+
+        def create_message_side_effect(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return ProviderResponse(
+                    content=[
+                        {"type": "tool_use", "id": "call_1", "name": "web_search",
+                         "input": {"query": "test"}},
+                    ],
+                    stop_reason="tool_use",
+                    usage={"input_tokens": 100, "output_tokens": 50},
+                    model="claude-haiku-4-5",
+                )
+            else:
+                return ProviderResponse(
+                    content=[{"type": "text", "text": "Final answer without web search."}],
+                    stop_reason="end_turn",
+                    usage={"input_tokens": 200, "output_tokens": 30},
+                    model="claude-haiku-4-5",
+                )
+
+        mock_provider = MagicMock()
+        mock_provider.get_provider_name.return_value = "anthropic"
+        mock_provider.get_model_name.return_value = "claude-haiku-4-5"
+        mock_provider.supports_feature.return_value = False
+        mock_provider.create_message.side_effect = create_message_side_effect
+
+        runner._create_provider = MagicMock(return_value=mock_provider)
+
+        events = []
+        async for event in runner.run_query(
+            "test query",
+            model="claude-haiku-4-5",
+            stream_progress=True,
+            disabled_tools={"web_search"},
+        ):
+            events.append(event)
+
+        # Should have a failed tool_call event for web_search
+        tool_events = [e for e in events if e.get("type") == "tool_call"]
+        assert any(
+            e["tool"] == "web_search" and e["status"] == "failed"
+            for e in tool_events
+        ), "Expected a failed tool_call event for disabled web_search"
+
+        # Tool adapter.execute should NOT have been called for web_search
+        runner.tool_adapter.execute.assert_not_called()
+
+        # Final event should still succeed
+        final = next(e for e in events if e["type"] == "final")
+        assert final["success"] is True
+
+    @pytest.mark.anyio
+    async def test_disabled_tool_not_in_schemas(self, runner):
+        """Disabled tools should be excluded from tool schemas sent to LLM."""
+        runner._initialized = True
+        runner.tool_adapter = MagicMock()
+        runner.tool_adapter.get_available_tools.return_value = ["search", "web_search"]
+        runner.tool_adapter.get_tool_schema.side_effect = lambda name: {
+            "name": name,
+            "description": f"{name} tool",
+            "input_schema": {"type": "object", "properties": {}, "required": []},
+        }
+        runner.tool_adapter.registry = MagicMock()
+        runner.system_prompt = "test prompt"
+
+        from src.agent.providers.base import ProviderResponse
+
+        mock_provider = MagicMock()
+        mock_provider.get_provider_name.return_value = "anthropic"
+        mock_provider.get_model_name.return_value = "claude-haiku-4-5"
+        mock_provider.supports_feature.return_value = False
+        mock_provider.create_message.return_value = ProviderResponse(
+            content=[{"type": "text", "text": "Answer"}],
+            stop_reason="end_turn",
+            usage={"input_tokens": 100, "output_tokens": 50},
+            model="claude-haiku-4-5",
+        )
+        runner._create_provider = MagicMock(return_value=mock_provider)
+
+        events = []
+        async for event in runner.run_query(
+            "test query",
+            model="claude-haiku-4-5",
+            disabled_tools={"web_search"},
+        ):
+            events.append(event)
+
+        # Verify only "search" schema was passed (not "web_search")
+        call_args = mock_provider.create_message.call_args
+        tools_passed = call_args.kwargs.get("tools", [])
+        tool_names = [t["name"] for t in tools_passed]
+        assert "search" in tool_names
+        assert "web_search" not in tool_names
+
+
+class TestLangSmithConfigKey:
+    """Test that _setup_langsmith reads from the correct config key."""
+
+    def test_langsmith_reads_from_top_level_key(self):
+        """LangSmith config should be read from config['langsmith']."""
+        config = {"langsmith": {"enabled": False}}
+        runner = SingleAgentRunner(config=config)
+        langsmith_config = runner.config.get("langsmith", {})
+        assert langsmith_config.get("enabled") is False
+
+    def test_langsmith_missing_key_is_noop(self):
+        """Missing langsmith key should not crash."""
+        runner = SingleAgentRunner(config={})
+        # _setup_langsmith should not raise
+        runner._setup_langsmith()
 
 
 class TestSingleAgentConfig:

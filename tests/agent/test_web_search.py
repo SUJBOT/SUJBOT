@@ -3,7 +3,7 @@ Tests for web_search tool (src/agent/tools/web_search.py).
 
 Covers:
 - Input validation: valid/invalid queries
-- Disabled state: web_search_enabled config no longer blocks tool (runner handles it)
+- Disabled state: disabling is handled at runner level (disabled_tools set), not in tool
 - Missing API key: returns error
 - Tool result format: check ToolResult structure with mocked Gemini response
 - Citation format: verify sources list format
@@ -26,10 +26,9 @@ from src.agent.config import ToolConfig
 # ---------------------------------------------------------------------------
 
 
-def _make_tool(web_search_enabled=True, web_search_model="gemini-2.0-flash"):
+def _make_tool(web_search_model="gemini-2.0-flash"):
     """Create a WebSearchTool with a mock config."""
     config = ToolConfig(
-        web_search_enabled=web_search_enabled,
         web_search_model=web_search_model,
     )
     return WebSearchTool(
@@ -124,11 +123,11 @@ class TestWebSearchInput:
 
 
 class TestWebSearchDisabled:
-    def test_disabled_config_does_not_block_execution(self):
-        """web_search_enabled=False in ToolConfig no longer blocks the tool.
-        Disabling is handled at the runner level via disabled_tools set."""
-        tool = _make_tool(web_search_enabled=False)
-        # Without GOOGLE_API_KEY, tool fails on missing key (not "disabled")
+    @patch.dict("os.environ", {}, clear=True)
+    def test_tool_always_attempts_execution(self):
+        """Tool has no internal disable guard — disabling is handled at runner level
+        via disabled_tools set. Without API key, tool fails on missing key."""
+        tool = _make_tool()
         result = tool.execute(query="test query")
         assert not result.success
         assert "api_key" in result.error.lower()
@@ -315,12 +314,10 @@ class TestWebSearchCitationFormat:
 class TestWebSearchConfig:
     def test_tool_config_defaults(self):
         config = ToolConfig()
-        assert config.web_search_enabled is True
         assert config.web_search_model == "gemini-2.0-flash"
 
     def test_tool_config_custom(self):
-        config = ToolConfig(web_search_enabled=False, web_search_model="gemini-2.5-flash")
-        assert config.web_search_enabled is False
+        config = ToolConfig(web_search_model="gemini-2.5-flash")
         assert config.web_search_model == "gemini-2.5-flash"
 
 

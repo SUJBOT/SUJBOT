@@ -1,5 +1,30 @@
 # Changelog — 13.–19. února 2026
 
+## 28. Remove routing runner, rag_confidence module, and dead code (19. února 2026)
+
+### Cleanup
+- **Remove RoutingAgentRunner** — 8B router → 30B worker architecture removed. `AgentAdapter` now uses `SingleAgentRunner` directly. Deleted `src/single_agent/routing_runner.py`, `prompts/agents/router.txt`, and `tests/agent/test_routing_runner.py`.
+- **Delete `rag_confidence/` module** — QPP-based retrieval confidence scoring (standalone, by veselm73, was disabled). ~7,500 lines removed including models, tests, training scripts, and calibration data.
+- **Delete `src/duplicate_detector.py`** — unused dead code.
+- **Remove deprecated config fields** — `routing` section, OCR-era fields removed from `config_schema.py` and `config.json`.
+
+### Backend
+- **LangSmith config promoted** — from `multi_agent.langsmith` to top-level `langsmith` key. Backward-compat fallback reads old location with deprecation warning.
+- **Web search disabling** — per-request `disabled_tools` set in runner replaces tool-level `web_search_enabled` guard. Dead `ToolConfig.web_search_enabled` field removed.
+- **Disabled tool guard** — runner rejects LLM hallucinated calls to disabled tools with error feedback.
+- Stale multi-agent/routing comments cleaned up across docstrings.
+
+### Frontend
+- `routing` SSE event handling removed (no longer emitted by backend).
+- `webSearchEnabled` toggle lifted from `ChatInput` to `useChat` hook (persists across conversation switches).
+- PDF side panel: `MemoizedPage` wrapper, text cache, pending scroll pattern for search performance.
+- `'routing'` removed from `SSEEvent` TypeScript type union.
+- i18n: routing-related keys removed from cs.json and en.json.
+
+### Tests
+- New tests for disabled-tool rejection logic and LangSmith config key propagation.
+- Web search tests updated for removed `web_search_enabled` field.
+
 ## 27. 8B Router → 30B Thinking Worker architecture (19. února 2026)
 
 ### Architecture

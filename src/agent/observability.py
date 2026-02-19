@@ -1,7 +1,5 @@
 """
 LangSmith observability setup.
-
-Originally part of the removed multi_agent package (see git history).
 """
 
 import logging

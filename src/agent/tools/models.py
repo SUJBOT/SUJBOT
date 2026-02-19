@@ -1,7 +1,7 @@
 """
 Tool execution models — Pydantic models for tracking tool calls and metrics.
 
-Only the models used by ToolAdapter (originally defined in the removed multi_agent package).
+Used by ToolAdapter for tool call tracking and metrics collection.
 """
 
 from datetime import datetime

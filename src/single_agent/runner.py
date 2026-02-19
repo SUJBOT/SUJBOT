@@ -82,6 +82,14 @@ class SingleAgentRunner:
     def _setup_langsmith(self) -> None:
         """Setup LangSmith tracing if configured."""
         langsmith_config = self.config.get("langsmith", {})
+        # Backward compat: check old nested location
+        if not langsmith_config:
+            langsmith_config = self.config.get("multi_agent", {}).get("langsmith", {})
+            if langsmith_config:
+                logger.warning(
+                    "LangSmith config found under 'multi_agent.langsmith' (deprecated). "
+                    "Move to top-level 'langsmith' key in config.json."
+                )
         if not langsmith_config.get("enabled", False):
             return
         try:
@@ -184,7 +192,6 @@ class SingleAgentRunner:
             adaptive_retrieval=adaptive_config,
             max_document_compare=agent_tools_config.get("max_document_compare", 3),
             compliance_threshold=agent_tools_config.get("compliance_threshold", 0.7),
-            web_search_enabled=web_search_config.get("enabled", True),
             web_search_model=web_search_config.get("model", "gemini-2.0-flash"),
         )
 

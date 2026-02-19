@@ -624,7 +624,7 @@ export function useChat() {
             // Append thinking content (live from local LLM)
             if (!streamState.currentMessage) {
               console.warn('thinking_delta received but no currentMessage exists');
-            } else if (streamState.currentMessage) {
+            } else {
               streamState.currentMessage.thinkingContent =
                 (streamState.currentMessage.thinkingContent || '') + event.data.content;
               streamState.currentMessage.isThinking = true;
@@ -652,7 +652,7 @@ export function useChat() {
             // Thinking phase finished
             if (!streamState.currentMessage) {
               console.warn('thinking_done received but no currentMessage exists');
-            } else if (streamState.currentMessage) {
+            } else {
               streamState.currentMessage.isThinking = false;
               // Keep thinkingContent for now; clear on first text_delta
 
