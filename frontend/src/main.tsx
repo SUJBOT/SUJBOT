@@ -6,6 +6,11 @@ import App from './App.tsx'
 import { AuthProvider } from './contexts/AuthContext'
 import { CitationProvider } from './contexts/CitationContext'
 
+// Auto-reload on stale chunk imports after deployment
+window.addEventListener('vite:preloadError', () => {
+  window.location.reload();
+});
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <AuthProvider>

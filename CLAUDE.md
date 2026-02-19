@@ -40,7 +40,7 @@ uv run pytest tests/ --cov=src --cov-report=html           # With coverage
 # NOTE: pytest-timeout NOT installed. Do not use --timeout flag.
 
 # Production tests (requires running Docker stack)
-PROD_BASE_URL="http://localhost:8200" \
+PROD_BASE_URL="https://localhost" \
 PROD_TEST_USER="prodtest@example.com" \
 PROD_TEST_PASSWORD="ProdTest123!" \
 uv run pytest tests/production/ -v
@@ -113,6 +113,7 @@ docker network connect sujbot_sujbot_db_net sujbot_backend
 docker network connect bridge sujbot_backend
 ```
 - **After container recreation**: Run `docker exec sujbot_nginx nginx -s reload` to force DNS re-resolution. Without this, nginx connects to old container IPs → 502 errors.
+- **Network timing**: `docker network connect` runs AFTER `docker run`, so backend starts before DB network is attached → DNS failure for `sujbot_postgres`. Run `docker restart sujbot_backend` after all three network connections are established.
 - MUST connect to THREE networks: `sujbot_prod_net` (nginx) + `sujbot_db_net` (postgres) + `bridge` (host.docker.internal access)
 - `--add-host=host.docker.internal:host-gateway` required for local model access (vLLM + embedding) via socat bridges
 - `--env-file .env` required (API keys); `-e DATABASE_URL=...@sujbot_postgres:5432/...` overrides dev port
@@ -134,13 +135,29 @@ UFW rules (one-time): `sudo ufw allow from 172.16.0.0/12 to any port 18080 proto
 
 ```
 User Query → AgentAdapter.stream_response()
-  → SingleAgentRunner.run_query(model, disabled_tools, ...)
-    → Autonomous tool loop (search, compliance, graph, web, etc.)
-    → RAG Tools, VL Retrieval, Storage (PostgreSQL), Graph RAG
+  → variant="remote" → SingleAgentRunner (Sonnet 4.5, unchanged)
+  → variant="local" + routing enabled → RoutingAgentRunner
+     → Phase 1: 8B Router (single non-streaming call, thinking DISABLED, tool_choice=required)
+        ├── answer_directly → yield text_delta + final (greetings, meta-questions)
+        ├── Simple tool (get_document_list, get_stats, web_search)
+        │    → execute tool → feed result back → 8B streams response
+        ├── delegate_to_thinking_agent → Phase 2: 30B with thinking budget
+        │    → Full autonomous tool loop (search, compliance, graph, web, etc.)
+        └── Unknown tool → fallback to 30B delegation
+  → RAG Tools, VL Retrieval, Storage (PostgreSQL), Graph RAG
 ```
 
+**Routing architecture** (`src/single_agent/routing_runner.py`):
+- 8B FP8 (Qwen3-VL-8B-Instruct-FP8, gx10-fa34:8082) classifies queries via 5 tools: `answer_directly`, `delegate_to_thinking_agent`, `get_document_list`, `get_stats`, `web_search`
+- Tool-based classification (LLM-driven, `tool_choice="required"`) — router always picks a tool
+- 30B worker (Qwen3-VL-30B-A3B-Thinking, gx10-eb6e:8080) gets `extra_llm_kwargs` with thinking budget
+- Router call disables thinking: `extra_body={"chat_template_kwargs": {"enable_thinking": False}}`
+- Graceful fallback: router failure or unknown tool → falls back to 30B directly
+- Config: `config.json` → `routing` section (enabled, router_model, worker_model, thinking_budgets)
+- Prompt: `prompts/agents/router.txt`
+
 **Key directories:**
-- `src/single_agent/` - Production runner (`SingleAgentRunner`)
+- `src/single_agent/` - Production runner + routing runner (8B router → 30B worker)
 - `src/agent/` - Agent CLI, tools (`tools/`), providers (`providers/`), observability
 - `src/graph/` - Graph RAG (storage, embedder, entity extraction, communities)
 - `src/vl/` - Vision-Language RAG module (Jina v4 embeddings, page store, VL retriever)
