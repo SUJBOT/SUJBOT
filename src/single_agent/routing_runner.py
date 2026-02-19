@@ -35,8 +35,9 @@ logger = logging.getLogger(__name__)
 ANSWER_DIRECTLY_SCHEMA = {
     "name": "answer_directly",
     "description": (
-        "Answer ONLY greetings, thank-you messages, or meta-questions about the system. "
-        "NEVER use for factual questions."
+        "ONLY for greetings, thank-you messages, or brief meta-questions about how the system works. "
+        "NEVER use for factual questions. NEVER use to refuse or say you cannot help — "
+        "delegate to the expert agent instead."
     ),
     "input_schema": {
         "type": "object",
@@ -54,9 +55,10 @@ DELEGATE_TOOL_SCHEMA = {
     "name": "delegate_to_thinking_agent",
     "description": (
         "Delegate to the expert thinking agent with deep reasoning and full "
-        "document search (search, compliance_check, graph_search, expand_context). "
-        "Use for ANY question that needs document search, deep analysis, or "
-        "multi-step reasoning."
+        "document search (search, compliance_check, graph_search, expand_context, web_search). "
+        "Use for ANY question that needs document search, deep analysis, research, "
+        "multi-step reasoning, or gap analysis. Also use when you are unsure — "
+        "the expert is always the safe choice."
     ),
     "input_schema": {
         "type": "object",
@@ -293,15 +295,15 @@ class RoutingAgentRunner:
         extra_rules = []
         if "web_search" in active_tools:
             extra_rules.append(
-                "4. NEVER use web_search for factual/knowledge questions — delegate instead.\n"
-                "5. web_search is ONLY for time-sensitive current information (weather, news, events)."
+                "6. web_search (your tool) is ONLY for simple real-time lookups (weather, news, events).\n"
+                "7. For research tasks that COMBINE web search with document analysis, DELEGATE — "
+                "the expert has web_search too and can reason across both web and corpus results."
             )
         else:
             extra_rules.append(
-                "4. You do NOT have web_search. For questions about current/real-time info "
-                "(weather, news, prices, events), use answer_directly to tell the user that "
-                "web search is disabled and you cannot provide this information. "
-                "Do NOT delegate these — the expert cannot search the web either."
+                "6. You do NOT have web_search. The expert agent does NOT have it either.\n"
+                "7. For questions needing current/real-time info, delegate anyway — "
+                "the expert can use document search and reasoning to provide the best available answer."
             )
 
         prompt = self.router_prompt.replace("{available_tools}", available_section)
