@@ -6,7 +6,6 @@
  */
 
 import { useState, useCallback, useRef, useEffect, type SetStateAction, type Dispatch } from 'react';
-import { useTranslation } from 'react-i18next';
 import { apiService } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import type { Message, Conversation, ToolCall, ClarificationData, Attachment } from '../types';
@@ -56,7 +55,6 @@ interface StreamingState {
 }
 
 export function useChat() {
-  const { t } = useTranslation();
   const { isAuthenticated } = useAuth();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   // Current conversation ID - initialized from URL query param for refresh persistence

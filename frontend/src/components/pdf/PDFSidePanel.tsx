@@ -198,7 +198,8 @@ export function PDFSidePanel({
             const textContent = await page.getTextContent();
             pageText = textContent.items.map((item: any) => item.str).join('');
             cache.set(i, pageText);
-          } catch {
+          } catch (err) {
+            console.warn(`Failed to extract text from page ${i}:`, err);
             cache.set(i, '');
             continue;
           }
