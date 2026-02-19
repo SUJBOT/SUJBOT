@@ -781,7 +781,15 @@ def _save_attachment_files(
                 "Failed to save attachment %s (id=%s) for conversation %s: %s",
                 att.filename, att_id, conversation_id, e, exc_info=True,
             )
-            continue  # Skip this attachment but save others
+            # Append failure entry to preserve positional alignment with input
+            metadata_list.append({
+                "attachment_id": None,
+                "filename": att.filename,
+                "mime_type": att.mime_type,
+                "size_bytes": 0,
+                "error": "save_failed",
+            })
+            continue
 
         metadata_list.append({
             "attachment_id": att_id,

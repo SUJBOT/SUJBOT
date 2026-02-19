@@ -270,41 +270,48 @@ class RoutingAgentRunner:
                 except StopIteration:
                     return None
 
+            text_yielded = False
+
             while True:
                 chunk = await loop.run_in_executor(None, _next_chunk, stream)
                 if chunk is None:
                     break
 
-                if hasattr(chunk, "usage") and chunk.usage is not None:
-                    usage_data = {
-                        "input_tokens": getattr(chunk.usage, "prompt_tokens", 0) or 0,
-                        "output_tokens": getattr(chunk.usage, "completion_tokens", 0) or 0,
-                    }
+                try:
+                    if hasattr(chunk, "usage") and chunk.usage is not None:
+                        usage_data = {
+                            "input_tokens": getattr(chunk.usage, "prompt_tokens", 0) or 0,
+                            "output_tokens": getattr(chunk.usage, "completion_tokens", 0) or 0,
+                        }
 
-                if not chunk.choices:
+                    if not chunk.choices:
+                        continue
+
+                    delta = chunk.choices[0].delta
+
+                    # Text content — stream immediately
+                    if hasattr(delta, "content") and delta.content:
+                        for pc in parser.feed(delta.content):
+                            if pc.type == ChunkType.TEXT:
+                                text_yielded = True
+                                yield {"type": "text_delta", "content": pc.content}
+
+                    # Tool call deltas — accumulate
+                    if hasattr(delta, "tool_calls") and delta.tool_calls:
+                        for tc_delta in delta.tool_calls:
+                            idx = tc_delta.index
+                            if idx not in tool_call_deltas:
+                                tool_call_deltas[idx] = {"id": "", "name": "", "arguments": ""}
+                            if tc_delta.id:
+                                tool_call_deltas[idx]["id"] = tc_delta.id
+                            if tc_delta.function:
+                                if tc_delta.function.name:
+                                    tool_call_deltas[idx]["name"] = tc_delta.function.name
+                                if tc_delta.function.arguments:
+                                    tool_call_deltas[idx]["arguments"] += tc_delta.function.arguments
+                except (TypeError, AttributeError, KeyError) as chunk_err:
+                    logger.warning("Skipping malformed streaming chunk: %s", chunk_err)
                     continue
-
-                delta = chunk.choices[0].delta
-
-                # Text content — stream immediately
-                if hasattr(delta, "content") and delta.content:
-                    for pc in parser.feed(delta.content):
-                        if pc.type == ChunkType.TEXT:
-                            yield {"type": "text_delta", "content": pc.content}
-
-                # Tool call deltas — accumulate
-                if hasattr(delta, "tool_calls") and delta.tool_calls:
-                    for tc_delta in delta.tool_calls:
-                        idx = tc_delta.index
-                        if idx not in tool_call_deltas:
-                            tool_call_deltas[idx] = {"id": "", "name": "", "arguments": ""}
-                        if tc_delta.id:
-                            tool_call_deltas[idx]["id"] = tc_delta.id
-                        if tc_delta.function:
-                            if tc_delta.function.name:
-                                tool_call_deltas[idx]["name"] = tc_delta.function.name
-                            if tc_delta.function.arguments:
-                                tool_call_deltas[idx]["arguments"] += tc_delta.function.arguments
 
             # Flush parser
             for pc in parser.flush():
@@ -317,7 +324,10 @@ class RoutingAgentRunner:
                 try:
                     parsed_input = json.loads(tc["arguments"]) if tc["arguments"] else {}
                 except json.JSONDecodeError:
-                    logger.warning("Failed to parse tool call arguments: %s", tc["arguments"][:200])
+                    logger.warning(
+                        "Failed to parse tool call arguments for tool '%s': %s",
+                        tc["name"], tc["arguments"][:200],
+                    )
                     parsed_input = {}
                 yield {
                     "type": "_tool_call",
@@ -346,7 +356,7 @@ class RoutingAgentRunner:
                 )
 
                 text = response.text or ""
-                if text:
+                if text and not text_yielded:
                     yield {"type": "text_delta", "content": text}
 
                 content_blocks = response.content if isinstance(response.content, list) else []

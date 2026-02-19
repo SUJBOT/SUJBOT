@@ -310,9 +310,6 @@ def _load_builtin_defaults():
         "o3-mini": "o3-mini",
         "gemini-flash": "gemini-2.5-flash",
         "gemini-pro": "gemini-2.5-pro",
-        "qwen-72b": "Qwen/Qwen2.5-72B-Instruct",
-        "qwen-7b": "Qwen/Qwen2.5-7B-Instruct",
-        "minimax-m2": "MiniMaxAI/MiniMax-M2",
     }
 
     _EMBEDDING_MODELS_RAW = {

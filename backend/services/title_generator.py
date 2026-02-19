@@ -19,7 +19,7 @@ class TitleGenerator:
     """
     Generate conversation titles using local Qwen3-VL-8B via vLLM.
 
-    Uses the lighter 8B model for fast, cost-effective title generation.
+    Uses the lighter 8B model for fast, zero-cost title generation.
     Thread-safe and designed for concurrent usage across multiple workers.
     """
 

@@ -10,11 +10,13 @@ import json
 import re
 from typing import List, Dict, Any, Optional, Iterator
 
+import openai
 from openai import OpenAI
 from langsmith.wrappers import wrap_openai
 
 from .base import BaseProvider, ProviderResponse
 from .openai_compat import STOP_REASON_MAP, convert_tools_to_openai
+from ...exceptions import ProviderError
 
 logger = logging.getLogger(__name__)
 
@@ -91,8 +93,11 @@ class VLLMProvider(BaseProvider):
                 temperature=temperature,
                 **kwargs,
             )
+        except openai.APIError as e:
+            logger.error("vLLM API error (model=%s): %s", self.model, e)
+            raise
         except Exception as e:
-            logger.error(f"vLLM API error: {e}")
+            logger.error("Unexpected error in vLLM create_message (model=%s): %s", self.model, e, exc_info=True)
             raise
 
         return self._convert_response(response)
@@ -134,8 +139,11 @@ class VLLMProvider(BaseProvider):
                 stream_options={"include_usage": True},
                 **kwargs,
             )
+        except openai.APIError as e:
+            logger.error("vLLM streaming API error (model=%s): %s", self.model, e)
+            raise
         except Exception as e:
-            logger.error(f"vLLM streaming API error: {e}")
+            logger.error("Unexpected error in vLLM stream_message (model=%s): %s", self.model, e, exc_info=True)
             raise
 
     def _format_messages(self, messages: List[Dict], system: Any) -> List[Dict]:
@@ -408,11 +416,15 @@ class VLLMProvider(BaseProvider):
                 content_blocks.append({"type": "text", "text": clean_text})
 
         # Convert tool calls
+        failed_tool_calls = 0
+        total_tool_calls = 0
         if hasattr(message, "tool_calls") and message.tool_calls:
+            total_tool_calls = len(message.tool_calls)
             for tool_call in message.tool_calls:
                 try:
                     parsed_args = json.loads(tool_call.function.arguments)
                 except (json.JSONDecodeError, TypeError) as e:
+                    failed_tool_calls += 1
                     logger.error(
                         "Failed to parse tool arguments from vLLM: %s. Tool: %s, Args: %s",
                         e,
@@ -443,9 +455,14 @@ class VLLMProvider(BaseProvider):
         }
 
         if not content_blocks:
+            if total_tool_calls > 0 and failed_tool_calls == total_tool_calls:
+                raise ProviderError(
+                    f"All {total_tool_calls} tool call(s) from vLLM had unparseable arguments",
+                    details={"model": self.model, "raw_content": (message.content or "")[:200]},
+                )
             logger.warning(
                 "vLLM response had no usable content after processing "
-                "(text stripped or all tool calls failed parsing). Raw: %s",
+                "(text stripped). Raw: %s",
                 (message.content or "")[:200],
             )
             content_blocks = [{"type": "text", "text": ""}]

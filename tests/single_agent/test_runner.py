@@ -355,3 +355,9 @@ class TestDedupWithAttachments:
         assert any(
             b.get("type") == "image" for b in user_messages[1]["content"]
         )
+
+        # Ordering: history text MUST come before multimodal content
+        all_messages = messages
+        user_indices = [i for i, m in enumerate(all_messages) if m["role"] == "user"]
+        assert len(user_indices) == 2
+        assert user_indices[0] < user_indices[1], "History text must precede multimodal content"

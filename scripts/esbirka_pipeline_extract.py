@@ -9,7 +9,7 @@ Usage:
 
 Requires:
     - PDFs in data/esbirka_benchmark/ (run esbirka_gt_dataset.py first)
-    - LLM API key (ANTHROPIC_API_KEY or DEEPINFRA_API_KEY)
+    - LLM API key (ANTHROPIC_API_KEY)
 """
 
 import argparse

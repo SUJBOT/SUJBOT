@@ -1,15 +1,17 @@
 """
 Tests for VLLMProvider._format_messages — Anthropic → OpenAI format translation.
 
-Tests tool_use, tool_result, multimodal image, and text-only message handling.
+Tests tool_use, tool_result, multimodal image, text-only message handling,
+_convert_response, and _strip_think_tags.
 """
 
 import json
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import pytest
 
 from src.agent.providers.vllm_provider import VLLMProvider
+from src.exceptions import ProviderError
 
 
 @pytest.fixture
@@ -237,6 +239,143 @@ class TestFormatMessagesMultimodal:
         assert any("Page 1 from BZ_VR1" in b["text"] for b in text_blocks)
         # Instruction text should be present
         assert any("READ" in b["text"] for b in text_blocks)
+
+
+class TestStripThinkTags:
+    """Test _strip_think_tags edge cases."""
+
+    def test_complete_think_block_removed(self, provider):
+        text = "<think>reasoning here</think>Final answer."
+        assert provider._strip_think_tags(text) == "Final answer."
+
+    def test_multiple_think_blocks(self, provider):
+        text = "<think>first</think>A<think>second</think>B"
+        assert provider._strip_think_tags(text) == "AB"
+
+    def test_truncated_think_block(self, provider):
+        text = "<think>reasoning without closing tag"
+        assert provider._strip_think_tags(text) == ""
+
+    def test_no_think_tags(self, provider):
+        text = "Just plain text."
+        assert provider._strip_think_tags(text) == "Just plain text."
+
+    def test_empty_string(self, provider):
+        assert provider._strip_think_tags("") == ""
+
+    def test_multiline_think_block(self, provider):
+        text = "<think>\nline1\nline2\n</think>\nAnswer here."
+        assert provider._strip_think_tags(text) == "Answer here."
+
+    def test_think_only_response(self, provider):
+        text = "<think>all reasoning, no answer</think>"
+        assert provider._strip_think_tags(text) == ""
+
+    def test_nested_angle_brackets(self, provider):
+        text = "<think>has <b>html</b> inside</think>Result"
+        assert provider._strip_think_tags(text) == "Result"
+
+
+class TestConvertResponse:
+    """Test _convert_response — OpenAI response → Anthropic ProviderResponse."""
+
+    def _mock_response(self, content=None, tool_calls=None, finish_reason="stop",
+                       prompt_tokens=10, completion_tokens=5):
+        """Build a mock OpenAI response object."""
+        message = MagicMock()
+        message.content = content
+        message.tool_calls = tool_calls
+
+        choice = MagicMock()
+        choice.message = message
+        choice.finish_reason = finish_reason
+
+        usage = MagicMock()
+        usage.prompt_tokens = prompt_tokens
+        usage.completion_tokens = completion_tokens
+
+        response = MagicMock()
+        response.choices = [choice]
+        response.usage = usage
+        return response
+
+    def test_text_response(self, provider):
+        resp = self._mock_response(content="Hello world")
+        result = provider._convert_response(resp)
+        assert result.content == [{"type": "text", "text": "Hello world"}]
+        assert result.usage["input_tokens"] == 10
+        assert result.usage["output_tokens"] == 5
+
+    def test_text_with_think_tags_stripped(self, provider):
+        resp = self._mock_response(content="<think>reasoning</think>Answer")
+        result = provider._convert_response(resp)
+        assert result.content == [{"type": "text", "text": "Answer"}]
+
+    def test_tool_call_response(self, provider):
+        tc = MagicMock()
+        tc.id = "call_abc"
+        tc.function.name = "search"
+        tc.function.arguments = '{"query": "safety"}'
+        resp = self._mock_response(content=None, tool_calls=[tc])
+        result = provider._convert_response(resp)
+        assert len(result.content) == 1
+        assert result.content[0]["type"] == "tool_use"
+        assert result.content[0]["name"] == "search"
+        assert result.content[0]["input"] == {"query": "safety"}
+
+    def test_text_plus_tool_call(self, provider):
+        tc = MagicMock()
+        tc.id = "call_xyz"
+        tc.function.name = "expand_context"
+        tc.function.arguments = '{"chunk_ids": ["c1"]}'
+        resp = self._mock_response(content="Let me search.", tool_calls=[tc])
+        result = provider._convert_response(resp)
+        assert len(result.content) == 2
+        assert result.content[0]["type"] == "text"
+        assert result.content[1]["type"] == "tool_use"
+
+    def test_empty_choices_raises(self, provider):
+        resp = MagicMock()
+        resp.choices = []
+        with pytest.raises(ValueError, match="no choices"):
+            provider._convert_response(resp)
+
+    def test_all_tool_calls_unparseable_raises_provider_error(self, provider):
+        tc = MagicMock()
+        tc.id = "call_bad"
+        tc.function.name = "search"
+        tc.function.arguments = "not-json{"
+        resp = self._mock_response(content=None, tool_calls=[tc])
+        with pytest.raises(ProviderError, match="unparseable"):
+            provider._convert_response(resp)
+
+    def test_partial_tool_call_failure_keeps_good_ones(self, provider):
+        tc_good = MagicMock()
+        tc_good.id = "call_1"
+        tc_good.function.name = "search"
+        tc_good.function.arguments = '{"query": "ok"}'
+
+        tc_bad = MagicMock()
+        tc_bad.id = "call_2"
+        tc_bad.function.name = "expand"
+        tc_bad.function.arguments = "broken{"
+
+        resp = self._mock_response(content=None, tool_calls=[tc_good, tc_bad])
+        result = provider._convert_response(resp)
+        assert len(result.content) == 1
+        assert result.content[0]["name"] == "search"
+
+    def test_think_only_response_yields_empty_text(self, provider):
+        resp = self._mock_response(content="<think>only thinking</think>")
+        result = provider._convert_response(resp)
+        assert result.content == [{"type": "text", "text": ""}]
+
+    def test_no_usage_defaults_to_zero(self, provider):
+        resp = self._mock_response(content="Answer")
+        resp.usage = None
+        result = provider._convert_response(resp)
+        assert result.usage["input_tokens"] == 0
+        assert result.usage["output_tokens"] == 0
 
 
 class TestFormatMessagesFullToolLoop:
