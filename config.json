@@ -318,6 +318,21 @@
     "max_iterations": 10,
     "enable_prompt_caching": true
   },
+  "routing": {
+    "enabled": true,
+    "router_model": "qwen3-vl-8b-local",
+    "worker_model": "qwen3-vl-30b-local",
+    "router_prompt_file": "prompts/agents/router.txt",
+    "router_max_tokens": 2048,
+    "router_temperature": 0.1,
+    "thinking_budgets": {
+      "low": 1024,
+      "medium": 4096,
+      "high": 16384,
+      "maximum": 32768
+    },
+    "router_simple_tools": ["get_document_list", "get_stats", "web_search"]
+  },
   "model_registry": {
     "llm_models": {
       "haiku": {
@@ -461,6 +476,16 @@
           "output": 0.0
         },
         "context_window": 131072,
+        "supports_vision": true
+      },
+      "qwen3-vl-8b-local": {
+        "id": "Qwen/Qwen3-VL-8B-Instruct",
+        "provider": "local_llm_8b",
+        "pricing": {
+          "input": 0.0,
+          "output": 0.0
+        },
+        "context_window": 32768,
         "supports_vision": true
       }
     },
@@ -640,7 +665,7 @@
         "model": "claude-sonnet-4-5-20250929"
       },
       "local": {
-        "display_name": "Local (Qwen3 VL 30B, vLLM on GB10)",
+        "display_name": "Local (8B Router + 30B Thinking)",
         "model": "qwen3-vl-30b-local"
       }
     },

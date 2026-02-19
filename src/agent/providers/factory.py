@@ -154,11 +154,21 @@ def create_provider(
             base_url=base_url,
         )
 
+    elif provider_name == "local_llm_8b":
+        # Local 8B LLM (Qwen3-VL-8B-Instruct-FP8 on gx10-fa34, port 18082)
+        base_url = os.getenv("LOCAL_LLM_8B_BASE_URL", "http://localhost:18082/v1")
+        return DeepInfraProvider(
+            api_key="local-no-key-needed",
+            model=resolved_model,
+            base_url=base_url,
+        )
+
     else:
         raise ValueError(
             f"Unsupported provider: {provider_name} for model: {model}\n"
             f"Supported providers: anthropic (Claude), openai (GPT-4o/o-series), "
-            f"google (Gemini), deepinfra (Qwen), local_llm (local llama.cpp/vLLM)"
+            f"google (Gemini), deepinfra (Qwen), local_llm (local 30B vLLM), "
+            f"local_llm_8b (local 8B vLLM)"
         )
 
 

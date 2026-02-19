@@ -1,5 +1,34 @@
 # Changelog — 13.–19. února 2026
 
+## 27. 8B Router → 30B Thinking Worker architecture (19. února 2026)
+
+### Architecture
+- **New routing layer**: Fast 8B model (Qwen3-VL-8B-Instruct-FP8) classifies queries, delegates complex ones to 30B thinking model (Qwen3-VL-30B-A3B-Thinking) with controllable thinking budget.
+- **Tool-based delegation**: Router gets a single virtual tool `delegate_to_thinking_agent` with `task_description`, `complexity` (simple/medium/complex/expert), and `thinking_budget` (low/medium/high/maximum → 1K/4K/16K/32K tokens).
+- **Graceful fallback**: If 8B router fails, falls back to 30B directly — zero user impact.
+- Simple queries (greetings, meta-questions) → 8B answers directly (~0.1s TTFT).
+- Document/regulatory queries → 8B delegates to 30B with full RAG tool loop.
+
+### Backend
+- `src/single_agent/routing_runner.py` — `RoutingAgentRunner` wraps `SingleAgentRunner` via composition. `__getattr__` delegates `initialize()`, `get_tool_health()`, etc. transparently.
+- `src/single_agent/runner.py` — Added `extra_llm_kwargs` parameter to `run_query()` for thinking budget passthrough.
+- `src/agent/providers/factory.py` — Added `local_llm_8b` provider type (port 18082 via `LOCAL_LLM_8B_BASE_URL`).
+- `backend/agent_adapter.py` — Conditional `RoutingAgentRunner` initialization when `routing.enabled=true`. New `routing` SSE event.
+- `config.json` — New `routing` section (enabled, router_model, worker_model, thinking_budgets). New `qwen3-vl-8b-local` model in registry.
+- `prompts/agents/router.txt` — Router system prompt for query classification.
+- vLLM Qwen3 thinking control: `extra_body.chat_template_kwargs.enable_thinking` (disabled for router, enabled with budget for worker).
+
+### Frontend
+- `useChat.ts` — Handles `routing` SSE event (classifying/delegate/direct progress messages).
+- `types/index.ts` — Added `routing` to SSE event union type.
+- i18n strings for routing progress (cs/en).
+
+### Configuration
+- `routing.enabled`: Toggle routing on/off (default: true for local variant).
+- `routing.thinking_budgets`: Token budgets per complexity level.
+- `.env` — Added `LOCAL_LLM_8B_BASE_URL=http://localhost:8082/v1`.
+- Backend deploy: Add `-e LOCAL_LLM_8B_BASE_URL=http://host.docker.internal:18082/v1`.
+
 ## 26. Deploy Qwen3-VL-8B-Instruct on gx10-fa34 (19. února 2026)
 
 ### Infrastructure

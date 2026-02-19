@@ -495,8 +495,37 @@ export function useChat() {
           apiAttachments,  // Pass file attachments for multimodal context
           webSearchEnabled,  // Per-request web search toggle
         )) {
+          // Handle routing decision (8B router → 30B worker)
+          if (event.event === 'routing') {
+            if (streamState.currentMessage && streamState.currentMessage.agentProgress) {
+              const { decision, complexity, thinking_budget } = event.data;
+              if (decision === 'classifying') {
+                streamState.currentMessage.agentProgress.currentMessage = 'Classifying query...';
+              } else if (decision === 'delegate') {
+                streamState.currentMessage.agentProgress.currentMessage =
+                  `Delegating to thinking agent (${complexity}, budget: ${thinking_budget})...`;
+              } else if (decision === 'direct') {
+                streamState.currentMessage.agentProgress.currentMessage = 'Answering directly...';
+              }
+
+              // Update UI
+              setConversations((prev) =>
+                prev.map((c) => {
+                  if (c.id !== updatedConversation.id) return c;
+                  const messages = [...c.messages];
+                  const lastMsg = messages[messages.length - 1];
+                  if (lastMsg?.role === 'assistant') {
+                    messages[messages.length - 1] = { ...streamState.currentMessage! };
+                  } else {
+                    messages.push({ ...streamState.currentMessage! });
+                  }
+                  return { ...c, messages };
+                })
+              );
+            }
+          }
           // Handle tool health check (first event)
-          if (event.event === 'tool_health') {
+          else if (event.event === 'tool_health') {
             // Log tool health status (visible in browser console)
             if (!event.data.healthy) {
               console.warn('Tool health warning:', event.data.summary);

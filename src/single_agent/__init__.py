@@ -6,5 +6,6 @@ that has access to all RAG tools and a unified system prompt.
 """
 
 from .runner import SingleAgentRunner
+from .routing_runner import RoutingAgentRunner
 
-__all__ = ["SingleAgentRunner"]
+__all__ = ["SingleAgentRunner", "RoutingAgentRunner"]

@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import AsyncGenerator, Dict, Any, List, Optional
 
 from src.single_agent.runner import SingleAgentRunner
+from src.single_agent.routing_runner import RoutingAgentRunner
 from src.agent.config import AgentConfig
 from src.cost_tracker import get_global_tracker, reset_global_tracker
 from src.utils.security import sanitize_error
@@ -105,11 +106,18 @@ class AgentAdapter:
             "single_agent": full_config.get("single_agent", {}),
             "multi_agent": full_config.get("multi_agent", {}),  # For LangSmith config
             "vl": full_config.get("vl", {}),
+            "routing": full_config.get("routing", {}),
         }
 
-        # Initialize single-agent runner
-        logger.info("Initializing single-agent system...")
-        self.runner = SingleAgentRunner(runner_config)
+        # Initialize runner (routing wrapper if enabled, otherwise plain single-agent)
+        routing_config = full_config.get("routing", {})
+        inner_runner = SingleAgentRunner(runner_config)
+        if routing_config.get("enabled", False):
+            logger.info("Initializing routing agent (8B router → 30B worker)...")
+            self.runner = RoutingAgentRunner(runner_config, inner_runner)
+        else:
+            logger.info("Initializing single-agent system...")
+            self.runner = inner_runner
 
         # Track degraded components for health endpoint
         self.degraded_components = []
@@ -268,7 +276,18 @@ class AgentAdapter:
             ):
                 event_type = event.get("type")
 
-                if event_type == "tool_call":
+                if event_type == "routing":
+                    yield {
+                        "event": "routing",
+                        "data": {
+                            "decision": event.get("decision"),
+                            "complexity": event.get("complexity"),
+                            "thinking_budget": event.get("thinking_budget"),
+                        },
+                    }
+                    await asyncio.sleep(0)
+
+                elif event_type == "tool_call":
                     yield {
                         "event": "tool_call",
                         "data": {
