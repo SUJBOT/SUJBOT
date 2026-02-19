@@ -67,7 +67,7 @@ DELEGATE_TOOL_SCHEMA = {
 }
 
 # Tools the 8B router can execute directly (simple, fast, no deep reasoning)
-ROUTER_SIMPLE_TOOLS = ["get_document_list", "get_stats", "web_search"]
+ROUTER_SIMPLE_TOOLS = ["get_document_list", "get_stats"]
 
 # Shared extra_body to disable thinking on 8B router calls
 _THINKING_DISABLED_BODY = {"chat_template_kwargs": {"enable_thinking": False}}
