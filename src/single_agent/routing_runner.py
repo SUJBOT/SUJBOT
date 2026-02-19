@@ -4,10 +4,10 @@ Routing Agent Runner — 8B router handles simple queries, 30B handles complex o
 Architecture:
   User Query → RoutingAgentRunner.run_query()
     → 8B Router (streaming classification, thinking DISABLED, tool_choice=auto)
-       ├── text-only response → stream text_delta in real-time (greetings, meta)
-       ├── simple tool (get_document_list, get_stats, web_search)
+       ├── text-only response → buffer then flush text_delta (greetings, meta)
+       ├── simple tool (get_document_list, get_stats)
        │    → execute tool → feed result back → 8B streams response (text_delta)
-       └── delegate_to_thinking_agent
+       └── delegate_to_thinking_agent (SILENT — pre-delegation text discarded)
             → 30B worker with full autonomous tool loop + thinking budget
 """
 
@@ -530,8 +530,11 @@ class RoutingAgentRunner:
         router_start = time.time()
 
         try:
-            # Stream classification — text deltas yield immediately, tool calls accumulated
+            # Stream classification — buffer text until we know if delegation follows.
+            # If router delegates, discard any pre-delegation text (invisible handoff).
+            # If router responds directly, flush buffered text as text_delta events.
             final_text = ""
+            buffered_text_events: List[Dict[str, Any]] = []
             tool_call = None
             usage_data = None
 
@@ -540,8 +543,7 @@ class RoutingAgentRunner:
             ):
                 if event["type"] == "text_delta":
                     final_text += event["content"]
-                    if stream_progress:
-                        yield event
+                    buffered_text_events.append(event)
                 elif event["type"] == "_tool_call":
                     tool_call = event  # Take the first tool call
                 elif event["type"] == "_usage":
@@ -578,7 +580,7 @@ class RoutingAgentRunner:
                 response_time_ms=router_time_ms,
             )
 
-        # --- No tool call: text was streamed directly ---
+        # --- No tool call: flush buffered text to user ---
         if tool_call is None:
             # Attachment guard: if user sent images, 8B can't process them meaningfully
             if attachment_blocks:
@@ -601,6 +603,9 @@ class RoutingAgentRunner:
 
             if stream_progress:
                 yield {"type": "routing", "decision": "direct"}
+                # Flush buffered text as text_delta events (was buffered during classification)
+                for text_ev in buffered_text_events:
+                    yield text_ev
 
             yield {
                 "type": "final",
@@ -615,7 +620,13 @@ class RoutingAgentRunner:
             }
             return
 
-        # --- Has tool call: dispatch ---
+        # --- Has tool call: discard any pre-tool-call text (silent handoff) ---
+        if final_text.strip():
+            logger.info(
+                "Discarding %d chars of router pre-delegation text: %s",
+                len(final_text), final_text[:100],
+            )
+
         tool_name = tool_call.get("name", "")
         tool_inputs = tool_call.get("input", {})
         tool_id = tool_call.get("id", "")
