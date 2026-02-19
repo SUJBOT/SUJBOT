@@ -40,7 +40,9 @@
     "uploadAllComplete": "All {{count}} documents indexed successfully",
     "someUploadsFailed": "{{success}} of {{total}} uploaded, {{failed}} failed",
     "remove": "Remove",
-    "convertingImages": "Converting images to document..."
+    "convertingImages": "Converting images to document...",
+    "imagesBatch_one": "{{count}} image",
+    "imagesBatch_other": "{{count}} images"
   },
   "login": {
     "email": "Email",

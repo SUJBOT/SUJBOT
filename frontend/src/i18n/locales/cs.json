@@ -40,7 +40,10 @@
     "uploadAllComplete": "Všech {{count}} dokumentů úspěšně indexováno",
     "someUploadsFailed": "{{success}} z {{total}} nahráno, {{failed}} selhalo",
     "remove": "Odebrat",
-    "convertingImages": "Převod obrázků na dokument..."
+    "convertingImages": "Převod obrázků na dokument...",
+    "imagesBatch_one": "{{count}} obrázek",
+    "imagesBatch_few": "{{count}} obrázky",
+    "imagesBatch_other": "{{count}} obrázků"
   },
   "login": {
     "email": "E-mail",

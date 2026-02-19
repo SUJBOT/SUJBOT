@@ -223,6 +223,17 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
 
     setTotalJobs(jobs.length);
 
+    // Helper: label for a job (i18n-safe)
+    const jobLabel = (job: UploadJob) =>
+      job.type === 'image-batch'
+        ? t('documentBrowser.imagesBatch', { count: job.entries.length })
+        : job.entry.file.name;
+    const jobId = (job: UploadJob) =>
+      job.type === 'image-batch' ? job.entries[0].id : job.entry.id;
+
+    // Use majority category for image batch (all images share one category toggle)
+    const imageBatchCategory = imageEntries.length > 0 ? imageEntries[0].category : 'documentation';
+
     const results: UploadFileResult[] = [];
     let anySuccess = false;
 
@@ -230,12 +241,7 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
       const job = jobs[i];
       setCurrentIndex(i);
       setCurrentProgress(null);
-
-      if (job.type === 'image-batch') {
-        setCurrentLabel(`${job.entries.length} images`);
-      } else {
-        setCurrentLabel(job.entry.file.name);
-      }
+      setCurrentLabel(jobLabel(job));
 
       abortRef.current = new AbortController();
 
@@ -247,7 +253,7 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
           ? apiService.uploadImages(
               job.entries.map((e) => e.file),
               abortRef.current.signal,
-              job.entries[0].category,
+              imageBatchCategory,
               accessLevel
             )
           : apiService.uploadDocument(
@@ -268,40 +274,21 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
           }
         }
 
-        if (job.type === 'image-batch') {
-          const batchName = `${job.entries.length} images`;
-          results.push({
-            id: job.entries[0].id,
-            filename: batchName,
-            success: !!fileResult,
-            result: fileResult,
-            error: fileError ?? (!fileResult ? 'Upload ended without confirmation' : undefined),
-          });
-        } else {
-          results.push({
-            id: job.entry.id,
-            filename: job.entry.file.name,
-            success: !!fileResult,
-            result: fileResult,
-            error: fileError ?? (!fileResult ? 'Upload ended without confirmation' : undefined),
-          });
-        }
+        results.push({
+          id: jobId(job),
+          filename: jobLabel(job),
+          success: !!fileResult,
+          result: fileResult,
+          error: fileError ?? (!fileResult ? 'Upload ended without confirmation' : undefined),
+        });
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') {
-          const label = job.type === 'image-batch'
-            ? `${job.entries.length} images`
-            : job.entry.file.name;
-          const id = job.type === 'image-batch' ? job.entries[0].id : job.entry.id;
-          results.push({ id, filename: label, success: false, error: 'Cancelled' });
+          results.push({ id: jobId(job), filename: jobLabel(job), success: false, error: 'Cancelled' });
           break;
         }
-        const label = job.type === 'image-batch'
-          ? `${job.entries.length} images`
-          : job.entry.file.name;
-        const id = job.type === 'image-batch' ? job.entries[0].id : job.entry.id;
         results.push({
-          id,
-          filename: label,
+          id: jobId(job),
+          filename: jobLabel(job),
           success: false,
           error: err instanceof Error ? err.message : 'Unexpected error',
         });
@@ -312,11 +299,7 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
     const attemptedCount = results.length;
     for (let j = attemptedCount; j < jobs.length; j++) {
       const job = jobs[j];
-      const label = job.type === 'image-batch'
-        ? `${job.entries.length} images`
-        : job.entry.file.name;
-      const id = job.type === 'image-batch' ? job.entries[0].id : job.entry.id;
-      results.push({ id, filename: label, success: false, error: 'Cancelled' });
+      results.push({ id: jobId(job), filename: jobLabel(job), success: false, error: 'Cancelled' });
     }
 
     setUploadResults(results);
@@ -325,7 +308,7 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
     abortRef.current = null;
 
     if (anySuccess) onUploadComplete();
-  }, [files, accessLevel, isImageFile, onUploadComplete]);
+  }, [files, accessLevel, isImageFile, t, onUploadComplete]);
 
   const handleCancel = useCallback(() => {
     abortRef.current?.abort();

@@ -133,21 +133,26 @@ class DocumentConverter:
 
         Args:
             image_buffers: Raw image bytes (PNG, JPG, TIFF, BMP, WebP)
-            filenames: Corresponding filenames (for error messages)
+            filenames: Corresponding filenames (must match length of image_buffers)
 
         Returns:
             PDF bytes
 
         Raises:
-            ValueError: If image_buffers is empty
+            ValueError: If image_buffers is empty or lengths mismatch
             ConversionError: If any image cannot be processed
         """
         if not image_buffers:
             raise ValueError("No images provided")
+        if len(image_buffers) != len(filenames):
+            raise ValueError(
+                f"image_buffers length ({len(image_buffers)}) != filenames length ({len(filenames)})"
+            )
 
         doc = fitz.open()
         try:
             for i, (img_bytes, fname) in enumerate(zip(image_buffers, filenames)):
+                img_doc = None
                 try:
                     img_doc = fitz.open(stream=img_bytes, filetype="png")  # fitz auto-detects
                     if len(img_doc) == 0:
@@ -155,10 +160,14 @@ class DocumentConverter:
                             f"Image has no pages: {fname}",
                             details={"filename": fname, "index": i},
                         )
+                    if len(img_doc) > 1:
+                        logger.warning(
+                            "Multi-page image %s has %d pages; only first page used",
+                            fname, len(img_doc),
+                        )
                     img_rect = img_doc[0].rect
                     page = doc.new_page(width=img_rect.width, height=img_rect.height)
                     page.insert_image(page.rect, stream=img_bytes)
-                    img_doc.close()
                 except ConversionError:
                     raise
                 except Exception as e:
@@ -167,6 +176,9 @@ class DocumentConverter:
                         details={"filename": fname, "index": i},
                         cause=e,
                     )
+                finally:
+                    if img_doc is not None:
+                        img_doc.close()
             return doc.tobytes()
         finally:
             doc.close()

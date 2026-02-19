@@ -1017,6 +1017,9 @@ async def upload_status(user: Dict = Depends(get_current_user)):
     return EventSourceResponse(_stream_upload_state(state))
 
 
+MAX_IMAGE_COUNT = 200  # Prevent DoS via thousands of tiny images
+
+
 @router.post("/upload-images")
 async def upload_images(
     request: Request,
@@ -1030,10 +1033,13 @@ async def upload_images(
 
     Images are combined into a PDF (one page per image) and indexed
     through the standard VL pipeline. The document name is auto-generated
-    as "Images_YYYY-MM-DD_HH-MM".
+    as "Images_{user_id}_{timestamp}".
     """
     from datetime import datetime
     from src.vl.document_converter import IMAGE_EXTENSIONS, DocumentConverter
+
+    user_id = user["id"]
+    logger.info("Image upload started: user=%s, file_count=%d", user_id, len(files))
 
     # Validate category
     if category not in ("documentation", "legislation"):
@@ -1052,6 +1058,12 @@ async def upload_images(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="At least one image file is required",
+        )
+    # File count limit
+    if len(files) > MAX_IMAGE_COUNT:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Too many images ({len(files)}). Maximum is {MAX_IMAGE_COUNT}.",
         )
     # Validate VL components
     if not _get_vl_components_from_deps():
@@ -1091,9 +1103,9 @@ async def upload_images(
     paired = sorted(zip(filenames, image_buffers), key=lambda x: x[0])
     filenames, image_buffers = [list(t) for t in zip(*paired)]
 
-    # Generate document name and path
+    # Generate document name and path (include user_id for uniqueness)
     now = datetime.now()
-    doc_name = f"Images_{now.strftime('%Y-%m-%d_%H-%M')}"
+    doc_name = f"Images_{user_id}_{now.strftime('%Y-%m-%d_%H-%M-%S')}"
     safe_stem = _sanitize_filename(doc_name)
     pdf_path = PDF_BASE_DIR / f"{safe_stem}.pdf"
 
@@ -1105,7 +1117,6 @@ async def upload_images(
         counter += 1
 
     # Reject if upload already active for this user
-    user_id = user["id"]
     existing = _active_uploads.get(user_id)
     if existing and not existing.done:
         raise HTTPException(
@@ -1116,12 +1127,18 @@ async def upload_images(
     # Convert images to PDF
     try:
         pdf_bytes = DocumentConverter.images_to_pdf(image_buffers, filenames)
-    except Exception as e:
+    except (ValueError, ConversionError) as e:
+        logger.warning("Image conversion failed: user=%s, error=%s", user_id, e)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Failed to process images: {sanitize_error(e)}",
         )
     del image_buffers  # free memory
+
+    logger.info(
+        "Image conversion complete: user=%s, pages=%d, pdf_size=%d, path=%s",
+        user_id, len(filenames), len(pdf_bytes), pdf_path.name,
+    )
 
     # Create upload state and start background task
     state = UploadState(
