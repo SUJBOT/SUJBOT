@@ -50,15 +50,6 @@ class WebSearchTool(BaseTool):
     input_schema = WebSearchInput
 
     def execute_impl(self, query: str) -> ToolResult:
-        # Check if web search is enabled
-        web_search_enabled = getattr(self.config, "web_search_enabled", True)
-        if not web_search_enabled:
-            return ToolResult(
-                success=False,
-                data=None,
-                error="Web search is disabled in configuration",
-            )
-
         # Get API key
         api_key = os.getenv("GOOGLE_API_KEY", "")
         if not api_key:

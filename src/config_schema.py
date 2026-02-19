@@ -576,10 +576,6 @@ class AgentConfig(BaseModel):
         description="Keep last N messages with full tool context",
         ge=1
     )
-    query_expansion_model: Optional[str] = Field(
-        default=None,
-        description="[DEPRECATED] Query expansion LLM model (OCR-only, unused in VL mode)"
-    )
 
 
 class AgentToolConfig(BaseModel):
@@ -601,31 +597,6 @@ class AgentToolConfig(BaseModel):
         description="Legal compliance confidence threshold",
         ge=0.0,
         le=1.0
-    )
-    # Deprecated OCR fields — kept Optional for backward compat with existing config.json
-    enable_reranking: Optional[bool] = Field(
-        default=None,
-        description="[DEPRECATED] OCR-only reranking"
-    )
-    reranker_candidates: Optional[int] = Field(
-        default=None,
-        description="[DEPRECATED] OCR-only reranker candidates"
-    )
-    reranker_model: Optional[str] = Field(
-        default=None,
-        description="[DEPRECATED] OCR-only reranker model"
-    )
-    context_window: Optional[int] = Field(
-        default=None,
-        description="[DEPRECATED] OCR-only context window"
-    )
-    lazy_load_reranker: Optional[bool] = Field(
-        default=None,
-        description="[DEPRECATED] OCR-only lazy reranker loading"
-    )
-    cache_embeddings: Optional[bool] = Field(
-        default=None,
-        description="[DEPRECATED] OCR-only embedding cache"
     )
 
 
@@ -1052,7 +1023,7 @@ class RootConfig(BaseModel):
 
     model_config = ConfigDict(
         strict=True,  # Disable automatic type coercion
-        extra="allow",  # Allow unknown fields (for backwards compatibility with multi_agent, storage, etc.)
+        extra="allow",  # Allow unknown fields (for backwards compatibility with storage, security_monitoring, etc.)
     )
 
     vl: Optional[VLConfig] = Field(

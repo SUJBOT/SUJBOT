@@ -81,7 +81,7 @@ class SingleAgentRunner:
 
     def _setup_langsmith(self) -> None:
         """Setup LangSmith tracing if configured."""
-        langsmith_config = self.config.get("multi_agent", {}).get("langsmith", {})
+        langsmith_config = self.config.get("langsmith", {})
         if not langsmith_config.get("enabled", False):
             return
         try:
@@ -524,6 +524,37 @@ class SingleAgentRunner:
                         tool_use_id = tool_use.get("id")
 
                         logger.info(f"Tool call: {tool_name}")
+
+                        # Reject tool calls to disabled tools (LLM hallucinated a filtered tool)
+                        if tool_name in _disabled:
+                            logger.warning(
+                                "LLM called disabled tool '%s', returning error result",
+                                tool_name,
+                            )
+                            if stream_progress:
+                                yield {
+                                    "type": "tool_call",
+                                    "tool": tool_name,
+                                    "status": "failed",
+                                }
+                            tool_results.append(
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": tool_use_id,
+                                    "content": f"Error: Tool '{tool_name}' is not available for this request.",
+                                    "is_error": True,
+                                }
+                            )
+                            tool_call_history.append(
+                                {
+                                    "tool": tool_name,
+                                    "input": tool_input,
+                                    "success": False,
+                                    "duration_ms": 0,
+                                    "api_cost_usd": 0.0,
+                                }
+                            )
+                            continue
 
                         if stream_progress:
                             yield {

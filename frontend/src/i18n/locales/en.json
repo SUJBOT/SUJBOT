@@ -123,10 +123,7 @@
     "auditingCitations": "Auditing citations",
     "synthesizingInfo": "Synthesizing information",
     "generatingReportMsg": "Generating report",
-    "runningAgent": "Running {{agent}}",
-    "routingClassifying": "Classifying query...",
-    "routingDelegating": "Delegating to thinking agent...",
-    "routingDirect": "Answering directly..."
+    "runningAgent": "Running {{agent}}"
   },
   "welcome": {
     "suggestedQuestions": "Suggested Questions",

@@ -3,7 +3,7 @@ Tests for web_search tool (src/agent/tools/web_search.py).
 
 Covers:
 - Input validation: valid/invalid queries
-- Disabled state: returns error when web_search_enabled=False
+- Disabled state: web_search_enabled config no longer blocks tool (runner handles it)
 - Missing API key: returns error
 - Tool result format: check ToolResult structure with mocked Gemini response
 - Citation format: verify sources list format
@@ -119,16 +119,19 @@ class TestWebSearchInput:
 
 
 # ---------------------------------------------------------------------------
-# Disabled state
+# Disabled state (handled at runner level via disabled_tools, not in tool)
 # ---------------------------------------------------------------------------
 
 
 class TestWebSearchDisabled:
-    def test_disabled_returns_error(self):
+    def test_disabled_config_does_not_block_execution(self):
+        """web_search_enabled=False in ToolConfig no longer blocks the tool.
+        Disabling is handled at the runner level via disabled_tools set."""
         tool = _make_tool(web_search_enabled=False)
+        # Without GOOGLE_API_KEY, tool fails on missing key (not "disabled")
         result = tool.execute(query="test query")
         assert not result.success
-        assert "disabled" in result.error.lower()
+        assert "api_key" in result.error.lower()
 
 
 # ---------------------------------------------------------------------------
