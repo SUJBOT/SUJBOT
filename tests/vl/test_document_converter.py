@@ -3,7 +3,8 @@
 import fitz
 import pytest
 
-from src.vl.document_converter import DocumentConverter, SUPPORTED_EXTENSIONS, _decode_text
+from src.vl.document_converter import DocumentConverter, IMAGE_EXTENSIONS, SUPPORTED_EXTENSIONS, _decode_text
+from src.exceptions import ConversionError
 
 
 @pytest.fixture
@@ -196,3 +197,48 @@ class TestCheckDependencies:
         assert "pdflatex" in deps
         assert isinstance(deps["libreoffice"], bool)
         assert isinstance(deps["pdflatex"], bool)
+
+
+def _make_png(width=100, height=80, color=(1, 0, 0)):
+    """Create a minimal PNG image in memory using PyMuPDF."""
+    doc = fitz.open()
+    page = doc.new_page(width=width, height=height)
+    page.draw_rect(fitz.Rect(0, 0, width, height), color=color, fill=color)
+    pix = page.get_pixmap()
+    png_bytes = pix.tobytes("png")
+    doc.close()
+    return png_bytes
+
+
+class TestImagesToPdf:
+    def test_single_image(self):
+        png = _make_png()
+        result = DocumentConverter.images_to_pdf([png], ["test.png"])
+        assert isinstance(result, bytes)
+        doc = fitz.open(stream=result, filetype="pdf")
+        assert len(doc) == 1
+        doc.close()
+
+    def test_multiple_images_become_pages(self):
+        images = [_make_png(color=(1, 0, 0)), _make_png(color=(0, 1, 0)), _make_png(color=(0, 0, 1))]
+        result = DocumentConverter.images_to_pdf(images, ["a.png", "b.png", "c.png"])
+        doc = fitz.open(stream=result, filetype="pdf")
+        assert len(doc) == 3
+        doc.close()
+
+    def test_empty_list_raises(self):
+        with pytest.raises(ValueError, match="No images"):
+            DocumentConverter.images_to_pdf([], [])
+
+    def test_corrupt_image_raises_conversion_error(self):
+        with pytest.raises(ConversionError):
+            DocumentConverter.images_to_pdf([b"not an image"], ["bad.png"])
+
+    def test_image_extensions_constant(self):
+        assert ".png" in IMAGE_EXTENSIONS
+        assert ".jpg" in IMAGE_EXTENSIONS
+        assert ".jpeg" in IMAGE_EXTENSIONS
+        assert ".tiff" in IMAGE_EXTENSIONS
+        assert ".tif" in IMAGE_EXTENSIONS
+        assert ".bmp" in IMAGE_EXTENSIONS
+        assert ".webp" in IMAGE_EXTENSIONS
