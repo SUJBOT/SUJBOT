@@ -507,15 +507,14 @@ export function useChat() {
           // Handle routing events (8B router → 30B worker classification)
           if (event.event === 'routing') {
             if (streamState.currentMessage?.agentProgress) {
-              const decision = event.data.decision;
-              let message = '';
-              if (decision === 'classifying') {
-                message = t('progress.routingClassifying');
-              } else if (decision === 'delegate') {
-                message = t('progress.routingDelegating');
-              } else if (decision === 'direct' || decision === 'simple_tool') {
-                message = t('progress.routingDirect');
-              }
+              const routingMessages: Record<string, string> = {
+                classifying: t('progress.routingClassifying'),
+                delegate: t('progress.routingDelegating'),
+                direct: t('progress.routingDirect'),
+                simple_tool: t('progress.routingDirect'),
+                fallback: t('progress.routingDelegating'),
+              };
+              const message = routingMessages[event.data.decision] ?? '';
               if (message) {
                 streamState.currentMessage.agentProgress.currentMessage = message;
                 // Update UI
@@ -533,6 +532,8 @@ export function useChat() {
                   })
                 );
               }
+            } else {
+              console.warn('Received routing event but agentProgress is not initialized:', event.data);
             }
           }
           // Handle tool health check (first event)

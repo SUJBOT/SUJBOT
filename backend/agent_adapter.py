@@ -92,6 +92,7 @@ class AgentAdapter:
             logger.warning(f"config.json not found at {config_path}, using defaults")
 
         # Build runner configuration
+        routing_config = full_config.get("routing", {})
         runner_config = {
             "api_keys": {
                 "anthropic_api_key": self.config.anthropic_api_key,
@@ -106,15 +107,17 @@ class AgentAdapter:
             "single_agent": full_config.get("single_agent", {}),
             "langsmith": full_config.get("langsmith", {}),
             "vl": full_config.get("vl", {}),
-            "routing": full_config.get("routing", {}),
+            "routing": routing_config,
         }
+
+        # Track degraded components for health endpoint
+        self.degraded_components = []
 
         # Initialize single-agent runner
         logger.info("Initializing single-agent system...")
         self.runner = SingleAgentRunner(runner_config)
 
         # Initialize routing runner (8B router → 30B worker) if enabled
-        routing_config = full_config.get("routing", {})
         self.routing_runner = None
         if routing_config.get("enabled", False):
             try:
@@ -126,11 +129,28 @@ class AgentAdapter:
                 )
             except FileNotFoundError as e:
                 logger.error("Routing runner init failed (prompt missing?): %s", e)
+                self.degraded_components.append({
+                    "component": "routing_runner",
+                    "error": str(e),
+                    "severity": "high",
+                    "user_message": "Query routing disabled: router prompt file not found",
+                })
+            except (ValueError, KeyError, TypeError) as e:
+                logger.error("Routing runner init failed (config error): %s", e, exc_info=True)
+                self.degraded_components.append({
+                    "component": "routing_runner",
+                    "error": str(e),
+                    "severity": "high",
+                    "user_message": "Query routing disabled due to configuration error",
+                })
             except Exception as e:
-                logger.error("Routing runner init failed: %s", e, exc_info=True)
-
-        # Track degraded components for health endpoint
-        self.degraded_components = []
+                logger.error("Routing runner init failed (unexpected): %s", e, exc_info=True)
+                self.degraded_components.append({
+                    "component": "routing_runner",
+                    "error": sanitize_error(e),
+                    "severity": "critical",
+                    "user_message": "Query routing disabled due to unexpected error",
+                })
 
         # Store current model
         self.current_model = model or full_config.get("single_agent", {}).get(
@@ -297,10 +317,8 @@ class AgentAdapter:
                     yield {
                         "event": "routing",
                         "data": {
-                            "decision": event.get("decision"),
-                            "complexity": event.get("complexity"),
-                            "thinking_budget": event.get("thinking_budget"),
-                            "tool": event.get("tool"),
+                            k: v for k, v in event.items()
+                            if k != "type" and v is not None
                         },
                     }
                     await asyncio.sleep(0)

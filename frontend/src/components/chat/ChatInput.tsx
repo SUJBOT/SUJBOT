@@ -289,13 +289,13 @@ export function ChatInput({ onSend, onCancel, isStreaming, disabled, refreshSpen
           <button
             type="button"
             onClick={onToggleWebSearch}
-            disabled={disabled}
+            disabled={disabled || isStreaming}
             className={cn(
               'flex-shrink-0 self-center',
               'w-10 h-10 rounded-xl',
               'flex items-center justify-center',
               'transition-all duration-200',
-              disabled
+              disabled || isStreaming
                 ? 'text-accent-300 dark:text-accent-700 cursor-not-allowed'
                 : webSearchEnabled
                   ? cn(
