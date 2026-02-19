@@ -57,7 +57,7 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 # Valid provider literals (keep in sync with config_schema.py)
-LLM_PROVIDERS = frozenset({"anthropic", "openai", "google", "deepinfra", "local_llm"})
+LLM_PROVIDERS = frozenset({"anthropic", "openai", "google", "deepinfra", "local_llm", "local_llm_8b"})
 EMBEDDING_PROVIDERS = frozenset({"openai", "deepinfra", "voyage", "huggingface"})
 
 

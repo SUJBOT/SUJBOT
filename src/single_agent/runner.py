@@ -301,6 +301,7 @@ class SingleAgentRunner:
         conversation_history: Optional[List[Dict[str, str]]] = None,
         attachment_blocks: Optional[List[Dict[str, Any]]] = None,
         disabled_tools: Optional[Set[str]] = None,
+        extra_llm_kwargs: Optional[Dict[str, Any]] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Run query through single agent with autonomous tool loop.
@@ -312,6 +313,7 @@ class SingleAgentRunner:
             conversation_history: Previous messages for context
             attachment_blocks: Multimodal content blocks from user attachments
             disabled_tools: Optional set of tool names to exclude from this request
+            extra_llm_kwargs: Optional kwargs merged into every LLM call (e.g. thinking budget)
 
         Yields:
             Dict events. Final event has type='final'.
@@ -346,7 +348,7 @@ class SingleAgentRunner:
             # local_llm: ensure at least 32768 tokens (thinking models emit large <think> blocks).
             # Anthropic: if configured max_tokens exceeds 16384, clamp to 4096
             # (Anthropic SDK rejects high non-streaming values).
-            if provider_name == "local_llm":
+            if provider_name in ("local_llm", "local_llm_8b"):
                 max_tokens = max(max_tokens, 32768)
             elif provider_name == "anthropic" and max_tokens > 16384:
                 max_tokens = 4096
@@ -372,7 +374,13 @@ class SingleAgentRunner:
             and (schema := self.tool_adapter.get_tool_schema(tool_name))
         ]
 
-        logger.info(f"Running query with model={model_name}, tools={len(tool_schemas)}")
+        if _disabled:
+            logger.info(
+                "Running query with model=%s, tools=%d (disabled: %s)",
+                model_name, len(tool_schemas), _disabled,
+            )
+        else:
+            logger.info(f"Running query with model={model_name}, tools={len(tool_schemas)}")
 
         # Build user message content (text or multimodal with attachments)
         if attachment_blocks:
@@ -430,10 +438,16 @@ class SingleAgentRunner:
                 logger.info(f"Iteration {iteration + 1}/{max_iterations}")
 
                 # Force tool use on first iteration for models that don't
-                # voluntarily call tools (e.g., Qwen3-VL on DeepInfra)
-                extra_kwargs = {}
-                if iteration == 0 and tool_schemas:
-                    if provider_name in ("deepinfra", "local_llm"):
+                # voluntarily call tools (e.g., Qwen3-VL on DeepInfra).
+                # Skip when thinking is enabled — let the model reason about tool selection.
+                extra_kwargs = dict(extra_llm_kwargs or {})
+                thinking_enabled = (
+                    extra_kwargs.get("extra_body", {})
+                    .get("chat_template_kwargs", {})
+                    .get("enable_thinking", False)
+                )
+                if iteration == 0 and tool_schemas and not thinking_enabled:
+                    if provider_name in ("deepinfra", "local_llm", "local_llm_8b"):
                         extra_kwargs["tool_choice"] = "required"
                     elif provider_name == "anthropic":
                         extra_kwargs["tool_choice"] = {"type": "any"}
@@ -441,7 +455,7 @@ class SingleAgentRunner:
                 # LLM call — streaming for local_llm, non-streaming otherwise
                 llm_start = time.time()
                 try:
-                    if provider_name == "local_llm":
+                    if provider_name in ("local_llm", "local_llm_8b"):
                         # Streaming path: yields thinking/text events live
                         response = None
                         used_fallback = False
@@ -658,7 +672,8 @@ class SingleAgentRunner:
                     if self._should_stop_early(tool_call_history):
                         logger.info("Early stop: consecutive empty searches")
                         final_text = await self._force_final_answer(
-                            provider, messages, system, max_tokens, temperature
+                            provider, messages, system, max_tokens, temperature,
+                            extra_llm_kwargs=extra_llm_kwargs,
                         )
                         break
 
@@ -672,7 +687,8 @@ class SingleAgentRunner:
                 # Max iterations reached
                 logger.warning(f"Max iterations ({max_iterations}) reached")
                 final_text = await self._force_final_answer(
-                    provider, messages, system, max_tokens, temperature
+                    provider, messages, system, max_tokens, temperature,
+                    extra_llm_kwargs=extra_llm_kwargs,
                 )
 
             # Build final result
@@ -989,7 +1005,10 @@ class SingleAgentRunner:
                 break
         return failed >= 2
 
-    async def _force_final_answer(self, provider, messages, system, max_tokens, temperature) -> str:
+    async def _force_final_answer(
+        self, provider, messages, system, max_tokens, temperature,
+        extra_llm_kwargs: Optional[Dict[str, Any]] = None,
+    ) -> str:
         """Force LLM to produce final text answer (no tools)."""
         final_messages = messages + [
             {
@@ -1009,6 +1028,7 @@ class SingleAgentRunner:
                 system=system,
                 max_tokens=max_tokens,
                 temperature=temperature,
+                **(extra_llm_kwargs or {}),
             )
             return (
                 final_response.text

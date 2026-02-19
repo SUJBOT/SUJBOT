@@ -23,7 +23,7 @@
     "summarizing": "Generating page summaries...",
     "graph_extraction": "Extracting entities...",
     "reconnecting": "Reconnecting to upload...",
-    "unsupportedFormat": "Unsupported format. Supported: PDF, DOCX, TXT, Markdown, HTML, LaTeX",
+    "unsupportedFormat": "Unsupported format. Supported: PDF, DOCX, TXT, Markdown, HTML, LaTeX, images (PNG, JPG, TIFF, BMP, WebP)",
     "fileTooLarge": "File too large (max 100 MB)",
     "alreadyExists": "Document already exists",
     "accessLevel": "Document classification",
@@ -32,14 +32,17 @@
     "dropzone": "Drop file here",
     "dropzoneOr": "or",
     "dropzoneBrowse": "browse files",
-    "dropzoneFormats": "PDF, DOCX, TXT, Markdown, HTML, LaTeX (max 100 MB)",
+    "dropzoneFormats": "PDF, DOCX, TXT, MD, HTML, LaTeX, PNG, JPG, TIFF, BMP, WebP (max 100 MB)",
     "someFilesSkipped": "{{count}} file(s) skipped (unsupported format or too large)",
     "categoryUpdateFailed": "Failed to update category",
     "filesSelected": "{{count}} files selected",
     "uploadProgress": "Uploading {{current}} of {{total}}",
     "uploadAllComplete": "All {{count}} documents indexed successfully",
     "someUploadsFailed": "{{success}} of {{total}} uploaded, {{failed}} failed",
-    "remove": "Remove"
+    "remove": "Remove",
+    "convertingImages": "Converting images to document...",
+    "imagesBatch_one": "{{count}} image",
+    "imagesBatch_other": "{{count}} images"
   },
   "login": {
     "email": "Email",
@@ -120,7 +123,10 @@
     "auditingCitations": "Auditing citations",
     "synthesizingInfo": "Synthesizing information",
     "generatingReportMsg": "Generating report",
-    "runningAgent": "Running {{agent}}"
+    "runningAgent": "Running {{agent}}",
+    "routingClassifying": "Classifying query...",
+    "routingDelegating": "Delegating to thinking agent...",
+    "routingDirect": "Answering directly..."
   },
   "welcome": {
     "suggestedQuestions": "Suggested Questions",

@@ -1,10 +1,11 @@
 """
 Single-agent runner for SUJBOT.
 
-Replaces the multi-agent system with a single autonomous agent
-that has access to all RAG tools and a unified system prompt.
+SingleAgentRunner: autonomous tool loop with unified prompt.
+RoutingAgentRunner: 8B router classifies queries, delegates complex ones to 30B.
 """
 
 from .runner import SingleAgentRunner
+from .routing_runner import RoutingAgentRunner
 
-__all__ = ["SingleAgentRunner"]
+__all__ = ["SingleAgentRunner", "RoutingAgentRunner"]

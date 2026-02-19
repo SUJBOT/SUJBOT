@@ -101,6 +101,7 @@ docker run -d --name sujbot_backend \
   --env-file /home/prusemic/SUJBOT/.env \
   -e DATABASE_URL=postgresql://postgres:sujbot_secure_password@sujbot_postgres:5432/sujbot \
   -e LOCAL_LLM_BASE_URL=http://host.docker.internal:18080/v1 \
+  -e LOCAL_LLM_8B_BASE_URL=http://host.docker.internal:18082/v1 \
   -e LOCAL_EMBEDDING_BASE_URL=http://host.docker.internal:18081/v1 \
   -v $(pwd)/config.json:/app/config.json:ro \
   -v $(pwd)/prompts:/app/prompts:ro \
@@ -115,7 +116,7 @@ docker network connect bridge sujbot_backend
 - MUST connect to THREE networks: `sujbot_prod_net` (nginx) + `sujbot_db_net` (postgres) + `bridge` (host.docker.internal access)
 - `--add-host=host.docker.internal:host-gateway` required for local model access (vLLM + embedding) via socat bridges
 - `--env-file .env` required (API keys); `-e DATABASE_URL=...@sujbot_postgres:5432/...` overrides dev port
-- `LOCAL_LLM_BASE_URL` / `LOCAL_EMBEDDING_BASE_URL` override `.env` values (which point to localhost, unreachable from Docker)
+- `LOCAL_LLM_BASE_URL` / `LOCAL_LLM_8B_BASE_URL` / `LOCAL_EMBEDDING_BASE_URL` override `.env` values (which point to localhost, unreachable from Docker)
 - `/app/data` must be writable (no `:ro`) for document uploads
 - `/app/vector_db:ro` required even if empty (validation check)
 
@@ -132,15 +133,30 @@ UFW rules (one-time): `sudo ufw allow from 172.16.0.0/12 to any port 18080 proto
 ## Architecture Overview
 
 ```
-User Query → SingleAgentRunner (autonomous tool loop)
-  → RAG Tools (search, expand_context, get_document_info, compliance_check, web_search, etc.)
-  → VL Retrieval: embedder cosine → page images → multimodal LLM
-  → Storage (PostgreSQL: vectors + checkpoints)
-  → LLM: "remote" (Sonnet 4.5 cloud) or "local" (Qwen3-VL-30B-A3B-Thinking on GB10 via vLLM)
+User Query → AgentAdapter.stream_response()
+  → routing.enabled=true (init-time) → RoutingAgentRunner wraps SingleAgentRunner
+     → Phase 1: 8B Router (single non-streaming call, thinking DISABLED, tool_choice=required)
+        ├── answer_directly → yield text_delta + final (greetings, meta-questions)
+        ├── Simple tool (get_document_list, get_stats, web_search)
+        │    → execute tool → feed result back → 8B streams response
+        ├── delegate_to_thinking_agent → Phase 2: 30B with thinking budget
+        │    → Full autonomous tool loop (search, compliance, graph, web, etc.)
+        └── Unknown tool → fallback to 30B delegation
+  → routing.enabled=false → SingleAgentRunner directly
+  → RAG Tools, VL Retrieval, Storage (PostgreSQL), Graph RAG
 ```
 
+**Routing architecture** (`src/single_agent/routing_runner.py`):
+- 8B FP8 (Qwen3-VL-8B-Instruct-FP8, gx10-fa34:8082) classifies queries via virtual + real tools: `answer_directly`, `delegate_to_thinking_agent`, plus configurable simple tools (`get_document_list`, `get_stats`, `web_search`)
+- Tool-based classification (LLM-driven, `tool_choice="required"`) — router always picks a tool
+- 30B worker (Qwen3-VL-30B-A3B-Thinking, gx10-eb6e:8080) gets `extra_llm_kwargs` with thinking budget
+- Router call disables thinking: `extra_body={"chat_template_kwargs": {"enable_thinking": False}}`
+- Graceful fallback: router failure or unknown tool → falls back to 30B directly
+- Config: `config.json` → `routing` section (enabled, router_model, worker_model, thinking_budgets)
+- Prompt: `prompts/agents/router.txt`
+
 **Key directories:**
-- `src/single_agent/` - Production runner (autonomous tool loop with unified prompt)
+- `src/single_agent/` - Production runner + routing runner (8B router → 30B worker)
 - `src/agent/` - Agent CLI, tools (`tools/`), providers (`providers/`), observability
 - `src/graph/` - Graph RAG (storage, embedder, entity extraction, communities)
 - `src/vl/` - Vision-Language RAG module (Jina v4 embeddings, page store, VL retriever)

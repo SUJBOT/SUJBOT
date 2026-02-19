@@ -45,7 +45,7 @@ def create_provider(
         google_api_key: Google API key (optional, defaults to GOOGLE_API_KEY env var)
 
     Returns:
-        Provider instance (AnthropicProvider, OpenAIProvider, or GeminiProvider)
+        Provider instance (AnthropicProvider, OpenAIProvider, GeminiProvider, or DeepInfraProvider)
 
     Raises:
         ValueError: If provider cannot be determined or API key is missing
@@ -146,8 +146,17 @@ def create_provider(
         return DeepInfraProvider(api_key=key, model=resolved_model)
 
     elif provider_name == "local_llm":
-        # Local LLM via llama.cpp / vLLM (OpenAI-compatible API)
+        # Local 30B LLM via vLLM (OpenAI-compatible API)
         base_url = os.getenv("LOCAL_LLM_BASE_URL", "http://localhost:18080/v1")
+        return DeepInfraProvider(
+            api_key="local-no-key-needed",
+            model=resolved_model,
+            base_url=base_url,
+        )
+
+    elif provider_name == "local_llm_8b":
+        # Local 8B LLM (Qwen3-VL-8B-Instruct-FP8 on gx10-fa34, port 18082)
+        base_url = os.getenv("LOCAL_LLM_8B_BASE_URL", "http://localhost:18082/v1")
         return DeepInfraProvider(
             api_key="local-no-key-needed",
             model=resolved_model,
@@ -158,7 +167,8 @@ def create_provider(
         raise ValueError(
             f"Unsupported provider: {provider_name} for model: {model}\n"
             f"Supported providers: anthropic (Claude), openai (GPT-4o/o-series), "
-            f"google (Gemini), deepinfra (Qwen), local_llm (local llama.cpp/vLLM)"
+            f"google (Gemini), deepinfra (Qwen), local_llm (local 30B vLLM), "
+            f"local_llm_8b (local 8B vLLM)"
         )
 
 
@@ -173,7 +183,7 @@ def detect_provider_from_model(model: str) -> str:
         model: Model name or alias
 
     Returns:
-        Provider name ("anthropic", "openai", "google", "deepinfra", "local_llm")
+        Provider name ("anthropic", "openai", "google", "deepinfra", "local_llm", "local_llm_8b")
 
     Raises:
         ValueError: If provider cannot be determined
@@ -214,5 +224,5 @@ def detect_provider_from_model(model: str) -> str:
         f"Add model to config.json model_registry with explicit 'provider' field,\n"
         f"or use a model name containing: 'claude', 'haiku', 'sonnet', 'opus' (Anthropic), "
         f"'gpt-', 'o1', 'o3', 'o4' (OpenAI), 'gemini' (Google), 'qwen'/'llama'/'minimax' (DeepInfra), "
-        f"or set provider to 'local_llm' for local llama.cpp/vLLM servers"
+        f"or set provider to 'local_llm'/'local_llm_8b' for local vLLM servers"
     )

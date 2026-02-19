@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 # Type alias for providers
-LLMProvider = Literal["anthropic", "openai", "google", "deepinfra", "local_llm"]
+LLMProvider = Literal["anthropic", "openai", "google", "deepinfra", "local_llm", "local_llm_8b"]
 EmbeddingProvider = Literal["openai", "deepinfra", "voyage", "huggingface", "jina"]
 
 

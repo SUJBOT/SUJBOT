@@ -1017,6 +1017,149 @@ async def upload_status(user: Dict = Depends(get_current_user)):
     return EventSourceResponse(_stream_upload_state(state))
 
 
+MAX_IMAGE_COUNT = 200  # Prevent DoS via thousands of tiny images
+
+
+@router.post("/upload-images")
+async def upload_images(
+    request: Request,
+    files: List[UploadFile] = File(...),
+    category: str = Form("documentation"),
+    access_level: str = Form("public"),
+    user: Dict = Depends(get_current_user),
+):
+    """
+    Upload multiple image files as a single document.
+
+    Images are combined into a PDF (one page per image) and indexed
+    through the standard VL pipeline. The document name is auto-generated
+    as "Images_{user_id}_{timestamp}".
+    """
+    from datetime import datetime
+    from src.vl.document_converter import IMAGE_EXTENSIONS, DocumentConverter
+
+    user_id = user["id"]
+    logger.info("Image upload started: user=%s, file_count=%d", user_id, len(files))
+
+    # Validate category
+    if category not in ("documentation", "legislation"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Category must be 'documentation' or 'legislation'",
+        )
+    # Validate access level
+    if access_level not in ("public", "secret"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Access level must be 'public' or 'secret'",
+        )
+    # Must have at least one file
+    if not files:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one image file is required",
+        )
+    # File count limit
+    if len(files) > MAX_IMAGE_COUNT:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Too many images ({len(files)}). Maximum is {MAX_IMAGE_COUNT}.",
+        )
+    # Validate VL components
+    if not _get_vl_components_from_deps():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="VL indexing pipeline not initialized",
+        )
+
+    # Validate all files are images and read content
+    image_buffers: list[bytes] = []
+    filenames: list[str] = []
+    total_size = 0
+
+    for f in files:
+        if not f.filename:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="All files must have filenames",
+            )
+        ext = Path(f.filename).suffix.lower()
+        if ext not in IMAGE_EXTENSIONS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unsupported image format: {ext}. Supported: {', '.join(sorted(IMAGE_EXTENSIONS))}",
+            )
+        content = await f.read()
+        total_size += len(content)
+        if total_size > MAX_UPLOAD_SIZE:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail="Total file size too large (max 100 MB)",
+            )
+        image_buffers.append(content)
+        filenames.append(f.filename)
+
+    # Sort by filename for deterministic page order
+    paired = sorted(zip(filenames, image_buffers), key=lambda x: x[0])
+    filenames, image_buffers = [list(t) for t in zip(*paired)]
+
+    # Generate document name and path (include user_id for uniqueness)
+    now = datetime.now()
+    doc_name = f"Images_{user_id}_{now.strftime('%Y-%m-%d_%H-%M-%S')}"
+    safe_stem = _sanitize_filename(doc_name)
+    pdf_path = PDF_BASE_DIR / f"{safe_stem}.pdf"
+
+    # Ensure unique path (append counter if needed)
+    counter = 1
+    while pdf_path.exists():
+        safe_stem = _sanitize_filename(f"{doc_name}_{counter}")
+        pdf_path = PDF_BASE_DIR / f"{safe_stem}.pdf"
+        counter += 1
+
+    # Reject if upload already active for this user
+    existing = _active_uploads.get(user_id)
+    if existing and not existing.done:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An upload is already in progress",
+        )
+
+    # Convert images to PDF
+    try:
+        pdf_bytes = DocumentConverter.images_to_pdf(image_buffers, filenames)
+    except (ValueError, ConversionError) as e:
+        logger.warning("Image conversion failed: user=%s, error=%s", user_id, e)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to process images: {sanitize_error(e)}",
+        )
+    del image_buffers  # free memory
+
+    logger.info(
+        "Image conversion complete: user=%s, pages=%d, pdf_size=%d, path=%s",
+        user_id, len(filenames), len(pdf_bytes), pdf_path.name,
+    )
+
+    # Create upload state and start background task
+    state = UploadState(
+        document_id=pdf_path.stem,
+        filename=f"{safe_stem}.pdf",
+        user_id=user_id,
+        category=category,
+        pdf_path=pdf_path,
+        access_level=access_level,
+        file_ext=".pdf",  # Already converted to PDF
+    )
+    task = asyncio.create_task(_run_pipeline_task(state, pdf_bytes))
+    state.task = task
+    _active_uploads[user_id] = state
+
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+    return EventSourceResponse(_stream_upload_state(state))
+
+
 @router.post("/upload-cancel")
 async def cancel_upload(user: Dict = Depends(get_current_user)):
     """Cancel an active upload and clean up."""

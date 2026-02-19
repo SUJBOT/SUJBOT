@@ -21,6 +21,7 @@ from ..exceptions import ConversionError
 logger = logging.getLogger(__name__)
 
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md", ".html", ".htm", ".tex", ".latex"}
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp", ".webp"}
 
 # A4 dimensions in points (72 dpi)
 _A4_WIDTH = 595
@@ -123,6 +124,64 @@ class DocumentConverter:
             "libreoffice": shutil.which("libreoffice") is not None,
             "pdflatex": shutil.which("pdflatex") is not None,
         }
+
+    @staticmethod
+    def images_to_pdf(image_buffers: list[bytes], filenames: list[str]) -> bytes:
+        """Combine multiple images into a single PDF (one image per page).
+
+        Each image is inserted as a full page preserving its aspect ratio.
+
+        Args:
+            image_buffers: Raw image bytes (PNG, JPG, TIFF, BMP, WebP)
+            filenames: Corresponding filenames (must match length of image_buffers)
+
+        Returns:
+            PDF bytes
+
+        Raises:
+            ValueError: If image_buffers is empty or lengths mismatch
+            ConversionError: If any image cannot be processed
+        """
+        if not image_buffers:
+            raise ValueError("No images provided")
+        if len(image_buffers) != len(filenames):
+            raise ValueError(
+                f"image_buffers length ({len(image_buffers)}) != filenames length ({len(filenames)})"
+            )
+
+        doc = fitz.open()
+        try:
+            for i, (img_bytes, fname) in enumerate(zip(image_buffers, filenames)):
+                img_doc = None
+                try:
+                    img_doc = fitz.open(stream=img_bytes, filetype="png")  # fitz auto-detects
+                    if len(img_doc) == 0:
+                        raise ConversionError(
+                            f"Image has no pages: {fname}",
+                            details={"filename": fname, "index": i},
+                        )
+                    if len(img_doc) > 1:
+                        logger.warning(
+                            "Multi-page image %s has %d pages; only first page used",
+                            fname, len(img_doc),
+                        )
+                    img_rect = img_doc[0].rect
+                    page = doc.new_page(width=img_rect.width, height=img_rect.height)
+                    page.insert_image(page.rect, stream=img_bytes)
+                except ConversionError:
+                    raise
+                except Exception as e:
+                    raise ConversionError(
+                        f"Failed to process image {fname}: {e}",
+                        details={"filename": fname, "index": i},
+                        cause=e,
+                    )
+                finally:
+                    if img_doc is not None:
+                        img_doc.close()
+            return doc.tobytes()
+        finally:
+            doc.close()
 
     # ─── Conversion methods ───────────────────────────────────────────
 
