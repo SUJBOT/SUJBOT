@@ -47,11 +47,12 @@ class VLLMProvider(BaseProvider):
         self._provider_name = provider_name
 
         # Initialize OpenAI client (wrapped for LangSmith tracing)
+        # 600s timeout: vision+thinking models (30B) can take 300-500s for page extraction
         self.client = wrap_openai(
             OpenAI(
                 api_key="local-no-key",
                 base_url=base_url,
-                timeout=120.0,
+                timeout=600.0,
                 max_retries=3,
             )
         )
@@ -386,6 +387,9 @@ class VLLMProvider(BaseProvider):
         text = re.sub(r"<think>.*?</think>\s*", "", text, flags=re.DOTALL)
         # Strip truncated think block (no closing tag, e.g. max_tokens hit)
         text = re.sub(r"<think>.*$", "", text, flags=re.DOTALL)
+        # vLLM chat template strips opening <think> — only </think> appears.
+        # Strip everything before first </think> (thinking content without opening tag).
+        text = re.sub(r"^.*?</think>\s*", "", text, flags=re.DOTALL)
         return text.strip()
 
     def _convert_response(self, response) -> ProviderResponse:

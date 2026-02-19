@@ -28,9 +28,14 @@ async def rebuild_graph_communities(
     community_summarizer: Optional["CommunitySummarizer"] = None,
     graph_embedder: Optional["GraphEmbedder"] = None,
     llm_provider: Optional[Any] = None,
+    dedup_provider: Optional[Any] = None,
+    page_store: Optional[Any] = None,
     document_id: Optional[str] = None,
     enable_dedup: bool = True,
     semantic_threshold: float = 0.85,
+    llm_threshold: float = 0.75,
+    auto_merge_threshold: float = 0.95,
+    max_images_per_entity: int = 2,
 ) -> Dict:
     """
     Full post-indexing pipeline: dedup, community detection, summarization, embedding.
@@ -40,10 +45,15 @@ async def rebuild_graph_communities(
         community_detector: Leiden community detector
         community_summarizer: Optional LLM summarizer for communities
         graph_embedder: Optional embedder for entity/community search
-        llm_provider: Optional LLM provider for semantic dedup arbitration
+        llm_provider: Optional LLM provider for semantic dedup (fallback)
+        dedup_provider: Optional separate LLM provider for dedup (preferred over llm_provider)
+        page_store: Optional PageStore for multimodal dedup context
         document_id: For logging context (which document triggered this)
         enable_dedup: Whether to run entity deduplication
-        semantic_threshold: Cosine similarity threshold for semantic dedup
+        semantic_threshold: Legacy threshold (used as llm_threshold if thresholds not specified)
+        llm_threshold: Below this similarity, skip dedup entirely
+        auto_merge_threshold: Above this similarity, auto-merge without LLM
+        max_images_per_entity: Max page images per entity in dedup context
 
     Returns:
         Dict with pipeline stats
@@ -70,12 +80,16 @@ async def rebuild_graph_communities(
             logger.error(f"Entity embedding failed, continuing: {e}", exc_info=True)
             stats["entities_embedded"] = {"error": str(e)}
 
-    # Phase 3: Semantic dedup (requires embeddings + LLM)
-    if enable_dedup and graph_embedder and llm_provider:
+    # Phase 3: Semantic dedup (requires embeddings; LLM optional for middle-zone)
+    dedup_llm = dedup_provider or llm_provider
+    if enable_dedup and graph_embedder:
         try:
             sem_stats = await graph_storage.async_deduplicate_semantic(
-                similarity_threshold=semantic_threshold,
-                llm_provider=llm_provider,
+                llm_threshold=llm_threshold,
+                auto_merge_threshold=auto_merge_threshold,
+                llm_provider=dedup_llm,
+                page_store=page_store,
+                max_images_per_entity=max_images_per_entity,
             )
             stats["semantic_dedup"] = sem_stats
         except (GraphStoreError, ProviderError) as e:

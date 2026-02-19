@@ -996,62 +996,135 @@ class GraphStorageAdapter:
         return stats
 
     def deduplicate_semantic(
-        self, similarity_threshold: float = 0.85, llm_provider: Optional[Any] = None
-    ) -> Dict:
-        """Merge semantically similar entities using embedding NN + LLM arbiter (sync)."""
-        return run_async_safe(
-            self.async_deduplicate_semantic(similarity_threshold, llm_provider),
-            timeout=300.0,
-            operation_name="deduplicate_semantic",
-        )
-
-    async def async_deduplicate_semantic(
         self,
         similarity_threshold: float = 0.85,
         llm_provider: Optional[Any] = None,
+        llm_threshold: float = 0.75,
+        auto_merge_threshold: float = 0.95,
+        page_store: Optional[Any] = None,
+        max_images_per_entity: int = 2,
+    ) -> Dict:
+        """Merge semantically similar entities using embedding NN + LLM arbiter (sync)."""
+        return run_async_safe(
+            self.async_deduplicate_semantic(
+                llm_threshold=llm_threshold,
+                auto_merge_threshold=auto_merge_threshold,
+                llm_provider=llm_provider,
+                page_store=page_store,
+                max_images_per_entity=max_images_per_entity,
+            ),
+            timeout=600.0,
+            operation_name="deduplicate_semantic",
+        )
+
+    async def _get_entity_relationships(
+        self, conn: asyncpg.Connection, entity_id: int
+    ) -> List[Dict]:
+        """Get up to 10 relationships for dedup context."""
+        rows = await conn.fetch(
+            """
+            SELECT r.relationship_type AS type,
+                   CASE WHEN r.source_entity_id = $1
+                        THEN (SELECT name FROM graph.entities WHERE entity_id = r.target_entity_id)
+                        ELSE (SELECT name FROM graph.entities WHERE entity_id = r.source_entity_id)
+                   END AS other_name,
+                   CASE WHEN r.source_entity_id = $1 THEN 'outgoing' ELSE 'incoming' END AS direction
+            FROM graph.relationships r
+            WHERE r.source_entity_id = $1 OR r.target_entity_id = $1
+            LIMIT 10
+            """,
+            entity_id,
+        )
+        return [dict(r) for r in rows]
+
+    async def _get_entity_page_images(
+        self,
+        conn: asyncpg.Connection,
+        entity_id: int,
+        page_store: Any,
+        max_images: int,
+    ) -> List[Dict]:
+        """Load page images where entity appears (from source_page_ids)."""
+        row = await conn.fetchrow(
+            "SELECT source_page_ids FROM graph.entities WHERE entity_id = $1", entity_id
+        )
+        if not row or not row["source_page_ids"]:
+            return []
+
+        images = []
+        for page_id in row["source_page_ids"][:max_images]:
+            try:
+                image_b64 = page_store.get_image_base64(page_id)
+                images.append(
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": f"image/{page_store.image_format}",
+                            "data": image_b64,
+                        },
+                    }
+                )
+            except (FileNotFoundError, OSError):
+                logger.debug(f"Page image not found for dedup context: {page_id}")
+        return images
+
+    async def async_deduplicate_semantic(
+        self,
+        llm_threshold: float = 0.75,
+        auto_merge_threshold: float = 0.95,
+        llm_provider: Optional[Any] = None,
         max_candidates: int = 500,
+        page_store: Optional[Any] = None,
+        max_images_per_entity: int = 2,
     ) -> Dict:
         """
-        Merge semantically similar entities using embedding nearest-neighbor + LLM arbiter.
+        Merge semantically similar entities using two-threshold system + multimodal LLM.
 
-        1. Find candidate pairs above similarity threshold via pgvector KNN
-           (same entity_type required, uses CROSS JOIN LATERAL for batch NN)
-        2. Ask LLM to confirm each candidate pair
-        3. Build Union-Find from confirmed pairs (transitive closure)
-        4. Merge each group using same logic as exact dedup
+        Three zones based on cosine similarity:
+        - >= auto_merge_threshold: auto-merge without LLM call
+        - >= llm_threshold and < auto_merge_threshold: LLM arbitrates with rich context
+        - < llm_threshold: skip (too different)
 
         Args:
-            similarity_threshold: Cosine similarity threshold for candidate pairs
-            llm_provider: LLM provider for arbitration (required for actual merges)
-            max_candidates: Global cap on candidate pairs to evaluate. Defaults to 500.
+            llm_threshold: Below this similarity, skip entirely
+            auto_merge_threshold: Above this similarity, auto-merge without LLM
+            llm_provider: LLM provider for arbitration in the middle zone
+            max_candidates: Global cap on candidate pairs to evaluate
+            page_store: Optional PageStore for loading page images in dedup context
+            max_images_per_entity: Max page images per entity in LLM context
 
         Returns:
             Dict with merge stats
         """
         await self._ensure_pool()
 
-        if not llm_provider:
-            logger.info("No LLM provider for semantic dedup — skipping")
-            return {"candidates_found": 0, "llm_confirmed": 0, "entities_removed": 0}
+        # Load dedup prompt — use rich version if page_store available, else basic
+        prompts_dir = Path(__file__).resolve().parent.parent.parent / "prompts"
+        rich_path = prompts_dir / "graph_entity_dedup_rich.txt"
+        basic_path = prompts_dir / "graph_entity_dedup.txt"
 
-        # Load dedup prompt (try relative to source first, then cwd)
-        prompt_path = (
-            Path(__file__).resolve().parent.parent.parent / "prompts" / "graph_entity_dedup.txt"
-        )
-        if not prompt_path.exists():
-            prompt_path = Path("prompts") / "graph_entity_dedup.txt"
-        if not prompt_path.exists():
-            logger.error(f"Dedup prompt not found at {prompt_path}, skipping semantic dedup")
+        prompt_template = None
+        use_rich_prompt = page_store is not None and rich_path.exists()
+
+        for p in ([rich_path, basic_path] if page_store else [basic_path, rich_path]):
+            if p.exists():
+                prompt_template = p.read_text(encoding="utf-8")
+                use_rich_prompt = p == rich_path
+                break
+
+        if not prompt_template:
+            logger.error("Dedup prompt not found, skipping semantic dedup")
             return {
                 "candidates_found": 0,
+                "auto_merged": 0,
                 "llm_confirmed": 0,
                 "entities_removed": 0,
-                "error": f"Prompt file not found: {prompt_path}",
+                "error": "Prompt file not found",
             }
-        prompt_template = prompt_path.read_text(encoding="utf-8")
 
         # Find candidate pairs via pgvector KNN (batch nearest-neighbor)
-        # LIMIT 3 per entity, global cap via max_candidates, highest similarity first
+        # Use the lower threshold to get all candidates, then split by zone
         candidate_sql = """
             SELECT id1, id2, name1, name2, type1, type2, desc1, desc2, similarity
             FROM (
@@ -1079,7 +1152,7 @@ class GraphStorageAdapter:
 
         try:
             async with self.pool.acquire() as conn:
-                candidates = await conn.fetch(candidate_sql, similarity_threshold, max_candidates)
+                candidates = await conn.fetch(candidate_sql, llm_threshold, max_candidates)
         except asyncpg.PostgresError as e:
             raise GraphStoreError(
                 f"Failed to find semantic duplicate candidates: {e}", cause=e
@@ -1087,60 +1160,164 @@ class GraphStorageAdapter:
 
         if not candidates:
             logger.info("No semantic duplicate candidates found")
-            return {"candidates_found": 0, "llm_confirmed": 0, "entities_removed": 0}
+            return {
+                "candidates_found": 0,
+                "auto_merged": 0,
+                "llm_confirmed": 0,
+                "entities_removed": 0,
+            }
+
+        # Split candidates into zones
+        auto_merge_pairs = []
+        llm_zone_candidates = []
+
+        for cand in candidates:
+            sim = float(cand["similarity"])
+            if sim >= auto_merge_threshold:
+                auto_merge_pairs.append((cand["id1"], cand["id2"]))
+                logger.info(
+                    f"Auto-merge: '{cand['name1']}' ≈ '{cand['name2']}' (sim={sim:.3f})"
+                )
+            else:
+                # Between llm_threshold and auto_merge_threshold → LLM decides
+                llm_zone_candidates.append(cand)
 
         logger.info(
-            f"Found {len(candidates)} semantic duplicate candidates (threshold={similarity_threshold})"
+            f"Semantic dedup: {len(candidates)} candidates total, "
+            f"{len(auto_merge_pairs)} auto-merge, {len(llm_zone_candidates)} for LLM"
         )
 
-        # LLM arbitration for each candidate pair
-        confirmed_pairs = []
-        for cand in candidates:
-            prompt = prompt_template.format(
-                name1=cand["name1"],
-                type1=cand["type1"],
-                desc1=cand["desc1"] or "No description",
-                name2=cand["name2"],
-                type2=cand["type2"],
-                desc2=cand["desc2"] or "No description",
+        # LLM arbitration for middle-zone candidates
+        confirmed_pairs = list(auto_merge_pairs)  # Start with auto-merges
+        llm_confirmed_count = 0
+
+        if llm_provider and llm_zone_candidates:
+            for cand in llm_zone_candidates:
+                sim = float(cand["similarity"])
+
+                # Build message content (text-only or multimodal)
+                if use_rich_prompt:
+                    content_blocks = []
+
+                    # Fetch rich context
+                    try:
+                        async with self.pool.acquire() as conn:
+                            rels1 = await self._get_entity_relationships(conn, cand["id1"])
+                            rels2 = await self._get_entity_relationships(conn, cand["id2"])
+
+                            # Load page images if configured
+                            e1_images = []
+                            e2_images = []
+                            if page_store and max_images_per_entity > 0:
+                                e1_images = await self._get_entity_page_images(
+                                    conn, cand["id1"], page_store, max_images_per_entity
+                                )
+                                e2_images = await self._get_entity_page_images(
+                                    conn, cand["id2"], page_store, max_images_per_entity
+                                )
+                    except Exception as e:
+                        logger.debug(f"Failed to fetch rich context: {e}")
+                        rels1, rels2 = [], []
+                        e1_images, e2_images = [], []
+
+                    # Add page images for entity 1
+                    for img in e1_images:
+                        content_blocks.append(img)
+                        content_blocks.append(
+                            {"type": "text", "text": f"[Page context for: {cand['name1']}]"}
+                        )
+
+                    # Add page images for entity 2
+                    for img in e2_images:
+                        content_blocks.append(img)
+                        content_blocks.append(
+                            {"type": "text", "text": f"[Page context for: {cand['name2']}]"}
+                        )
+
+                    # Format relationships
+                    def _fmt_rels(rels: List[Dict]) -> str:
+                        if not rels:
+                            return "No relationships"
+                        lines = []
+                        for r in rels:
+                            arrow = "→" if r["direction"] == "outgoing" else "←"
+                            lines.append(f"  {arrow} {r['type']} {r['other_name']}")
+                        return "Relationships:\n" + "\n".join(lines)
+
+                    image_instruction = (
+                        "Examine the page images above to understand the context in which each entity appears."
+                        if (e1_images or e2_images)
+                        else ""
+                    )
+
+                    prompt_text = prompt_template.format(
+                        name1=cand["name1"],
+                        type1=cand["type1"],
+                        desc1=cand["desc1"] or "No description",
+                        name2=cand["name2"],
+                        type2=cand["type2"],
+                        desc2=cand["desc2"] or "No description",
+                        rels1=_fmt_rels(rels1),
+                        rels2=_fmt_rels(rels2),
+                        similarity=sim,
+                        image_instruction=image_instruction,
+                    )
+                    content_blocks.append({"type": "text", "text": prompt_text})
+                    messages = [{"role": "user", "content": content_blocks}]
+                else:
+                    # Basic text-only prompt
+                    prompt = prompt_template.format(
+                        name1=cand["name1"],
+                        type1=cand["type1"],
+                        desc1=cand["desc1"] or "No description",
+                        name2=cand["name2"],
+                        type2=cand["type2"],
+                        desc2=cand["desc2"] or "No description",
+                    )
+                    messages = [{"role": "user", "content": prompt}]
+
+                try:
+                    response = await asyncio.to_thread(
+                        llm_provider.create_message,
+                        messages=messages,
+                        tools=[],
+                        system="",
+                        max_tokens=200,
+                        temperature=0.0,
+                    )
+                    answer = (response.text or "").strip()
+                    is_yes = _parse_dedup_verdict(answer)
+
+                    if is_yes:
+                        confirmed_pairs.append((cand["id1"], cand["id2"]))
+                        llm_confirmed_count += 1
+                        logger.info(
+                            f"LLM confirmed merge: '{cand['name1']}' ≈ '{cand['name2']}' "
+                            f"(sim={sim:.3f})"
+                        )
+                    else:
+                        logger.debug(
+                            f"LLM rejected merge: '{cand['name1']}' vs '{cand['name2']}' "
+                            f"(sim={sim:.3f}): {answer[:80]}"
+                        )
+                except (KeyboardInterrupt, SystemExit, MemoryError):
+                    raise
+                except Exception as e:
+                    logger.warning(
+                        f"LLM arbitration failed for '{cand['name1']}' vs '{cand['name2']}': {e}",
+                        exc_info=True,
+                    )
+        elif not llm_provider and llm_zone_candidates:
+            logger.info(
+                f"No LLM provider — skipping {len(llm_zone_candidates)} middle-zone candidates"
             )
 
-            try:
-                response = await asyncio.to_thread(
-                    llm_provider.create_message,
-                    messages=[{"role": "user", "content": prompt}],
-                    tools=[],
-                    system="",
-                    max_tokens=100,
-                    temperature=0.0,
-                )
-                answer = (response.text or "").strip()
-                is_yes = _parse_dedup_verdict(answer)
-
-                if is_yes:
-                    confirmed_pairs.append((cand["id1"], cand["id2"]))
-                    logger.info(
-                        f"LLM confirmed merge: '{cand['name1']}' ≈ '{cand['name2']}' "
-                        f"(sim={cand['similarity']:.3f})"
-                    )
-                else:
-                    logger.debug(
-                        f"LLM rejected merge: '{cand['name1']}' vs '{cand['name2']}' "
-                        f"(sim={cand['similarity']:.3f}): {answer[:80]}"
-                    )
-            except (KeyboardInterrupt, SystemExit, MemoryError):
-                raise
-            except Exception as e:
-                logger.warning(
-                    f"LLM arbitration failed for '{cand['name1']}' vs '{cand['name2']}': {e}",
-                    exc_info=True,
-                )
-
         if not confirmed_pairs:
-            logger.info("No semantic duplicates confirmed by LLM")
+            logger.info("No semantic duplicates confirmed")
             return {
                 "candidates_found": len(candidates),
-                "llm_confirmed": 0,
+                "auto_merged": len(auto_merge_pairs),
+                "llm_confirmed": llm_confirmed_count,
                 "entities_removed": 0,
             }
 
@@ -1242,7 +1419,9 @@ class GraphStorageAdapter:
 
         stats = {
             "candidates_found": len(candidates),
-            "llm_confirmed": len(confirmed_pairs),
+            "auto_merged": len(auto_merge_pairs),
+            "llm_confirmed": llm_confirmed_count,
+            "total_confirmed": len(confirmed_pairs),
             "groups_merged": groups_succeeded,
             "groups_failed": groups_failed,
             "entities_removed": total_removed,

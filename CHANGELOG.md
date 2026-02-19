@@ -1,5 +1,27 @@
 # Changelog — 13.–19. února 2026
 
+## 29. Local model indexing pipeline + smart dedup + production priority (19. února 2026)
+
+### Architecture
+- **Per-task local model indexing**: All 5 LLM tasks in the indexing pipeline (summarization, entity extraction, community summarization, dedup, community embedding) now configurable to use local models via `config.json` → `vl_indexing` section. All tasks use 8B-Instruct (30B-Thinking unsuitable for structured JSON output — produces reasoning text instead). Saves ~$56/document vs Anthropic API.
+- **Production priority via IndexingSemaphore**: New `src/utils/indexing_semaphore.py` limits indexing concurrency to reserve vLLM KV cache slots for user queries. 30B: 2 of 8 slots; 8B: 8 of 16 slots. Remote providers are not throttled.
+- **Two-threshold entity dedup**: Cosine similarity ≥0.95 → auto-merge (no LLM). <0.75 → skip. Between → LLM arbitration with rich multimodal context (page images, relationships, similarity score).
+
+### Backend
+- `src/config_schema.py` — New `VLIndexingConfig` with sub-models: `VLIndexingTaskConfig`, `VLIndexingDedupConfig`, `VLIndexingConcurrencyConfig`. Optional on `RootConfig` (backward compatible).
+- `backend/main.py` — Creates per-task providers (extraction, summary, community, dedup) from `vl_indexing` config. Falls back to single remote provider when absent.
+- `backend/deps.py` — Added `dedup_provider` to VL component dependency injection.
+- `src/graph/entity_extractor.py` — Added `extra_llm_kwargs` parameter for vLLM thinking passthrough.
+- `src/graph/storage.py` — Rewrote `async_deduplicate_semantic()` with two-threshold system, added `_get_entity_relationships()` and `_get_entity_page_images()` helpers for rich dedup context.
+- `src/graph/post_processor.py` — Accepts separate `dedup_provider`, `page_store`, threshold params.
+- `backend/routes/documents.py` — Indexing LLM calls wrapped with `IndexingSemaphore`.
+- `prompts/graph_entity_dedup_rich.txt` — New multimodal dedup prompt (language-agnostic).
+
+### Scripts
+- `scripts/graph_rag_build.py` — Added `--use-local`, `--auto-merge-threshold`, `--llm-threshold` flags. Creates separate providers per task when using local models.
+- `scripts/graph_normalize_dedup.py` — Added `--use-local` and `--model` flags (was hardcoded to Haiku).
+- `scripts/vl_summarize_pages.py` — Added `--use-local` and `--model` flags.
+
 ## 28. Remove routing runner, rag_confidence module, and dead code (19. února 2026)
 
 ### Cleanup

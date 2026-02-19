@@ -93,6 +93,9 @@ docker run -d --name sujbot_frontend \
 - 404 on `/admin` → missing SPA fallback; 502 → missing `--network-alias`; `localhost:8000` in browser → wrong `VITE_API_BASE_URL`
 
 ### Backend Deploy (full recreation)
+
+**IMPORTANT:** Changes to `src/` or `backend/` Python code require `docker build` first — these are baked into the image. Only `config.json` and `prompts/` are volume-mounted and take effect on restart alone.
+
 ```bash
 docker stop sujbot_backend && docker rm sujbot_backend
 docker run -d --name sujbot_backend \
@@ -228,7 +231,7 @@ VL flow: Query → embedder embed_query() → PostgreSQL exact cosine (vectors.v
 
 **Graph search** uses `intfloat/multilingual-e5-small` (384-dim) for cross-language semantic search on entities/communities. Falls back to PostgreSQL FTS when embedder not configured.
 
-**Web search** uses Gemini's native Google Search grounding (`web_search` tool). Last-resort tool for questions requiring current/external info not in the corpus. Requires `GOOGLE_API_KEY` in `.env`. Config: `config.json` → `agent_tools.web_search` (enabled/model). Citations: `\webcite{url}{title}` renders as clickable external link badges in the UI.
+**Web search** uses Gemini's native Google Search grounding (`web_search` tool). Last-resort tool for questions requiring current/external info not in the corpus. Requires `GOOGLE_API_KEY` in `.env`. Config SSOT: `config.json` → `agent_tools.web_search` (`enabled`/`model`). Frontend has a Globe toggle in ChatInput but backend ignores the per-request flag — config.json is the single source of truth. When disabled, the tool remains visible to the LLM but `execute_impl()` returns an error (prevents hallucination vs removing the tool entirely). Citations: `\webcite{url}{title}` renders as clickable external link badges in the UI.
 
 ## Critical Constraints (DO NOT CHANGE)
 
@@ -256,6 +259,27 @@ Graph data in `graph` schema. Tables: `entities`, `relationships`, `communities`
 ## Configuration
 
 **Two-file system:** `.env` (secrets, gitignored) + `config.json` (settings, version-controlled). NO secrets in config.json.
+
+### VL Indexing Pipeline (`vl_indexing`)
+
+Per-task model config for the indexing pipeline (summarization, entity extraction, community summarization, dedup). When present in `config.json`, each indexing task uses its own provider — typically local models (8B/30B) to save API costs.
+
+```json
+"vl_indexing": {
+  "summarization":          { "model": "qwen3-vl-8b-local", "max_tokens": 500 },
+  "entity_extraction":      { "model": "qwen3-vl-8b-local", "max_tokens": 8000 },
+  "community_summarization": { "model": "qwen3-vl-8b-local", "max_tokens": 300 },
+  "dedup":                  { "model": "qwen3-vl-8b-local", "auto_merge_threshold": 0.95, "llm_threshold": 0.75, "use_page_images": true },
+  "concurrency":            { "max_30b_indexing_slots": 2, "max_8b_indexing_slots": 8 }
+}
+```
+
+Note: 30B-Thinking model is unsuitable for structured extraction — it outputs reasoning text instead of JSON, even with `enable_thinking: false`. All indexing tasks use 8B-Instruct.
+
+- **Production priority**: `IndexingSemaphore` (`src/utils/indexing_semaphore.py`) limits indexing concurrency to reserve model KV cache slots for user queries. 30B: 2 of 8 slots for indexing; 8B: 8 of 16 slots.
+- **Two-threshold dedup**: `auto_merge_threshold` (>= → auto-merge, no LLM), `llm_threshold` (< → skip), between → LLM arbitration with page images + relationship context.
+- **Fallback**: When `vl_indexing` is absent from config.json, backend falls back to a single remote provider (backward compatible).
+- **Scripts**: `graph_rag_build.py`, `graph_normalize_dedup.py`, `vl_summarize_pages.py` all support `--use-local` flag to use these config settings.
 
 ## Best Practices
 

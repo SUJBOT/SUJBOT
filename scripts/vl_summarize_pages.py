@@ -54,8 +54,19 @@ async def async_main(args):
         sys.exit(1)
 
     # Create summary provider
-    model = get_variant_model(args.variant)
-    logger.info(f"Summary model: {model} (variant: {args.variant})")
+    if args.use_local:
+        vl_idx_cfg = config.vl_indexing
+        if not vl_idx_cfg:
+            logger.error("--use-local requires vl_indexing section in config.json")
+            sys.exit(1)
+        model = vl_idx_cfg.summarization.model
+        logger.info(f"Summary model (local): {model}")
+    elif args.model:
+        model = args.model
+        logger.info(f"Summary model (override): {model}")
+    else:
+        model = get_variant_model(args.variant)
+        logger.info(f"Summary model: {model} (variant: {args.variant})")
     summary_provider = create_provider(model)
 
     # Create VL components
@@ -125,6 +136,17 @@ def main():
     parser.add_argument("--limit", type=int, default=None, help="Max pages to summarize (for testing)")
     parser.add_argument(
         "--variant", type=str, default="remote", help="Agent variant for summary model (default: remote)"
+    )
+    parser.add_argument(
+        "--use-local",
+        action="store_true",
+        help="Use local model from config.json vl_indexing.summarization section",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="Model to use (overrides --variant and --use-local)",
     )
     args = parser.parse_args()
     asyncio.run(async_main(args))

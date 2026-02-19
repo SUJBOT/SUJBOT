@@ -934,6 +934,119 @@ class AgentVariantsConfig(BaseModel):
 # ============================================================================
 
 
+class VLIndexingTaskConfig(BaseModel):
+    """Per-task model config for VL indexing pipeline stages."""
+
+    model: str = Field(
+        ...,
+        description="Model registry alias (e.g. 'qwen3-vl-8b-local', 'haiku')"
+    )
+    max_tokens: int = Field(
+        default=500,
+        ge=100,
+        description="Max output tokens for this task"
+    )
+    temperature: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=2.0,
+        description="LLM temperature"
+    )
+    enable_thinking: bool = Field(
+        default=False,
+        description="Enable vLLM thinking mode (Qwen3 <think> blocks)"
+    )
+    thinking_budget: int = Field(
+        default=0,
+        ge=0,
+        description="Thinking budget tokens (only used when enable_thinking=True)"
+    )
+
+
+class VLIndexingDedupConfig(BaseModel):
+    """Dedup config with two-threshold system and multimodal context."""
+
+    model: str = Field(
+        default="qwen3-vl-8b-local",
+        description="Model for LLM dedup arbitration"
+    )
+    max_tokens: int = Field(
+        default=200,
+        ge=50,
+        description="Max output tokens for dedup verdicts"
+    )
+    temperature: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=2.0,
+        description="LLM temperature for dedup"
+    )
+    auto_merge_threshold: float = Field(
+        default=0.95,
+        ge=0.5,
+        le=1.0,
+        description="Cosine similarity above which entities auto-merge without LLM"
+    )
+    llm_threshold: float = Field(
+        default=0.75,
+        ge=0.0,
+        le=1.0,
+        description="Cosine similarity below which entities are skipped (too different)"
+    )
+    use_page_images: bool = Field(
+        default=True,
+        description="Include source page images in LLM dedup context"
+    )
+    max_images_per_entity: int = Field(
+        default=2,
+        ge=0,
+        le=5,
+        description="Max page images to include per entity in dedup context"
+    )
+
+
+class VLIndexingConcurrencyConfig(BaseModel):
+    """Concurrency limits to reserve model capacity for production queries."""
+
+    max_30b_indexing_slots: int = Field(
+        default=2,
+        ge=1,
+        le=8,
+        description="Max concurrent 30B model slots for indexing (out of 8 total vLLM slots)"
+    )
+    max_8b_indexing_slots: int = Field(
+        default=8,
+        ge=1,
+        le=16,
+        description="Max concurrent 8B model slots for indexing (out of 16 total vLLM slots)"
+    )
+
+
+class VLIndexingConfig(BaseModel):
+    """VL indexing pipeline model configuration — per-task model selection."""
+
+    summarization: VLIndexingTaskConfig = Field(
+        ...,
+        description="Page summarization task config"
+    )
+    entity_extraction: VLIndexingTaskConfig = Field(
+        ...,
+        description="Entity extraction task config"
+    )
+    community_summarization: VLIndexingTaskConfig = Field(
+        ...,
+        description="Community summarization task config"
+    )
+    dedup: VLIndexingDedupConfig = Field(
+        default_factory=VLIndexingDedupConfig,
+        description="Entity deduplication config"
+    )
+    concurrency: VLIndexingConcurrencyConfig = Field(
+        default_factory=VLIndexingConcurrencyConfig,
+        description="Concurrency limits for local model slots"
+    )
+
+
 class VLConfig(BaseModel):
     """Vision-Language architecture configuration."""
 
@@ -1075,6 +1188,10 @@ class RootConfig(BaseModel):
     agent_variants: Optional[AgentVariantsConfig] = Field(
         default=None,
         description="Agent variant tier configuration - SSOT for backend/constants.py"
+    )
+    vl_indexing: Optional[VLIndexingConfig] = Field(
+        default=None,
+        description="VL indexing pipeline per-task model config (local models for $0 indexing)"
     )
 
     def _is_placeholder(self, value: Optional[str]) -> bool:
