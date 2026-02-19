@@ -16,8 +16,7 @@
   "models": {
     "llm_model": "gpt-4o-mini",
     "llm_provider": "openai",
-    "embedding_model": "Qwen/Qwen3-Embedding-8B",
-    "embedding_provider": "deepinfra"
+    "embedding_model": "Qwen/Qwen3-Embedding-8B"
   },
   "storage": {
     "backend": "postgresql",
@@ -218,26 +217,6 @@
         },
         "context_window": 1000000
       },
-      "qwen-vl-32b": {
-        "id": "Qwen/Qwen2.5-VL-32B-Instruct",
-        "provider": "deepinfra",
-        "pricing": {
-          "input": 0.2,
-          "output": 0.6
-        },
-        "context_window": 128000,
-        "supports_vision": true
-      },
-      "qwen3-vl-235b": {
-        "id": "Qwen/Qwen3-VL-235B-A22B-Instruct",
-        "provider": "deepinfra",
-        "pricing": {
-          "input": 0.2,
-          "output": 0.88
-        },
-        "context_window": 262144,
-        "supports_vision": true
-      },
       "qwen3-vl-235b-local": {
         "id": "QuantTrio/Qwen3-VL-235B-A22B-Thinking-AWQ",
         "provider": "local_llm",
@@ -373,15 +352,6 @@
         "dimensions": 384,
         "is_local": true
       },
-      "qwen3-embedding": {
-        "id": "Qwen/Qwen3-Embedding-8B",
-        "provider": "deepinfra",
-        "pricing": {
-          "input": 0.03,
-          "output": 0.0
-        },
-        "dimensions": 4096
-      },
       "jina-v4": {
         "id": "jina-embeddings-v4",
         "provider": "jina",
@@ -449,11 +419,7 @@
         "model": "qwen3-vl-30b-local"
       }
     },
-    "default_variant": "remote",
-    "deepinfra_supported_models": [
-      "Qwen/Qwen2.5-VL-32B-Instruct",
-      "Qwen/Qwen3-VL-235B-A22B-Instruct"
-    ]
+    "default_variant": "remote"
   },
   "security_monitoring": {
     "enabled": true,

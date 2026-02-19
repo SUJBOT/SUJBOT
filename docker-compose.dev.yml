@@ -35,7 +35,6 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
-      DEEPINFRA_API_KEY: ${DEEPINFRA_API_KEY}
       JINA_API_KEY: ${JINA_API_KEY:-}
 
       # LangSmith observability (per-user project)

@@ -137,19 +137,19 @@ UFW rules (one-time): `sudo ufw allow from 172.16.0.0/12 to any port 18080 proto
 User Query → AgentAdapter.stream_response()
   → variant="remote" → SingleAgentRunner (Sonnet 4.5, unchanged)
   → variant="local" + routing enabled → RoutingAgentRunner
-     → Phase 1: 8B Router (single non-streaming call, thinking DISABLED, tool_choice=required)
-        ├── answer_directly → yield text_delta + final (greetings, meta-questions)
+     → 8B Router (streaming classification, thinking DISABLED, tool_choice=auto)
+        ├── Text-only response → stream text_delta token-by-token (greetings, meta)
         ├── Simple tool (get_document_list, get_stats, web_search)
         │    → execute tool → feed result back → 8B streams response
-        ├── delegate_to_thinking_agent → Phase 2: 30B with thinking budget
+        ├── delegate_to_thinking_agent → 30B with thinking budget
         │    → Full autonomous tool loop (search, compliance, graph, web, etc.)
         └── Unknown tool → fallback to 30B delegation
   → RAG Tools, VL Retrieval, Storage (PostgreSQL), Graph RAG
 ```
 
 **Routing architecture** (`src/single_agent/routing_runner.py`):
-- 8B FP8 (Qwen3-VL-8B-Instruct-FP8, gx10-fa34:8082) classifies queries via 5 tools: `answer_directly`, `delegate_to_thinking_agent`, `get_document_list`, `get_stats`, `web_search`
-- Tool-based classification (LLM-driven, `tool_choice="required"`) — router always picks a tool
+- 8B FP8 (Qwen3-VL-8B-Instruct-FP8, gx10-fa34:8082) classifies queries via streaming call with `tool_choice="auto"`
+- Streaming classification: text responses stream token-by-token, tool calls accumulated from deltas
 - 30B worker (Qwen3-VL-30B-A3B-Thinking, gx10-eb6e:8080) gets `extra_llm_kwargs` with thinking budget
 - Router call disables thinking: `extra_body={"chat_template_kwargs": {"enable_thinking": False}}`
 - Graceful fallback: router failure or unknown tool → falls back to 30B directly
@@ -213,11 +213,11 @@ VL flow: Query → embedder embed_query() → PostgreSQL exact cosine (vectors.v
 - **8B helper model** (gx10-fa34): Qwen3-VL-8B-Instruct-FP8 via vLLM, coexists with embedding server. Container: `vllm-qwen3vl-8b`, port 8082/18082. Flags: `--max-model-len 32768 --max-num-batched-tokens 16384 --max-num-seqs 16 --gpu-memory-utilization 0.60 --enable-auto-tool-choice --tool-call-parser hermes`. Decode: ~20-23 tok/s, TTFT: 0.09-0.38s, KV cache: 405K tokens/12.35x concurrency. GPU: model 10.5 GiB + embedding 17 GiB = ~78 GiB / 119 GiB.
 - Benchmark script: `scripts/vllm_benchmark.py` — TTFT, decode throughput, e2e latency for RAG profiles. Supports `--model` and `--compare-model` for cross-model A/B comparison.
 - `"remote"` variant: Sonnet 4.5 (vision natively)
-- `local_llm` provider: reuses DeepInfraProvider with custom `base_url` (vLLM OpenAI-compatible API)
+- `local_llm` provider: `VLLMProvider` with custom `base_url` (vLLM OpenAI-compatible API)
 - Dynamic max_tokens in runner: local_llm→32768 (thinking models emit large `<think>` blocks), Anthropic→4096 if configured > 16384 (SDK rejects high non-streaming values)
 - **vLLM Qwen3 thinking tags**: Chat template strips opening `<think>` — only `</think>` appears in stream. Raw completions API shows both tags. `ThinkTagStreamParser(start_thinking=True)` handles this. Test with raw completions API (`client.completions.create`) if debugging tag behavior.
 - **Streaming thinking**: `local_llm` uses `_stream_llm_iteration()` in runner — yields `thinking_delta`/`thinking_done`/`text_delta` events. Other providers keep non-streaming `create_message()`. Parser: `src/agent/providers/think_parser.py`.
-- DeepInfra provider converts Anthropic image blocks → OpenAI `image_url` format
+- VLLMProvider converts Anthropic image blocks → OpenAI `image_url` format
 - ~1600 tokens/page
 
 **Image search:** `search` tool accepts `image_attachment_index` (user attachment) or `image_page_id` (existing page) for image-based queries via `VLRetriever.search_by_image()`.
@@ -300,7 +300,7 @@ New routes MUST be added to nginx regex in `docker/nginx/reverse-proxy.conf` ("D
 
 1. Fetch current pricing from provider API first
 2. Add to `config.json` → `model_registry.llm_models` with `id`, `provider`, `pricing`, `context_window`
-3. If DeepInfra: add to `agent_variants.deepinfra_supported_models`
+3. If local vLLM: set `provider` to `"local_llm"` or `"local_llm_8b"` with zero pricing
 
 ### Model Selection
 

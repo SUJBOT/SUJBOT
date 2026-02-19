@@ -261,3 +261,103 @@ class TestSingleAgentConfig:
         runner = SingleAgentRunner(config=config)
         assert runner.single_agent_config["model"] == "test-model"
         assert runner.single_agent_config["max_iterations"] == 5
+
+
+class TestDedupWithAttachments:
+    """Test that dedup logic preserves multimodal content when attachments are present."""
+
+    @pytest.mark.anyio
+    async def test_dedup_skips_when_no_attachments_and_text_matches(self, runner):
+        """Without attachments, matching query text should NOT add a duplicate."""
+        from src.agent.providers.base import ProviderResponse
+
+        runner._initialized = True
+        runner.tool_adapter = MagicMock()
+        runner.tool_adapter.get_available_tools.return_value = []
+        runner.tool_adapter.registry = MagicMock()
+        runner.system_prompt = "test"
+
+        mock_provider = MagicMock()
+        mock_provider.get_provider_name.return_value = "anthropic"
+        mock_provider.get_model_name.return_value = "claude-haiku-4-5"
+        mock_provider.supports_feature.return_value = False
+        mock_provider.create_message.return_value = ProviderResponse(
+            content=[{"type": "text", "text": "Answer"}],
+            stop_reason="end_turn",
+            usage={"input_tokens": 10, "output_tokens": 5},
+            model="claude-haiku-4-5",
+        )
+        runner._create_provider = MagicMock(return_value=mock_provider)
+
+        events = []
+        async for event in runner.run_query(
+            "hello",
+            model="claude-haiku-4-5",
+            conversation_history=[{"role": "user", "content": "hello"}],
+            attachment_blocks=None,
+        ):
+            events.append(event)
+
+        # Check messages passed to provider — should be 1 (from history, no duplicate)
+        call_args = mock_provider.create_message.call_args
+        messages = call_args.kwargs["messages"]
+        user_messages = [m for m in messages if m["role"] == "user"]
+        assert len(user_messages) == 1
+        assert user_messages[0]["content"] == "hello"
+
+    @pytest.mark.anyio
+    async def test_dedup_adds_when_attachments_present(self, runner):
+        """With attachments, ALWAYS add multimodal content even if text matches history."""
+        from src.agent.providers.base import ProviderResponse
+
+        runner._initialized = True
+        runner.tool_adapter = MagicMock()
+        runner.tool_adapter.get_available_tools.return_value = []
+        runner.tool_adapter.registry = MagicMock()
+        runner.system_prompt = "test"
+
+        mock_provider = MagicMock()
+        mock_provider.get_provider_name.return_value = "anthropic"
+        mock_provider.get_model_name.return_value = "claude-haiku-4-5"
+        mock_provider.supports_feature.return_value = False
+        mock_provider.create_message.return_value = ProviderResponse(
+            content=[{"type": "text", "text": "I see the image"}],
+            stop_reason="end_turn",
+            usage={"input_tokens": 100, "output_tokens": 20},
+            model="claude-haiku-4-5",
+        )
+        runner._create_provider = MagicMock(return_value=mock_provider)
+
+        attachment_blocks = [
+            {"type": "image", "source": {"type": "base64", "data": "abc123", "media_type": "image/jpeg"}}
+        ]
+
+        events = []
+        async for event in runner.run_query(
+            "hello",
+            model="claude-haiku-4-5",
+            conversation_history=[{"role": "user", "content": "hello"}],
+            attachment_blocks=attachment_blocks,
+        ):
+            events.append(event)
+
+        # Check messages — should have 2 user messages:
+        # 1. From history (text-only "hello")
+        # 2. Fresh multimodal content (image + text)
+        call_args = mock_provider.create_message.call_args
+        messages = call_args.kwargs["messages"]
+        user_messages = [m for m in messages if m["role"] == "user"]
+        assert len(user_messages) == 2
+        # First is text-only from history
+        assert user_messages[0]["content"] == "hello"
+        # Second is multimodal (list with image block + text block)
+        assert isinstance(user_messages[1]["content"], list)
+        assert any(
+            b.get("type") == "image" for b in user_messages[1]["content"]
+        )
+
+        # Ordering: history text MUST come before multimodal content
+        all_messages = messages
+        user_indices = [i for i, m in enumerate(all_messages) if m["role"] == "user"]
+        assert len(user_indices) == 2
+        assert user_indices[0] < user_indices[1], "History text must precede multimodal content"

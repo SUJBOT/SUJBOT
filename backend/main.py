@@ -341,9 +341,6 @@ async def lifespan(app: FastAPI):
                     logger.warning(f"  - {model}")
                 logger.warning("")
                 logger.warning("Fix: Add pricing to config.json model_registry.llm_models")
-                logger.warning(
-                    "Or run: uv run python scripts/fetch_deepinfra_pricing.py --config-format --update"
-                )
                 logger.warning("=" * 60)
             else:
                 logger.info("✓ All configured models have pricing data")
@@ -784,7 +781,15 @@ def _save_attachment_files(
                 "Failed to save attachment %s (id=%s) for conversation %s: %s",
                 att.filename, att_id, conversation_id, e, exc_info=True,
             )
-            continue  # Skip this attachment but save others
+            # Append failure entry to preserve positional alignment with input
+            metadata_list.append({
+                "attachment_id": None,
+                "filename": att.filename,
+                "mime_type": att.mime_type,
+                "size_bytes": 0,
+                "error": "save_failed",
+            })
+            continue
 
         metadata_list.append({
             "attachment_id": att_id,
@@ -920,6 +925,15 @@ async def chat_stream(
             yield {
                 "event": "title_update",
                 "data": json.dumps({"title": generated_title}, ensure_ascii=False),
+            }
+
+        # Notify frontend of saved attachment IDs so preview works immediately
+        if user_metadata and "attachments" in user_metadata:
+            yield {
+                "event": "attachments_saved",
+                "data": json.dumps(
+                    {"attachments": user_metadata["attachments"]}, ensure_ascii=True
+                ),
             }
 
         # Collect assistant response for database storage

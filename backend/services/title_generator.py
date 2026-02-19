@@ -1,5 +1,5 @@
 """
-Conversation Title Generator using Qwen 2.5 7B via DeepInfra.
+Conversation Title Generator using local 8B vLLM model.
 
 Generates concise, descriptive titles from the first user message.
 Uses async OpenAI-compatible API for non-blocking operation.
@@ -17,28 +17,23 @@ logger = logging.getLogger(__name__)
 
 class TitleGenerator:
     """
-    Generate conversation titles using Qwen 2.5 7B via DeepInfra.
+    Generate conversation titles using local Qwen3-VL-8B via vLLM.
 
-    Uses the lighter 7B model for fast, cost-effective title generation.
+    Uses the lighter 8B model for fast, zero-cost title generation.
     Thread-safe and designed for concurrent usage across multiple workers.
     """
 
     def __init__(self):
-        """Initialize the title generator with DeepInfra client."""
-        api_key = os.getenv("DEEPINFRA_API_KEY")
-        if api_key:
-            self.client = AsyncOpenAI(
-                api_key=api_key,
-                base_url="https://api.deepinfra.com/v1/openai",
-                timeout=15.0,
-                max_retries=2
-            )
-            self.model = "Qwen/Qwen2.5-7B-Instruct"
-            logger.info("TitleGenerator initialized with DeepInfra Qwen 2.5 7B")
-        else:
-            self.client = None
-            self.model = None
-            logger.warning("DEEPINFRA_API_KEY not set - title generation will use fallback")
+        """Initialize the title generator with local 8B vLLM client."""
+        base_url = os.getenv("LOCAL_LLM_8B_BASE_URL", "http://localhost:18082/v1")
+        self.client = AsyncOpenAI(
+            api_key="local-no-key",
+            base_url=base_url,
+            timeout=15.0,
+            max_retries=2,
+        )
+        self.model = "Qwen/Qwen3-VL-8B-Instruct"
+        logger.info("TitleGenerator initialized with local 8B vLLM at %s", base_url)
 
     async def generate_title(self, first_message: str) -> Optional[str]:
         """
@@ -52,10 +47,6 @@ class TitleGenerator:
         """
         if not first_message or not first_message.strip():
             return None
-
-        # Fallback if DeepInfra not configured
-        if not self.client:
-            return self._fallback_title(first_message)
 
         try:
             response = await self.client.chat.completions.create(
@@ -76,12 +67,13 @@ class TitleGenerator:
                             "User: 'Ahoj, jak se máš?' → Přátelský pozdrav\n"
                             "User: 'Jak napsat rekurzi v Pythonu?' → Rekurze v Pythonu\n"
                             "User: 'Vysvětli mi kvantovou mechaniku' → Kvantová mechanika"
-                        )
+                        ),
                     },
-                    {"role": "user", "content": first_message[:500]}
+                    {"role": "user", "content": first_message[:500]},
                 ],
                 max_tokens=20,
-                temperature=0.2
+                temperature=0.2,
+                extra_body={"chat_template_kwargs": {"enable_thinking": False}},
             )
 
             raw_title = response.choices[0].message.content
@@ -96,7 +88,7 @@ class TitleGenerator:
                     logger.info(f"Using LLM title: '{title}'")
                     return title
                 else:
-                    logger.warning(f"Title rejected (too long or same as message), using fallback")
+                    logger.warning("Title rejected (too long or same as message), using fallback")
 
             fallback = self._fallback_title(first_message)
             logger.info(f"Using fallback title: '{fallback}'")

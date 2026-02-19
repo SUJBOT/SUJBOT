@@ -21,8 +21,7 @@ Copy `.env.example` to `.env` and fill in your values.
 |----------|---------|
 | `ANTHROPIC_API_KEY` | Anthropic Claude models (Haiku, Sonnet, Opus) |
 | `OPENAI_API_KEY` | OpenAI models (GPT-4o, GPT-4o-mini) |
-| `DEEPINFRA_API_KEY` | DeepInfra models (Qwen3-VL, Qwen embedding) |
-| `JINA_API_KEY` | Jina v4 embeddings (VL mode) |
+| `JINA_API_KEY` | Jina v4 embeddings (VL mode, if using cloud Jina) |
 
 ### Optional API Keys
 
@@ -120,15 +119,11 @@ The `model` field is the fallback model. In practice, the model is determined by
         "model": "claude-sonnet-4-5-20250929"
       },
       "local": {
-        "display_name": "Local (Qwen3 VL 235B)",
-        "model": "Qwen/Qwen3-VL-235B-A22B-Instruct"
+        "display_name": "Local (8B Router + 30B Thinking)",
+        "model": "qwen3-vl-30b-local"
       }
     },
-    "default_variant": "remote",
-    "deepinfra_supported_models": [
-      "Qwen/Qwen2.5-VL-32B-Instruct",
-      "Qwen/Qwen3-VL-235B-A22B-Instruct"
-    ]
+    "default_variant": "remote"
   }
 }
 ```
@@ -177,7 +172,7 @@ Pricing is in USD per 1M tokens.
      "context_window": 128000
    }
    ```
-3. If using DeepInfra, also add the model ID to `agent_variants.deepinfra_supported_models`
+3. If local vLLM: set `provider` to `"local_llm"` or `"local_llm_8b"` with zero pricing
 
 ### Retrieval (OCR Mode)
 

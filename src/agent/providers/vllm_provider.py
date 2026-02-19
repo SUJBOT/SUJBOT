@@ -1,106 +1,62 @@
 """
-DeepInfra LLM Provider using OpenAI-compatible API.
+vLLM Provider using OpenAI-compatible API.
 
-Supports Llama, Qwen, MiniMax and other models via DeepInfra's OpenAI-compatible endpoint.
+Connects to local vLLM servers (Qwen3-VL models on GB10 nodes).
 Model configuration is in config.json (SSOT).
 """
 
 import logging
 import json
-import os
 import re
 from typing import List, Dict, Any, Optional, Iterator
 
+import openai
 from openai import OpenAI
 from langsmith.wrappers import wrap_openai
 
 from .base import BaseProvider, ProviderResponse
 from .openai_compat import STOP_REASON_MAP, convert_tools_to_openai
-from ...exceptions import APIKeyError
+from ...exceptions import ProviderError
 
 logger = logging.getLogger(__name__)
 
 
-class DeepInfraProvider(BaseProvider):
+class VLLMProvider(BaseProvider):
     """
-    DeepInfra provider for open-source LLMs.
+    vLLM provider for local LLMs via OpenAI-compatible API.
 
-    Uses OpenAI-compatible API format (https://api.deepinfra.com/v1/openai).
-
-    Supported models are configured in config.json model_registry section.
-    Common models include:
-    - MiniMaxAI/MiniMax-M2 (high context, recommended for complex tasks)
-    - meta-llama/Llama-4-Scout-17B-16E-Instruct (recommended for agents)
-    - meta-llama/Meta-Llama-3.1-70B-Instruct
-    - meta-llama/Meta-Llama-3.1-8B-Instruct (lighter model)
-    - Qwen/Qwen2.5-72B-Instruct
-    - Qwen/Qwen2.5-7B-Instruct
+    Connects to vLLM servers running Qwen3-VL models on GB10 nodes.
+    Supports streaming, tool use, and multimodal (vision) content.
     """
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        model: str = "meta-llama/Llama-4-Scout-17B-16E-Instruct",
-        base_url: Optional[str] = None,
+        base_url: str,
+        model: str,
+        provider_name: str = "local_llm",
     ):
         """
-        Initialize DeepInfra provider.
+        Initialize vLLM provider.
 
         Args:
-            api_key: DeepInfra API key (defaults to DEEPINFRA_API_KEY env var).
-                     For local servers (base_url set), a dummy key is acceptable.
-            model: Model identifier (default: meta-llama/Llama-4-Scout-17B-16E-Instruct)
-            base_url: Custom API base URL (e.g. local llama.cpp server).
-                      Defaults to DeepInfra cloud endpoint.
-
-        Raises:
-            APIKeyError: If API key is missing (cloud mode only)
+            base_url: vLLM server URL (e.g. http://host.docker.internal:18080/v1)
+            model: Model identifier (e.g. Qwen/Qwen3-VL-30B-A3B-Thinking)
+            provider_name: Provider name for cost tracking (local_llm or local_llm_8b)
         """
-        self._is_local = base_url is not None
-
-        if self._is_local:
-            # Local mode: API key not required (llama.cpp doesn't need one)
-            self.api_key = api_key or "local-no-key"
-        else:
-            self.api_key = api_key or os.getenv("DEEPINFRA_API_KEY")
-            if not self.api_key:
-                raise APIKeyError(
-                    "DEEPINFRA_API_KEY required. Set in .env file or pass to constructor.",
-                    details={"provider": "deepinfra"},
-                )
-
-        # Model validation is handled by config.json (SSOT)
-        # Log warning if model not in config, but don't reject (API will validate)
-        try:
-            from ...utils.model_registry import ModelRegistry
-
-            config = ModelRegistry.get_model_config(model, "llm")
-            if config.provider not in ("deepinfra", "local_llm"):
-                logger.warning(
-                    f"Model {model} is configured with provider '{config.provider}', not 'deepinfra'"
-                )
-        except (ImportError, KeyError):
-            logger.debug(f"Model {model} not found in config.json model_registry, using as-is")
-
         self.model = model
-
-        effective_base_url = base_url or "https://api.deepinfra.com/v1/openai"
+        self._provider_name = provider_name
 
         # Initialize OpenAI client (wrapped for LangSmith tracing)
         self.client = wrap_openai(
             OpenAI(
-                api_key=self.api_key,
-                base_url=effective_base_url,
-                timeout=120.0 if self._is_local else 60.0,
+                api_key="local-no-key",
+                base_url=base_url,
+                timeout=120.0,
                 max_retries=3,
             )
         )
 
-        logger.info(
-            "DeepInfraProvider initialized: %s%s",
-            model,
-            f" (local: {effective_base_url})" if self._is_local else "",
-        )
+        logger.info("VLLMProvider initialized: %s (%s)", model, base_url)
 
     def create_message(
         self,
@@ -137,8 +93,11 @@ class DeepInfraProvider(BaseProvider):
                 temperature=temperature,
                 **kwargs,
             )
+        except openai.APIError as e:
+            logger.error("vLLM API error (model=%s): %s", self.model, e)
+            raise
         except Exception as e:
-            logger.error(f"DeepInfra API error: {e}")
+            logger.error("Unexpected error in vLLM create_message (model=%s): %s", self.model, e, exc_info=True)
             raise
 
         return self._convert_response(response)
@@ -170,11 +129,6 @@ class DeepInfraProvider(BaseProvider):
         openai_tools = convert_tools_to_openai(tools) if tools else None
 
         try:
-            # For local vLLM, request usage stats in stream (final chunk includes token counts)
-            extra = {}
-            if self._is_local:
-                extra["stream_options"] = {"include_usage": True}
-
             return self.client.chat.completions.create(
                 model=self.model,
                 messages=formatted_messages,
@@ -182,11 +136,14 @@ class DeepInfraProvider(BaseProvider):
                 max_tokens=max_tokens,
                 temperature=temperature,
                 stream=True,
-                **extra,
+                stream_options={"include_usage": True},
                 **kwargs,
             )
+        except openai.APIError as e:
+            logger.error("vLLM streaming API error (model=%s): %s", self.model, e)
+            raise
         except Exception as e:
-            logger.error(f"DeepInfra streaming API error: {e}")
+            logger.error("Unexpected error in vLLM stream_message (model=%s): %s", self.model, e, exc_info=True)
             raise
 
     def _format_messages(self, messages: List[Dict], system: Any) -> List[Dict]:
@@ -445,7 +402,7 @@ class DeepInfraProvider(BaseProvider):
             ValueError: If response has no choices
         """
         if not response.choices:
-            raise ValueError("Empty response from DeepInfra API - no choices returned")
+            raise ValueError("Empty response from vLLM API - no choices returned")
 
         choice = response.choices[0]
         message = choice.message
@@ -459,13 +416,17 @@ class DeepInfraProvider(BaseProvider):
                 content_blocks.append({"type": "text", "text": clean_text})
 
         # Convert tool calls
+        failed_tool_calls = 0
+        total_tool_calls = 0
         if hasattr(message, "tool_calls") and message.tool_calls:
+            total_tool_calls = len(message.tool_calls)
             for tool_call in message.tool_calls:
                 try:
                     parsed_args = json.loads(tool_call.function.arguments)
                 except (json.JSONDecodeError, TypeError) as e:
+                    failed_tool_calls += 1
                     logger.error(
-                        "Failed to parse tool arguments from DeepInfra: %s. " "Tool: %s, Args: %s",
+                        "Failed to parse tool arguments from vLLM: %s. Tool: %s, Args: %s",
                         e,
                         tool_call.function.name,
                         (
@@ -489,14 +450,19 @@ class DeepInfraProvider(BaseProvider):
             "output_tokens": (
                 getattr(response.usage, "completion_tokens", 0) if response.usage else 0
             ),
-            "cache_read_tokens": 0,  # DeepInfra doesn't support caching
+            "cache_read_tokens": 0,
             "cache_creation_tokens": 0,
         }
 
         if not content_blocks:
+            if total_tool_calls > 0 and failed_tool_calls == total_tool_calls:
+                raise ProviderError(
+                    f"All {total_tool_calls} tool call(s) from vLLM had unparseable arguments",
+                    details={"model": self.model, "raw_content": (message.content or "")[:200]},
+                )
             logger.warning(
-                "DeepInfra response had no usable content after processing "
-                "(text stripped or all tool calls failed parsing). Raw: %s",
+                "vLLM response had no usable content after processing "
+                "(text stripped). Raw: %s",
                 (message.content or "")[:200],
             )
             content_blocks = [{"type": "text", "text": ""}]
@@ -543,5 +509,5 @@ class DeepInfraProvider(BaseProvider):
         return self._tiktoken_estimate(messages, tools, system)
 
     def get_provider_name(self) -> str:
-        """Get provider name."""
-        return "local_llm" if self._is_local else "deepinfra"
+        """Get provider name for cost tracking."""
+        return self._provider_name

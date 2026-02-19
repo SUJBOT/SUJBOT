@@ -57,8 +57,8 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 # Valid provider literals (keep in sync with config_schema.py)
-LLM_PROVIDERS = frozenset({"anthropic", "openai", "google", "deepinfra", "local_llm", "local_llm_8b"})
-EMBEDDING_PROVIDERS = frozenset({"openai", "deepinfra", "voyage", "huggingface"})
+LLM_PROVIDERS = frozenset({"anthropic", "openai", "google", "local_llm", "local_llm_8b"})
+EMBEDDING_PROVIDERS = frozenset({"openai", "voyage", "huggingface"})
 
 
 @dataclass
@@ -278,11 +278,6 @@ def _infer_provider_from_model_id(model_id: str, model_type: str = "llm") -> str
         return "openai"
     if "gemini" in model_lower:
         return "google"
-    if any(kw in model_id for kw in ["Qwen/", "meta-llama/", "MiniMaxAI/"]):
-        return "deepinfra"
-    if any(kw in model_lower for kw in ["qwen", "llama", "minimax"]):
-        return "deepinfra"
-
     # Embedding patterns
     if model_type == "embedding":
         if "text-embedding" in model_lower:
@@ -315,9 +310,6 @@ def _load_builtin_defaults():
         "o3-mini": "o3-mini",
         "gemini-flash": "gemini-2.5-flash",
         "gemini-pro": "gemini-2.5-pro",
-        "qwen-72b": "Qwen/Qwen2.5-72B-Instruct",
-        "qwen-7b": "Qwen/Qwen2.5-7B-Instruct",
-        "minimax-m2": "MiniMaxAI/MiniMax-M2",
     }
 
     _EMBEDDING_MODELS_RAW = {
@@ -525,7 +517,7 @@ class ModelRegistry:
             model_type: Type of model ("llm", "embedding", "reranker")
 
         Returns:
-            Provider name ("anthropic", "openai", "google", "voyage", "huggingface", "deepinfra")
+            Provider name ("anthropic", "openai", "google", "voyage", "huggingface", "local_llm", "local_llm_8b")
 
         Raises:
             ValueError: If provider cannot be determined

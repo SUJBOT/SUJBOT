@@ -3,7 +3,7 @@ Tests for pre-call token counting via provider.count_tokens().
 
 Covers:
 - Anthropic exact counting via messages.count_tokens API
-- OpenAI/DeepInfra tiktoken estimation
+- OpenAI/VLLM tiktoken estimation
 - BaseProvider default (returns None)
 - Failure resilience (errors never block the flow)
 """
@@ -178,21 +178,20 @@ class TestOpenAICountTokens:
         assert result > 0
 
 
-# --- DeepInfra tiktoken estimation ---
+# --- VLLM tiktoken estimation ---
 
 
-class TestDeepInfraCountTokens:
-    """Test DeepInfra provider's tiktoken-based estimation."""
+class TestVLLMCountTokens:
+    """Test VLLM provider's tiktoken-based estimation."""
 
-    def test_deepinfra_count_tokens_returns_estimate(self):
-        from src.agent.providers.deepinfra_provider import DeepInfraProvider
+    def test_vllm_count_tokens_returns_estimate(self):
+        from src.agent.providers.vllm_provider import VLLMProvider
 
-        with patch("src.agent.providers.deepinfra_provider.wrap_openai", return_value=MagicMock()):
-            with patch.dict("os.environ", {"DEEPINFRA_API_KEY": "test-key"}):
-                provider = DeepInfraProvider(
-                    api_key="test-key",
-                    model="meta-llama/Llama-4-Scout-17B-16E-Instruct",
-                )
+        with patch("src.agent.providers.vllm_provider.wrap_openai", return_value=MagicMock()):
+            provider = VLLMProvider(
+                base_url="http://localhost:18080/v1",
+                model="Qwen/Qwen3-VL-30B-A3B-Thinking",
+            )
 
         result = provider.count_tokens(SAMPLE_MESSAGES, SAMPLE_TOOLS, SAMPLE_SYSTEM)
         assert isinstance(result, int)

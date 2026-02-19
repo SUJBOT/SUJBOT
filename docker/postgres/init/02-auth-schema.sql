@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS auth.users (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     last_login_at TIMESTAMP WITH TIME ZONE,
 
-    -- Agent variant preference (remote=Haiku 4.5, local=Qwen3-VL via DeepInfra)
+    -- Agent variant preference (remote=Sonnet 4.5, local=8B Router + 30B Thinking via vLLM)
     agent_variant VARCHAR(20) DEFAULT 'remote' CHECK (agent_variant IN ('remote', 'local'))
 );
 

@@ -3,8 +3,8 @@ Routing Agent Runner — 8B router handles simple queries, 30B handles complex o
 
 Architecture:
   User Query → RoutingAgentRunner.run_query()
-    → 8B Router (non-streaming classification, thinking DISABLED, tool_choice=required)
-       ├── answer_directly → yield text_delta + final
+    → 8B Router (streaming classification, thinking DISABLED, tool_choice=auto)
+       ├── text-only response → stream text_delta in real-time (greetings, meta)
        ├── simple tool (get_document_list, get_stats, web_search)
        │    → execute tool → feed result back → 8B streams response (text_delta)
        └── delegate_to_thinking_agent
@@ -32,31 +32,14 @@ logger = logging.getLogger(__name__)
 # Virtual tool schemas (intercepted by router, not in ToolAdapter)
 # ---------------------------------------------------------------------------
 
-ANSWER_DIRECTLY_SCHEMA = {
-    "name": "answer_directly",
-    "description": (
-        "Answer ONLY greetings, thank-you messages, or meta-questions about the system. "
-        "NEVER use for factual questions."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "response": {
-                "type": "string",
-                "description": "Your brief greeting or acknowledgment.",
-            },
-        },
-        "required": ["response"],
-    },
-}
-
 DELEGATE_TOOL_SCHEMA = {
     "name": "delegate_to_thinking_agent",
     "description": (
         "Delegate to the expert thinking agent with deep reasoning and full "
-        "document search (search, compliance_check, graph_search, expand_context). "
-        "Use for ANY question that needs document search, deep analysis, or "
-        "multi-step reasoning."
+        "document search (search, compliance_check, graph_search, expand_context, web_search). "
+        "Use for ANY question that needs document search, deep analysis, research, "
+        "multi-step reasoning, or gap analysis. Also use when you are unsure — "
+        "the expert is always the safe choice."
     ),
     "input_schema": {
         "type": "object",
@@ -108,8 +91,8 @@ class RoutingAgentRunner:
     """
     Router agent: 8B handles simple queries directly, 30B handles complex ones.
 
-    The 8B router has access to:
-    - answer_directly: greetings, small talk
+    The 8B router uses tool_choice="auto":
+    - Text-only response: greetings, small talk (streamed token-by-token)
     - Simple tools: get_document_list, get_stats, web_search
     - delegate_to_thinking_agent: document search, compliance, deep reasoning
 
@@ -242,6 +225,169 @@ class RoutingAgentRunner:
                     cause=fallback_err,
                 ) from fallback_err
 
+    async def _stream_classify(
+        self, provider, messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]], system: str,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Stream the 8B classification call with tool_choice="auto".
+
+        Text content is yielded immediately as text_delta events.
+        Tool call deltas are accumulated and yielded as _tool_call events at stream end.
+        Falls back to non-streaming create_message() on streaming errors.
+        Raises ProviderError if both streaming and fallback fail.
+
+        Yields:
+          - {"type": "text_delta", "content": ...}  — streamed text (real-time)
+          - {"type": "_tool_call", "name": ..., "input": ..., "id": ...}  — accumulated tool call
+          - {"type": "_usage", "data": ...}  — token usage
+        """
+        from ..agent.providers.think_parser import ChunkType, ThinkTagStreamParser
+
+        loop = asyncio.get_running_loop()
+
+        try:
+            stream = await loop.run_in_executor(
+                None,
+                lambda: provider.stream_message(
+                    messages=messages,
+                    tools=tools,
+                    system=system,
+                    max_tokens=self.router_max_tokens,
+                    temperature=self.router_temperature,
+                    tool_choice="auto",
+                    extra_body=_THINKING_DISABLED_BODY,
+                ),
+            )
+
+            parser = ThinkTagStreamParser(start_thinking=False)
+            usage_data = None
+            tool_call_deltas: Dict[int, Dict[str, Any]] = {}
+
+            def _next_chunk(it):
+                try:
+                    return next(it)
+                except StopIteration:
+                    return None
+
+            text_yielded = False
+
+            while True:
+                chunk = await loop.run_in_executor(None, _next_chunk, stream)
+                if chunk is None:
+                    break
+
+                try:
+                    if hasattr(chunk, "usage") and chunk.usage is not None:
+                        usage_data = {
+                            "input_tokens": getattr(chunk.usage, "prompt_tokens", 0) or 0,
+                            "output_tokens": getattr(chunk.usage, "completion_tokens", 0) or 0,
+                        }
+
+                    if not chunk.choices:
+                        continue
+
+                    delta = chunk.choices[0].delta
+
+                    # Text content — stream immediately
+                    if hasattr(delta, "content") and delta.content:
+                        for pc in parser.feed(delta.content):
+                            if pc.type == ChunkType.TEXT:
+                                text_yielded = True
+                                yield {"type": "text_delta", "content": pc.content}
+
+                    # Tool call deltas — accumulate
+                    if hasattr(delta, "tool_calls") and delta.tool_calls:
+                        for tc_delta in delta.tool_calls:
+                            idx = tc_delta.index
+                            if idx not in tool_call_deltas:
+                                tool_call_deltas[idx] = {"id": "", "name": "", "arguments": ""}
+                            if tc_delta.id:
+                                tool_call_deltas[idx]["id"] = tc_delta.id
+                            if tc_delta.function:
+                                if tc_delta.function.name:
+                                    tool_call_deltas[idx]["name"] = tc_delta.function.name
+                                if tc_delta.function.arguments:
+                                    tool_call_deltas[idx]["arguments"] += tc_delta.function.arguments
+                except (TypeError, AttributeError, KeyError) as chunk_err:
+                    logger.warning("Skipping malformed streaming chunk: %s", chunk_err)
+                    continue
+
+            # Flush parser
+            for pc in parser.flush():
+                if pc.type == ChunkType.TEXT:
+                    yield {"type": "text_delta", "content": pc.content}
+
+            # Yield accumulated tool calls
+            for idx in sorted(tool_call_deltas):
+                tc = tool_call_deltas[idx]
+                try:
+                    parsed_input = json.loads(tc["arguments"]) if tc["arguments"] else {}
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "Failed to parse tool call arguments for tool '%s': %s",
+                        tc["name"], tc["arguments"][:200],
+                    )
+                    parsed_input = {}
+                yield {
+                    "type": "_tool_call",
+                    "id": tc["id"],
+                    "name": tc["name"],
+                    "input": parsed_input,
+                }
+
+            if usage_data:
+                yield {"type": "_usage", "data": usage_data}
+
+        except _PROVIDER_ERRORS as e:
+            logger.warning(
+                "Router streaming classification failed, falling back to non-streaming: %s", e,
+                exc_info=True,
+            )
+            try:
+                response = provider.create_message(
+                    messages=messages,
+                    tools=tools,
+                    system=system,
+                    max_tokens=self.router_max_tokens,
+                    temperature=self.router_temperature,
+                    tool_choice="auto",
+                    extra_body=_THINKING_DISABLED_BODY,
+                )
+
+                text = response.text or ""
+                if text and not text_yielded:
+                    yield {"type": "text_delta", "content": text}
+
+                content_blocks = response.content if isinstance(response.content, list) else []
+                for block in content_blocks:
+                    if isinstance(block, dict) and block.get("type") == "tool_use":
+                        yield {
+                            "type": "_tool_call",
+                            "id": block.get("id", ""),
+                            "name": block.get("name", ""),
+                            "input": block.get("input", {}),
+                        }
+
+                if hasattr(response, "usage") and response.usage:
+                    yield {
+                        "type": "_usage",
+                        "data": {
+                            "input_tokens": response.usage.get("input_tokens", 0),
+                            "output_tokens": response.usage.get("output_tokens", 0),
+                        },
+                    }
+            except _PROVIDER_ERRORS as fallback_err:
+                logger.error(
+                    "Router non-streaming fallback also failed: %s",
+                    fallback_err, exc_info=True,
+                )
+                raise ProviderError(
+                    f"Router 8B completely unreachable: {fallback_err}",
+                    details={"router_model": self.router_model},
+                    cause=fallback_err,
+                ) from fallback_err
+
     @staticmethod
     def _load_router_prompt(prompt_file: str) -> str:
         prompt_path = Path(prompt_file)
@@ -257,8 +403,8 @@ class RoutingAgentRunner:
     def _build_router_tools(
         self, disabled_tools: Optional[Set[str]] = None
     ) -> List[Dict[str, Any]]:
-        """Build tool list for the 8B router: virtual tools + real simple tool schemas."""
-        tools = [ANSWER_DIRECTLY_SCHEMA, DELEGATE_TOOL_SCHEMA]
+        """Build tool list for the 8B router: delegation + real simple tool schemas."""
+        tools = [DELEGATE_TOOL_SCHEMA]
         _disabled = disabled_tools or set()
 
         # Add real tool schemas from inner runner's tool adapter
@@ -293,15 +439,15 @@ class RoutingAgentRunner:
         extra_rules = []
         if "web_search" in active_tools:
             extra_rules.append(
-                "4. NEVER use web_search for factual/knowledge questions — delegate instead.\n"
-                "5. web_search is ONLY for time-sensitive current information (weather, news, events)."
+                "6. web_search (your tool) is ONLY for simple real-time lookups (weather, news, events).\n"
+                "7. For research tasks that COMBINE web search with document analysis, DELEGATE — "
+                "the expert has web_search too and can reason across both web and corpus results."
             )
         else:
             extra_rules.append(
-                "4. You do NOT have web_search. For questions about current/real-time info "
-                "(weather, news, prices, events), use answer_directly to tell the user that "
-                "web search is disabled and you cannot provide this information. "
-                "Do NOT delegate these — the expert cannot search the web either."
+                "6. You do NOT have web_search. The expert agent does NOT have it either.\n"
+                "7. For questions needing current/real-time info, delegate anyway — "
+                "the expert can use document search and reasoning to provide the best available answer."
             )
 
         prompt = self.router_prompt.replace("{available_tools}", available_section)
@@ -350,7 +496,7 @@ class RoutingAgentRunner:
         disabled_tools: Optional[Set[str]] = None,
         extra_llm_kwargs: Optional[Dict[str, Any]] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """8B routing: direct answer, simple tool call, or 30B delegation."""
+        """8B routing: streamed text response, simple tool call, or 30B delegation."""
         from ..cost_tracker import get_global_tracker
 
         router_tools = self._build_router_tools(disabled_tools)
@@ -361,24 +507,46 @@ class RoutingAgentRunner:
         if conversation_history:
             for msg in conversation_history[-6:]:
                 router_messages.append({"role": msg["role"], "content": msg["content"]})
-        router_messages.append({"role": "user", "content": query})
+
+        # Hint to router about image attachments (8B can't see images, must delegate)
+        user_query = query
+        if attachment_blocks:
+            image_count = sum(
+                1 for b in attachment_blocks
+                if isinstance(b, dict) and b.get("type") == "image"
+            )
+            if image_count > 0:
+                user_query = (
+                    f"[User has attached {image_count} image(s) to this message. "
+                    f"You CANNOT see them — delegate to the expert agent for visual analysis.] "
+                    f"{query}"
+                )
+        router_messages.append({"role": "user", "content": user_query})
 
         if stream_progress:
             yield {"type": "routing", "decision": "classifying"}
 
-        logger.info("Router phase: classifying query with %s", self.router_model)
+        logger.info("Router phase: streaming classification with %s", self.router_model)
         router_start = time.time()
 
         try:
-            router_response = self.router_provider.create_message(
-                messages=router_messages,
-                tools=router_tools,
-                system=router_system,
-                max_tokens=self.router_max_tokens,
-                temperature=self.router_temperature,
-                tool_choice="required",
-                extra_body=_THINKING_DISABLED_BODY,
-            )
+            # Stream classification — text deltas yield immediately, tool calls accumulated
+            final_text = ""
+            tool_call = None
+            usage_data = None
+
+            async for event in self._stream_classify(
+                self.router_provider, router_messages, router_tools, router_system,
+            ):
+                if event["type"] == "text_delta":
+                    final_text += event["content"]
+                    if stream_progress:
+                        yield event
+                elif event["type"] == "_tool_call":
+                    tool_call = event  # Take the first tool call
+                elif event["type"] == "_usage":
+                    usage_data = event["data"]
+
         except _PROVIDER_ERRORS as e:
             logger.error("Router 8B call failed: %s, falling back to 30B", e, exc_info=True)
             if stream_progress:
@@ -400,48 +568,21 @@ class RoutingAgentRunner:
 
         # Track router cost
         tracker = get_global_tracker()
-        if hasattr(router_response, "usage") and router_response.usage:
+        if usage_data:
             tracker.track_llm(
                 provider="local_llm_8b",
                 model=self.router_model,
-                input_tokens=router_response.usage.get("input_tokens", 0),
-                output_tokens=router_response.usage.get("output_tokens", 0),
+                input_tokens=usage_data.get("input_tokens", 0),
+                output_tokens=usage_data.get("output_tokens", 0),
                 operation="router",
                 response_time_ms=router_time_ms,
             )
 
-        # Extract tool call with type guard
-        content_blocks = (
-            router_response.content
-            if isinstance(router_response.content, list)
-            else []
-        )
-        if not content_blocks:
-            logger.warning(
-                "Router returned empty/non-list content: %s",
-                type(router_response.content),
-            )
-
-        tool_call = next(
-            (b for b in content_blocks
-             if isinstance(b, dict) and b.get("type") == "tool_use"),
-            None,
-        )
-
-        if not tool_call:
-            logger.warning("Router returned no tool call, falling back to delegation")
-            tool_name = "delegate_to_thinking_agent"
-            tool_inputs = {"task_description": query, "complexity": "medium", "thinking_budget": "medium"}
-        else:
-            tool_name = tool_call.get("name", "")
-            tool_inputs = tool_call.get("input", {})
-            logger.info("Router chose tool=%s, inputs=%s", tool_name, str(tool_inputs)[:200])
-
-        # --- Branch 1: Direct answer (answer_directly tool) ---
-        if tool_name == "answer_directly":
-            # If user sent attachments, delegate to 30B (8B can't handle multimodal)
+        # --- No tool call: text was streamed directly ---
+        if tool_call is None:
+            # Attachment guard: if user sent images, 8B can't process them meaningfully
             if attachment_blocks:
-                logger.info("Router chose answer_directly but attachments present, delegating to 30B")
+                logger.info("Router responded with text but attachments present, delegating to 30B")
                 if stream_progress:
                     yield {"type": "routing", "decision": "delegate", "complexity": "simple", "thinking_budget": "low"}
                 async for event in self._delegate_to_worker(
@@ -456,13 +597,10 @@ class RoutingAgentRunner:
                     yield event
                 return
 
-            final_text = tool_inputs.get("response", "")
             logger.info("Router answered directly (%d chars)", len(final_text))
 
             if stream_progress:
                 yield {"type": "routing", "decision": "direct"}
-                if final_text:
-                    yield {"type": "text_delta", "content": final_text}
 
             yield {
                 "type": "final",
@@ -477,9 +615,14 @@ class RoutingAgentRunner:
             }
             return
 
-        # --- Branch 2: Delegate to 30B thinking agent ---
+        # --- Has tool call: dispatch ---
+        tool_name = tool_call.get("name", "")
+        tool_inputs = tool_call.get("input", {})
+        tool_id = tool_call.get("id", "")
+        logger.info("Router chose tool=%s, inputs=%s", tool_name, str(tool_inputs)[:200])
+
+        # --- Branch 1: Delegate to 30B thinking agent ---
         if tool_name == "delegate_to_thinking_agent":
-            task_desc = tool_inputs.get("task_description", query)
             budget_key = tool_inputs.get("thinking_budget", "medium")
             complexity = tool_inputs.get("complexity", "medium")
             budget_tokens = self.thinking_budgets.get(budget_key, 4096)
@@ -518,7 +661,7 @@ class RoutingAgentRunner:
                 yield event
             return
 
-        # --- Branch 3: Simple tool call (8B executes directly) ---
+        # --- Branch 2: Simple tool call (8B executes directly) ---
         if tool_name in self.simple_tool_names:
             # If user sent attachments, delegate to 30B (8B can't handle multimodal)
             if attachment_blocks:
@@ -598,7 +741,7 @@ class RoutingAgentRunner:
                 "role": "assistant",
                 "content": "",
                 "tool_calls": [{
-                    "id": tool_call.get("id", "call_simple"),
+                    "id": tool_id or "call_simple",
                     "type": "function",
                     "function": {
                         "name": tool_name,
@@ -608,7 +751,7 @@ class RoutingAgentRunner:
             })
             followup_messages.append({
                 "role": "tool",
-                "tool_call_id": tool_call.get("id", "call_simple"),
+                "tool_call_id": tool_id or "call_simple",
                 "content": tool_result_text[:4000],  # Truncate to avoid token overflow
             })
 
@@ -616,41 +759,41 @@ class RoutingAgentRunner:
                 yield {"type": "routing", "decision": "direct"}
 
             try:
-                final_text = ""
-                usage_data = None
+                followup_text = ""
+                followup_usage = None
 
                 # Stream 8B follow-up for real-time text_delta events
                 async for ev in self._stream_router_response(
                     self.router_provider, followup_messages, system=router_system,
                 ):
                     if ev["type"] == "text_delta":
-                        final_text += ev["content"]
+                        followup_text += ev["content"]
                         if stream_progress:
                             yield ev
                     elif ev["type"] == "_usage":
-                        usage_data = ev["data"]
+                        followup_usage = ev["data"]
 
                 # Track follow-up cost
-                if usage_data:
+                if followup_usage:
                     tracker.track_llm(
                         provider="local_llm_8b",
                         model=self.router_model,
-                        input_tokens=usage_data.get("input_tokens", 0),
-                        output_tokens=usage_data.get("output_tokens", 0),
+                        input_tokens=followup_usage.get("input_tokens", 0),
+                        output_tokens=followup_usage.get("output_tokens", 0),
                         operation="router_followup",
                     )
             except _PROVIDER_ERRORS as e:
                 logger.error("Router follow-up failed: %s", e, exc_info=True)
-                final_text = tool_result_text  # Fallback: raw tool result
+                followup_text = tool_result_text  # Fallback: raw tool result
                 if stream_progress:
-                    yield {"type": "text_delta", "content": final_text}
+                    yield {"type": "text_delta", "content": followup_text}
 
-            logger.info("Router simple tool response (%d chars)", len(final_text))
+            logger.info("Router simple tool response (%d chars)", len(followup_text))
 
             yield {
                 "type": "final",
                 "success": True,
-                "final_answer": final_text,
+                "final_answer": followup_text,
                 "tools_used": [tool_name],
                 "tool_call_count": 1,
                 "iterations": 1,
@@ -660,7 +803,7 @@ class RoutingAgentRunner:
             }
             return
 
-        # --- Branch 4: Unknown tool — fallback to 30B delegation ---
+        # --- Branch 3: Unknown tool — fallback to 30B delegation ---
         logger.warning(
             "Router returned unknown tool '%s', falling back to delegation", tool_name
         )

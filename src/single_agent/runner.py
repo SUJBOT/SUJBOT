@@ -404,13 +404,17 @@ class SingleAgentRunner:
 
             # Avoid duplicate user message: if history already ends with
             # the current query (frontend may include it), don't add again.
+            # IMPORTANT: When attachments are present, always add fresh content
+            # because history stores text-only (no base64), so multimodal
+            # blocks would be lost if we skip.
             if (
-                messages
+                not attachment_blocks
+                and messages
                 and messages[-1]["role"] == "user"
                 and isinstance(messages[-1]["content"], str)
                 and messages[-1]["content"].strip() == query.strip()
             ):
-                pass  # query already in history
+                pass  # query already in history (no attachments to preserve)
             else:
                 messages.append({"role": "user", "content": user_content})
         else:
@@ -445,7 +449,7 @@ class SingleAgentRunner:
                 logger.info(f"Iteration {iteration + 1}/{max_iterations}")
 
                 # Force tool use on first iteration for models that don't
-                # voluntarily call tools (e.g., Qwen3-VL on DeepInfra).
+                # voluntarily call tools (e.g., Qwen3-VL via vLLM).
                 # Skip when thinking is enabled — let the model reason about tool selection.
                 extra_kwargs = dict(extra_llm_kwargs or {})
                 thinking_enabled = (
@@ -454,7 +458,7 @@ class SingleAgentRunner:
                     .get("enable_thinking", False)
                 )
                 if iteration == 0 and tool_schemas and not thinking_enabled:
-                    if provider_name in ("deepinfra", "local_llm", "local_llm_8b"):
+                    if provider_name in ("local_llm", "local_llm_8b"):
                         extra_kwargs["tool_choice"] = "required"
                     elif provider_name == "anthropic":
                         extra_kwargs["tool_choice"] = {"type": "any"}

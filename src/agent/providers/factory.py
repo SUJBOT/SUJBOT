@@ -16,7 +16,7 @@ from typing import Optional
 from .anthropic_provider import AnthropicProvider
 from .base import BaseProvider
 from .openai_provider import OpenAIProvider
-from .deepinfra_provider import DeepInfraProvider
+from .vllm_provider import VLLMProvider
 
 # GeminiProvider uses lazy import to avoid breaking other providers
 # when google-generativeai SDK is incompatible
@@ -45,7 +45,7 @@ def create_provider(
         google_api_key: Google API key (optional, defaults to GOOGLE_API_KEY env var)
 
     Returns:
-        Provider instance (AnthropicProvider, OpenAIProvider, GeminiProvider, or DeepInfraProvider)
+        Provider instance (AnthropicProvider, OpenAIProvider, GeminiProvider, or VLLMProvider)
 
     Raises:
         ValueError: If provider cannot be determined or API key is missing
@@ -74,8 +74,7 @@ def create_provider(
     else:
         # Resolve model alias to full model ID
         resolved_model = ModelRegistry.resolve_llm(model)
-        # Look up provider from ORIGINAL alias first (handles same-ID, different-provider entries
-        # like qwen3-vl-235b [deepinfra] vs qwen3-vl-235b-local [local_llm])
+        # Look up provider from ORIGINAL alias first (handles same-ID, different-provider entries)
         try:
             provider_name = ModelRegistry.get_provider(model, "llm")
         except (ValueError, KeyError):
@@ -132,42 +131,29 @@ def create_provider(
 
         return GeminiProvider(api_key=key, model=resolved_model)
 
-    elif provider_name == "deepinfra":
-        # Get API key from env var
-        key = api_key or os.getenv("DEEPINFRA_API_KEY")
-
-        if not key:
-            raise ValueError(
-                "DeepInfra API key required for Qwen models.\n"
-                "Set DEEPINFRA_API_KEY environment variable or pass api_key parameter.\n"
-                "Example: export DEEPINFRA_API_KEY=..."
-            )
-
-        return DeepInfraProvider(api_key=key, model=resolved_model)
-
     elif provider_name == "local_llm":
         # Local 30B LLM via vLLM (OpenAI-compatible API)
         base_url = os.getenv("LOCAL_LLM_BASE_URL", "http://localhost:18080/v1")
-        return DeepInfraProvider(
-            api_key="local-no-key-needed",
-            model=resolved_model,
+        return VLLMProvider(
             base_url=base_url,
+            model=resolved_model,
+            provider_name="local_llm",
         )
 
     elif provider_name == "local_llm_8b":
         # Local 8B LLM (Qwen3-VL-8B-Instruct-FP8 on gx10-fa34, port 18082)
         base_url = os.getenv("LOCAL_LLM_8B_BASE_URL", "http://localhost:18082/v1")
-        return DeepInfraProvider(
-            api_key="local-no-key-needed",
-            model=resolved_model,
+        return VLLMProvider(
             base_url=base_url,
+            model=resolved_model,
+            provider_name="local_llm_8b",
         )
 
     else:
         raise ValueError(
             f"Unsupported provider: {provider_name} for model: {model}\n"
             f"Supported providers: anthropic (Claude), openai (GPT-4o/o-series), "
-            f"google (Gemini), deepinfra (Qwen), local_llm (local 30B vLLM), "
+            f"google (Gemini), local_llm (local 30B vLLM), "
             f"local_llm_8b (local 8B vLLM)"
         )
 
@@ -183,7 +169,7 @@ def detect_provider_from_model(model: str) -> str:
         model: Model name or alias
 
     Returns:
-        Provider name ("anthropic", "openai", "google", "deepinfra", "local_llm", "local_llm_8b")
+        Provider name ("anthropic", "openai", "google", "local_llm", "local_llm_8b")
 
     Raises:
         ValueError: If provider cannot be determined
@@ -211,18 +197,10 @@ def detect_provider_from_model(model: str) -> str:
     if "gemini" in model_lower:
         return "google"
 
-    # DeepInfra patterns (Qwen, Llama, MiniMax models)
-    if any(pattern in model_lower for pattern in ["qwen", "llama", "minimax"]):
-        return "deepinfra"
-
-    # Full model ID patterns (HuggingFace-style paths)
-    if any(p in model for p in ["Qwen/", "meta-llama/", "MiniMaxAI/"]):
-        return "deepinfra"
-
     raise ValueError(
         f"Cannot determine provider for model: {model}\n"
         f"Add model to config.json model_registry with explicit 'provider' field,\n"
         f"or use a model name containing: 'claude', 'haiku', 'sonnet', 'opus' (Anthropic), "
-        f"'gpt-', 'o1', 'o3', 'o4' (OpenAI), 'gemini' (Google), 'qwen'/'llama'/'minimax' (DeepInfra), "
+        f"'gpt-', 'o1', 'o3', 'o4' (OpenAI), 'gemini' (Google), "
         f"or set provider to 'local_llm'/'local_llm_8b' for local vLLM servers"
     )

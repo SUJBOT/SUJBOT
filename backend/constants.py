@@ -24,7 +24,6 @@ AgentVariant = Literal["remote", "local"]
 _config_loaded = False
 _VARIANT_CONFIG: dict[str, dict[str, str]] = {}
 _DEFAULT_VARIANT: str = "remote"
-_DEEPINFRA_SUPPORTED_MODELS: frozenset[str] = frozenset()
 
 
 # =============================================================================
@@ -44,13 +43,6 @@ _BUILTIN_VARIANT_CONFIG = {
 
 _BUILTIN_DEFAULT_VARIANT = "remote"
 
-_BUILTIN_DEEPINFRA_SUPPORTED_MODELS = frozenset(
-    {
-        "Qwen/Qwen2.5-VL-32B-Instruct",
-        "Qwen/Qwen3-VL-235B-A22B-Instruct",
-    }
-)
-
 
 # =============================================================================
 # Config Loading Functions
@@ -59,10 +51,9 @@ _BUILTIN_DEEPINFRA_SUPPORTED_MODELS = frozenset(
 
 def _load_builtin_defaults() -> None:
     """Load built-in fallback defaults."""
-    global _VARIANT_CONFIG, _DEFAULT_VARIANT, _DEEPINFRA_SUPPORTED_MODELS
+    global _VARIANT_CONFIG, _DEFAULT_VARIANT
     _VARIANT_CONFIG = _BUILTIN_VARIANT_CONFIG.copy()
     _DEFAULT_VARIANT = _BUILTIN_DEFAULT_VARIANT
-    _DEEPINFRA_SUPPORTED_MODELS = _BUILTIN_DEEPINFRA_SUPPORTED_MODELS
 
 
 def _ensure_config_loaded() -> None:
@@ -71,7 +62,7 @@ def _ensure_config_loaded() -> None:
 
     SSOT Source: config.json -> agent_variants section
     """
-    global _config_loaded, _VARIANT_CONFIG, _DEFAULT_VARIANT, _DEEPINFRA_SUPPORTED_MODELS
+    global _config_loaded, _VARIANT_CONFIG, _DEFAULT_VARIANT
 
     if _config_loaded:
         return
@@ -102,14 +93,6 @@ def _ensure_config_loaded() -> None:
         else:
             logger.debug("No agent_variants in config, using built-in defaults")
             _load_builtin_defaults()
-
-        # Load DeepInfra supported models
-        if hasattr(config.agent_variants, "deepinfra_supported_models"):
-            _DEEPINFRA_SUPPORTED_MODELS = frozenset(
-                config.agent_variants.deepinfra_supported_models
-            )
-        else:
-            _DEEPINFRA_SUPPORTED_MODELS = _BUILTIN_DEEPINFRA_SUPPORTED_MODELS
 
         _config_loaded = True
 
@@ -150,12 +133,6 @@ def get_default_variant() -> str:
     """Get the default variant name."""
     _ensure_config_loaded()
     return _DEFAULT_VARIANT
-
-
-def get_deepinfra_supported_models() -> frozenset[str]:
-    """Get set of supported DeepInfra models."""
-    _ensure_config_loaded()
-    return _DEEPINFRA_SUPPORTED_MODELS
 
 
 # =============================================================================

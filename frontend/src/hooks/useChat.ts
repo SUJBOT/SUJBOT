@@ -872,6 +872,31 @@ export function useChat() {
             if (newTitle) {
               updateConversationById(setConversations, updatedConversation.id, { title: newTitle });
             }
+          } else if (event.event === 'attachments_saved') {
+            // Backend saved attachments to disk — update user message with IDs for preview
+            const savedAttachments = event.data?.attachments;
+            if (savedAttachments && Array.isArray(savedAttachments)) {
+              setConversations((prev) =>
+                prev.map((c) => {
+                  if (c.id !== updatedConversation.id) return c;
+                  const messages = [...c.messages];
+                  // Find the last user message with attachments and patch in IDs
+                  for (let i = messages.length - 1; i >= 0; i--) {
+                    if (messages[i].role === 'user' && messages[i].attachments?.length) {
+                      messages[i] = {
+                        ...messages[i],
+                        attachments: messages[i].attachments!.map((att, idx) => ({
+                          ...att,
+                          attachmentId: savedAttachments[idx]?.attachment_id,
+                        })),
+                      };
+                      break;
+                    }
+                  }
+                  return { ...c, messages };
+                })
+              );
+            }
           } else if (event.event === 'message_saved') {
             // Message saved to database - capture message ID for feedback
             if (streamState.currentMessage && event.data?.message_id) {
