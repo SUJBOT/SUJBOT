@@ -6,6 +6,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect, type SetStateAction, type Dispatch } from 'react';
+import { useTranslation } from 'react-i18next';
 import { apiService } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import type { Message, Conversation, ToolCall, ClarificationData, Attachment } from '../types';
@@ -55,6 +56,7 @@ interface StreamingState {
 }
 
 export function useChat() {
+  const { t } = useTranslation();
   const { isAuthenticated } = useAuth();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   // Current conversation ID - initialized from URL query param for refresh persistence
@@ -500,12 +502,11 @@ export function useChat() {
             if (streamState.currentMessage && streamState.currentMessage.agentProgress) {
               const { decision, complexity, thinking_budget } = event.data;
               if (decision === 'classifying') {
-                streamState.currentMessage.agentProgress.currentMessage = 'Classifying query...';
+                streamState.currentMessage.agentProgress.currentMessage = t('progress.routingClassifying');
               } else if (decision === 'delegate') {
-                streamState.currentMessage.agentProgress.currentMessage =
-                  `Delegating to thinking agent (${complexity}, budget: ${thinking_budget})...`;
+                streamState.currentMessage.agentProgress.currentMessage = t('progress.routingDelegating');
               } else if (decision === 'direct') {
-                streamState.currentMessage.agentProgress.currentMessage = 'Answering directly...';
+                streamState.currentMessage.agentProgress.currentMessage = t('progress.routingDirect');
               }
 
               // Update UI

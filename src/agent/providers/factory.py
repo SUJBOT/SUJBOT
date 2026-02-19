@@ -183,7 +183,7 @@ def detect_provider_from_model(model: str) -> str:
         model: Model name or alias
 
     Returns:
-        Provider name ("anthropic", "openai", "google", "deepinfra", "local_llm")
+        Provider name ("anthropic", "openai", "google", "deepinfra", "local_llm", "local_llm_8b")
 
     Raises:
         ValueError: If provider cannot be determined
@@ -224,5 +224,5 @@ def detect_provider_from_model(model: str) -> str:
         f"Add model to config.json model_registry with explicit 'provider' field,\n"
         f"or use a model name containing: 'claude', 'haiku', 'sonnet', 'opus' (Anthropic), "
         f"'gpt-', 'o1', 'o3', 'o4' (OpenAI), 'gemini' (Google), 'qwen'/'llama'/'minimax' (DeepInfra), "
-        f"or set provider to 'local_llm' for local llama.cpp/vLLM servers"
+        f"or set provider to 'local_llm'/'local_llm_8b' for local vLLM servers"
     )

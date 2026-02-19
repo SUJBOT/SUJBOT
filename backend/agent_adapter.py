@@ -1,9 +1,10 @@
 """
-Agent Adapter - Wraps SingleAgentRunner for web frontend.
+Agent Adapter - Wraps SingleAgentRunner (or RoutingAgentRunner) for web frontend.
 
 This adapter:
-1. Initializes SingleAgentRunner from src/single_agent/runner.py
-2. Handles SSE event formatting for query execution
+1. Initializes runner: RoutingAgentRunner (8B router → 30B worker) when
+   routing.enabled=true, otherwise plain SingleAgentRunner
+2. Handles SSE event formatting (routing, tool_call, thinking_delta, text_delta, etc.)
 3. Tracks cost per message
 4. Provides clean interface for FastAPI
 """

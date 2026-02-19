@@ -12,6 +12,7 @@ Architecture:
 """
 
 import asyncio
+import json
 import logging
 import time
 from pathlib import Path
@@ -114,13 +115,19 @@ class RoutingAgentRunner:
         self.router_prompt = self._load_router_prompt(router_prompt_file)
 
     async def _stream_router_response(
-        self, provider, messages: List[Dict[str, Any]], stream_progress: bool
+        self, provider, messages: List[Dict[str, Any]],
+        system: str,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Stream an 8B response, yielding text_delta events and a final _usage event.
 
         Thinking is disabled but Qwen3 may still emit <think> tags — parsed as safety net.
         Falls back to non-streaming create_message() on errors.
+
+        Args:
+            provider: LLM provider instance.
+            messages: Conversation messages.
+            system: Processed system prompt (with placeholders resolved).
         """
         from ..agent.providers.think_parser import ChunkType, ThinkTagStreamParser
 
@@ -131,7 +138,7 @@ class RoutingAgentRunner:
                 None,
                 lambda: provider.stream_message(
                     messages=messages,
-                    system=self.router_prompt,
+                    system=system,
                     max_tokens=self.router_max_tokens,
                     temperature=self.router_temperature,
                     extra_body={
@@ -177,11 +184,14 @@ class RoutingAgentRunner:
             if usage_data:
                 yield {"type": "_usage", "data": usage_data}
 
-        except Exception as e:
-            logger.warning("Router streaming failed, falling back to non-streaming: %s", e)
+        except (ConnectionError, TimeoutError, OSError) as e:
+            logger.warning(
+                "Router streaming failed, falling back to non-streaming: %s", e,
+                exc_info=True,
+            )
             response = provider.create_message(
                 messages=messages,
-                system=self.router_prompt,
+                system=system,
                 max_tokens=self.router_max_tokens,
                 temperature=self.router_temperature,
                 extra_body={
@@ -309,7 +319,7 @@ class RoutingAgentRunner:
                     "chat_template_kwargs": {"enable_thinking": False}
                 },
             )
-        except Exception as e:
+        except (ConnectionError, TimeoutError, OSError, RuntimeError) as e:
             logger.error("Router 8B call failed: %s, falling back to 30B", e, exc_info=True)
             async for event in self.inner_runner.run_query(
                 query=query,
@@ -404,17 +414,31 @@ class RoutingAgentRunner:
                 yield {"type": "tool_call", "tool_name": tool_name, "tool_input": tool_inputs}
 
             # Execute tool via inner runner's tool adapter
-            tool_result = await self.inner_runner.tool_adapter.execute(
-                tool_name=tool_name,
-                inputs=tool_inputs,
-                agent_name="router_8b",
-            )
+            try:
+                tool_result = await self.inner_runner.tool_adapter.execute(
+                    tool_name=tool_name,
+                    inputs=tool_inputs,
+                    agent_name="router_8b",
+                )
+            except Exception as e:
+                logger.error("Router simple tool '%s' failed: %s", tool_name, e, exc_info=True)
+                yield {
+                    "type": "final",
+                    "success": False,
+                    "final_answer": f"Tool '{tool_name}' failed: {e}",
+                    "tools_used": [tool_name],
+                    "tool_call_count": 1,
+                    "iterations": 1,
+                    "model": self.router_model,
+                    "errors": [str(e)],
+                }
+                return
 
             if stream_progress:
                 yield {
                     "type": "tool_result",
                     "tool_name": tool_name,
-                    "success": tool_result.get("success", True),
+                    "success": tool_result.get("success", False),
                 }
 
             # Feed tool result back to 8B for final response
@@ -438,7 +462,7 @@ class RoutingAgentRunner:
                     "type": "function",
                     "function": {
                         "name": tool_name,
-                        "arguments": str(tool_inputs),
+                        "arguments": json.dumps(tool_inputs),
                     },
                 }],
             })
@@ -457,7 +481,7 @@ class RoutingAgentRunner:
 
                 # Stream 8B follow-up for real-time text_delta events
                 async for ev in self._stream_router_response(
-                    router_provider, followup_messages, stream_progress
+                    router_provider, followup_messages, system=router_system,
                 ):
                     if ev["type"] == "text_delta":
                         final_text += ev["content"]
@@ -476,7 +500,7 @@ class RoutingAgentRunner:
                         operation="router_followup",
                     )
             except Exception as e:
-                logger.error("Router follow-up failed: %s", e)
+                logger.error("Router follow-up failed: %s", e, exc_info=True)
                 final_text = tool_result_text  # Fallback: raw tool result
                 if stream_progress:
                     yield {"type": "text_delta", "content": final_text}
@@ -497,6 +521,22 @@ class RoutingAgentRunner:
             return
 
         # --- Branch 3: Direct answer (answer_directly tool) ---
+        if tool_name != "answer_directly":
+            logger.warning(
+                "Router returned unknown tool '%s', falling back to delegation", tool_name
+            )
+            async for event in self.inner_runner.run_query(
+                query=query,
+                model=self.worker_model,
+                stream_progress=stream_progress,
+                conversation_history=conversation_history,
+                attachment_blocks=attachment_blocks,
+                disabled_tools=disabled_tools,
+                extra_llm_kwargs=extra_llm_kwargs,
+            ):
+                yield event
+            return
+
         final_text = tool_inputs.get("response", "")
         logger.info("Router answered directly (%d chars)", len(final_text))
 

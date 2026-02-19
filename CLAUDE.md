@@ -136,20 +136,22 @@ UFW rules (one-time): `sudo ufw allow from 172.16.0.0/12 to any port 18080 proto
 User Query → AgentAdapter.stream_response()
   → variant="remote" → SingleAgentRunner (Sonnet 4.5, unchanged)
   → variant="local" + routing enabled → RoutingAgentRunner
-     → Phase 1: 8B Router (single non-streaming call, thinking DISABLED)
-        ├── Direct answer → yield text_delta + final (simple queries)
-        └── delegate_to_thinking_agent tool call
-             → Phase 2: SingleAgentRunner.run_query(30B, thinking budget)
-                → Full autonomous tool loop (search, compliance, graph, web, etc.)
+     → Phase 1: 8B Router (single non-streaming call, thinking DISABLED, tool_choice=required)
+        ├── answer_directly → yield text_delta + final (greetings, meta-questions)
+        ├── Simple tool (get_document_list, get_stats, web_search)
+        │    → execute tool → feed result back → 8B streams response
+        ├── delegate_to_thinking_agent → Phase 2: 30B with thinking budget
+        │    → Full autonomous tool loop (search, compliance, graph, web, etc.)
+        └── Unknown tool → fallback to 30B delegation
   → RAG Tools, VL Retrieval, Storage (PostgreSQL), Graph RAG
 ```
 
 **Routing architecture** (`src/single_agent/routing_runner.py`):
-- 8B FP8 (Qwen3-VL-8B-Instruct-FP8, gx10-fa34:8082) classifies queries via single `delegate_to_thinking_agent` tool
-- Tool-based delegation (LLM-driven, not hardcoded) — if 8B answers without tools → direct; if calls tool → delegate
+- 8B FP8 (Qwen3-VL-8B-Instruct-FP8, gx10-fa34:8082) classifies queries via 5 tools: `answer_directly`, `delegate_to_thinking_agent`, `get_document_list`, `get_stats`, `web_search`
+- Tool-based classification (LLM-driven, `tool_choice="required"`) — router always picks a tool
 - 30B worker (Qwen3-VL-30B-A3B-Thinking, gx10-eb6e:8080) gets `extra_llm_kwargs` with thinking budget
 - Router call disables thinking: `extra_body={"chat_template_kwargs": {"enable_thinking": False}}`
-- Graceful fallback: router failure → falls back to 30B directly
+- Graceful fallback: router failure or unknown tool → falls back to 30B directly
 - Config: `config.json` → `routing` section (enabled, router_model, worker_model, thinking_budgets)
 - Prompt: `prompts/agents/router.txt`
 
