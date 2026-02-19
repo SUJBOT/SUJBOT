@@ -232,7 +232,7 @@ export function PDFSidePanel({
       offset += (current as HTMLElement).offsetTop;
       current = (current as HTMLElement).offsetParent;
     }
-    container.scrollTo({ top: offset - container.clientHeight / 2, behavior: 'smooth' });
+    container.scrollTo({ top: offset - container.clientHeight / 2, behavior: 'instant' });
   }, []);
 
   // Try to refine scroll to the exact highlight span within a rendered page.
@@ -240,7 +240,7 @@ export function PDFSidePanel({
   const refineScrollToHighlight = useCallback((targetPage: number, matchOnPage: number) => {
     const el = pageRefs.current.get(targetPage);
     if (!el) return false;
-    const highlights = el.querySelectorAll('span.search-hl');
+    const highlights = el.querySelectorAll('mark.search-hl');
     if (highlights.length > 0) {
       const hl = highlights[Math.min(matchOnPage, highlights.length - 1)] ?? highlights[0];
       scrollToTarget(hl);
@@ -596,12 +596,17 @@ export function PDFSidePanel({
     [highlightPhrases]
   );
 
-  // DOM-based search highlighting: works across TextItem boundaries (needed for LaTeX PDFs
-  // where diacritics are separate characters, splitting words across multiple spans)
+  // DOM-based search highlighting: wraps only the matched character range in <mark>.
+  // Works across TextItem boundaries (needed for LaTeX PDFs where diacritics are
+  // separate characters, splitting words across multiple spans).
   useEffect(() => {
-    // Clear all previous search highlights
-    containerRef.current?.querySelectorAll('.search-hl').forEach(el => {
-      el.classList.remove('search-hl');
+    // Remove all previous highlight <mark> wrappers — unwrap their text back into parent
+    containerRef.current?.querySelectorAll('mark.search-hl').forEach(mark => {
+      const parent = mark.parentNode;
+      if (!parent) return;
+      while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
+      parent.removeChild(mark);
+      parent.normalize(); // merge adjacent text nodes
     });
 
     if (!debouncedQuery.trim() || searchResults.length === 0) return;
@@ -661,19 +666,50 @@ export function PDFSidePanel({
 
         const normalizedFull = normChars.join('');
 
-        // Find all match positions in normalized text, map back to original spans
+        // Collect match ranges in original text coordinates (process in reverse
+        // so that DOM mutations don't shift positions of earlier matches)
+        const matchRanges: Array<{ origStart: number; origEnd: number }> = [];
         let searchIdx = 0;
         while ((searchIdx = normalizedFull.indexOf(query, searchIdx)) !== -1) {
           const origStart = normToOrig[searchIdx];
           const origEnd = normToOrig[Math.min(searchIdx + query.length - 1, normToOrig.length - 1)] + 1;
-
-          // Mark all spans that overlap with [origStart, origEnd)
-          for (const { span, start, end } of spanRanges) {
-            if (start < origEnd && end > origStart) {
-              span.classList.add('search-hl');
-            }
-          }
+          matchRanges.push({ origStart, origEnd });
           searchIdx += query.length;
+        }
+
+        // Wrap only the matched character range within each overlapping span.
+        // Process matches in reverse so earlier DOM positions stay valid.
+        for (let m = matchRanges.length - 1; m >= 0; m--) {
+          const { origStart, origEnd } = matchRanges[m];
+
+          for (const { span, start: spanStart, end: spanEnd } of spanRanges) {
+            if (spanStart >= origEnd || spanEnd <= origStart) continue;
+
+            // Character range within this span's text
+            const hlStart = Math.max(0, origStart - spanStart);
+            const hlEnd = Math.min(spanEnd - spanStart, origEnd - spanStart);
+
+            const textNode = span.firstChild;
+            if (!textNode || textNode.nodeType !== Node.TEXT_NODE) continue;
+            const text = textNode.textContent || '';
+            if (hlStart >= text.length) continue;
+
+            // Split: [before][match][after]
+            const before = text.slice(0, hlStart);
+            const match = text.slice(hlStart, hlEnd);
+            const after = text.slice(hlEnd);
+
+            // Build fragment: before text + <mark> + after text
+            const frag = document.createDocumentFragment();
+            if (before) frag.appendChild(document.createTextNode(before));
+            const mark = document.createElement('mark');
+            mark.className = 'search-hl';
+            mark.textContent = match;
+            frag.appendChild(mark);
+            if (after) frag.appendChild(document.createTextNode(after));
+
+            span.replaceChild(frag, textNode);
+          }
         }
       });
     };

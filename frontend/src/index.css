@@ -314,12 +314,14 @@ body {
   opacity: 1 !important;
 }
 
-/* Search highlight — DOM-based (applied via JS classList, works across TextItem boundaries) */
-.react-pdf__Page__textContent span.search-hl {
+/* Search highlight — precise character-range <mark> wrappers inside text spans */
+.react-pdf__Page__textContent mark.search-hl {
   background-color: rgba(255, 120, 0, 0.75) !important;
   border-radius: 2px;
+  color: inherit;
 }
 
-.dark .react-pdf__Page__textContent span.search-hl {
+.dark .react-pdf__Page__textContent mark.search-hl {
   background-color: rgba(255, 140, 0, 0.7) !important;
+  color: inherit;
 }
